@@ -504,7 +504,9 @@ async function callStaffFn(name: string, body: Record<string, unknown>): Promise
   try {
     res = await fetch(`${functionsBase}/${name}`, { method: 'POST', headers: staffFnHeaders(), body: JSON.stringify(body) })
   } catch {
-    throw new ApiError('Could not reach the server. Check your connection and try again.')
+    // A missing function 404s without CORS headers, so the browser blocks it and
+    // fetch throws here — the usual cause is that it hasn't been deployed yet.
+    throw new ApiError(`Couldn’t reach the ${name} function — deploy it (see supabase/SETUP.md), or check your connection.`)
   }
   if (res.status === 404) throw new ApiError(`This feature isn’t deployed yet — deploy the ${name} function (see supabase/SETUP.md).`)
   const j = (await res.json().catch(() => ({}))) as Record<string, unknown>
@@ -590,7 +592,9 @@ async function callAdminFn(name: string, body: Record<string, unknown>): Promise
   try {
     res = await fetch(`${functionsBase}/${name}`, { method: 'POST', headers, body: JSON.stringify(body) })
   } catch {
-    throw new ApiError('Could not reach the server. Check your connection and try again.')
+    // A missing function 404s without CORS headers, so the browser blocks it and
+    // fetch throws here — the usual cause is that it hasn't been deployed yet.
+    throw new ApiError(`Couldn’t reach the ${name} function — deploy it (see supabase/SETUP.md), or check your connection.`)
   }
   if (res.status === 404) throw new ApiError(`Deploy the ${name} function first (see supabase/SETUP.md).`)
   const j = (await res.json().catch(() => ({}))) as Record<string, unknown>
