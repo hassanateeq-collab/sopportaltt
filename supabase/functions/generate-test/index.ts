@@ -14,7 +14,9 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { getUserAccessToken, downloadFromDrive } from '../_shared/google.ts'
 
-const MODEL = 'gemini-2.0-flash'
+// Overridable via the GEMINI_MODEL secret so you can try another model without
+// redeploying (e.g. if one model has no free-tier quota for your project).
+const MODEL = Deno.env.get('GEMINI_MODEL') ?? 'gemini-2.5-flash'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -149,7 +151,15 @@ Deno.serve(async (req) => {
         }),
       },
     )
-    if (!res.ok) return json({ error: `Gemini error: ${await res.text()}` }, 502)
+    if (!res.ok) {
+      const errText = await res.text()
+      if (res.status === 429) {
+        return json({
+          error: `Gemini quota: the free tier gives your project no quota for "${MODEL}". Try another model (set the GEMINI_MODEL secret), or enable billing on the Google Cloud project. Details: ${errText.slice(0, 200)}`,
+        }, 502)
+      }
+      return json({ error: `Gemini error (${res.status}): ${errText.slice(0, 300)}` }, 502)
+    }
     const data = await res.json()
     const text: string = (data.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? '').join('')
 
