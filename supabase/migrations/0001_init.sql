@@ -467,12 +467,32 @@ insert into public.departments (code, name) values
 on conflict (code) do nothing;
 
 -- ────────────────────────────────────────────── link YOUR admin account ──
--- Your admin login already exists in Supabase Auth. Map it to an admins row so
--- is_admin() recognises it. Replace the email below with your admin's email,
--- then this picks up its auth user id automatically.
+-- Map your existing Supabase Auth login to an admins row so is_admin()
+-- recognises it. This auto-detects: if there is exactly one Auth user it links
+-- that one (your admin), with no email to type. If there are several it refuses
+-- to guess and lists them, so you can link the right one deliberately.
 
-insert into public.admins (auth_user_id, name, email)
-select u.id, 'Hamsun Group Admin', u.email
-from auth.users u
-where u.email = 'REPLACE_WITH_YOUR_ADMIN_EMAIL@example.com'
-on conflict (email) do update set auth_user_id = excluded.auth_user_id;
+do $$
+declare
+  user_count integer;
+  admin_id   uuid;
+  admin_email text;
+begin
+  select count(*) into user_count from auth.users;
+
+  if user_count = 1 then
+    select id, email into admin_id, admin_email from auth.users limit 1;
+    insert into public.admins (auth_user_id, name, email)
+    values (admin_id, 'Hamsun Group Admin', admin_email)
+    on conflict (email) do update set auth_user_id = excluded.auth_user_id;
+    raise notice 'Linked admin: % (%).', admin_email, admin_id;
+
+  elsif user_count = 0 then
+    raise notice 'No Auth users yet. Create your admin under Authentication, then re-run this block.';
+
+  else
+    raise notice 'Found % Auth users, so not auto-linking. To link one, run:', user_count;
+    raise notice '  insert into public.admins(auth_user_id,name,email) select id, ''Admin'', email from auth.users where email = ''YOUR_ADMIN_EMAIL'' on conflict (email) do update set auth_user_id = excluded.auth_user_id;';
+    raise notice 'Existing Auth users: %', (select string_agg(email, ', ') from auth.users);
+  end if;
+end $$;

@@ -26,17 +26,13 @@ publishing group-wide or to another branch.
 ### Run it
 
 1. Open your project → **SQL Editor** → **New query**.
-2. **Before running**, find this line near the bottom and put your real admin
-   email in it (the one you already created in Supabase Auth):
+2. Paste the whole file, **Run**. It's safe to re-run if you need to.
 
-   ```sql
-   where u.email = 'REPLACE_WITH_YOUR_ADMIN_EMAIL@example.com';
-   ```
-
-   That line links your existing admin login to an `admins` row so the database
-   recognises it as an admin. If you skip it, the admin just won't have admin
-   powers until you run that snippet later.
-3. Paste the whole file, **Run**. It's safe to re-run if you need to.
+No email to edit: the admin link **auto-detects**. Because your project has a
+single Auth user (your admin), the migration links that user as the admin
+automatically — you'll see a `Linked admin: <your email>` notice in the output.
+(If you later have several Auth users it won't guess; it prints them and the
+one-line snippet to link the right one.)
 
 ### Check it worked
 
