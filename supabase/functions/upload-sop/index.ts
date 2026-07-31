@@ -14,7 +14,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { getAccessToken, uploadToDrive, makeViewOnly } from '../_shared/google.ts'
+import { getUserAccessToken, uploadToDrive, makeViewOnly } from '../_shared/google.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -26,21 +26,6 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 }
 
-/** Accept the service-account key as raw JSON or base64-encoded JSON. */
-function parseServiceAccount(raw: string): { client_email: string; private_key: string } {
-  const s = raw.trim()
-  try {
-    return JSON.parse(s)
-  } catch {
-    /* not raw JSON — try base64 */
-  }
-  try {
-    return JSON.parse(atob(s))
-  } catch {
-    throw new Error('GOOGLE_SERVICE_ACCOUNT is not valid JSON or base64 JSON.')
-  }
-}
-
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405)
@@ -48,7 +33,9 @@ Deno.serve(async (req) => {
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
   const ANON = Deno.env.get('SUPABASE_ANON_KEY')!
   const SERVICE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  const SA_RAW = Deno.env.get('GOOGLE_SERVICE_ACCOUNT')
+  const G_CLIENT_ID = Deno.env.get('GOOGLE_CLIENT_ID')
+  const G_CLIENT_SECRET = Deno.env.get('GOOGLE_CLIENT_SECRET')
+  const G_REFRESH = Deno.env.get('GOOGLE_REFRESH_TOKEN')
 
   try {
     // ---- who is calling? ----
@@ -84,7 +71,9 @@ Deno.serve(async (req) => {
     if (!title) return json({ error: 'Give the SOP a title.' }, 400)
     if (!(document instanceof File)) return json({ error: 'Upload the SOP document (PDF).' }, 400)
     if (!folderId) return json({ error: 'Choose a destination folder.' }, 400)
-    if (!SA_RAW) return json({ error: 'Drive is not configured — set the GOOGLE_SERVICE_ACCOUNT secret.' }, 500)
+    if (!G_CLIENT_ID || !G_CLIENT_SECRET || !G_REFRESH) {
+      return json({ error: 'Drive is not configured — set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REFRESH_TOKEN.' }, 500)
+    }
 
     // ---- authorisation: managers are pinned to their own department + branch ----
     if (!isAdmin) {
@@ -115,8 +104,8 @@ Deno.serve(async (req) => {
     }
     if (codes.some((c) => c.toUpperCase() === code)) return json({ error: `Code ${code} is already in use.` }, 400)
 
-    // ---- push files to Drive (view-only) ----
-    const token = await getAccessToken(parseServiceAccount(SA_RAW))
+    // ---- push files to Drive (view-only), as the Hamsun Google account ----
+    const token = await getUserAccessToken(G_CLIENT_ID, G_CLIENT_SECRET, G_REFRESH)
     const docId = await uploadToDrive(token, folderId, `${code} — ${title}.pdf`, 'application/pdf', await document.arrayBuffer())
     await makeViewOnly(token, docId)
 

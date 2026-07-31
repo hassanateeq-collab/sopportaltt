@@ -93,60 +93,58 @@ values in it, then `npm run dev`.
 The Add-SOP form uploads a PDF + optional video and picks a Drive folder. The
 files are pushed into your **Hamsun_SOP** folder (view-only) by the
 `upload-sop` Edge Function (`supabase/functions/upload-sop`), which then inserts
-the SOP and notifies staff. The browser never holds Drive credentials — the
-function uses a **Google service account**.
+the SOP and notifies staff. The browser never holds Drive credentials.
 
-### One-time Google setup
+**Why not a service account?** A service account owns no Drive storage, so it
+can't create files in a personal Gmail's My Drive (`storageQuotaExceeded`). So
+the function uploads **as the Hamsun Google account** using an OAuth refresh
+token — the files are owned by that account and use its 15 GB.
 
-1. **Google Cloud Console** (console.cloud.google.com) → create or pick a project.
-2. **APIs & Services → Library → enable the “Google Drive API”.**
-3. **APIs & Services → Credentials → Create credentials → Service account.**
-   Give it a name; no roles needed. Open the new service account → **Keys → Add
-   key → Create new key → JSON** and download the file.
-4. Copy the service account’s **email** (looks like
-   `name@project.iam.gserviceaccount.com`). In Google Drive, open the
-   **Hamsun_SOP** folder → **Share** → add that email as **Editor** (this
-   cascades to the department sub-folders). This is what lets the function upload.
+### One-time Google OAuth setup
+
+1. **Google Cloud Console → APIs & Services → OAuth consent screen.** User type
+   **External** → fill app name + your email. Add your Gmail under **Test users**.
+   Then **Publish app** (production) so the refresh token doesn't expire after 7
+   days. (Accept the "unverified app" notice — it's your own account.)
+2. **APIs & Services → Library → enable “Google Drive API”.**
+3. **Credentials → Create credentials → OAuth client ID → Web application.**
+   Under **Authorized redirect URIs** add:
+   `https://developers.google.com/oauthplayground`
+   Create it, then copy the **Client ID** and **Client secret**.
+4. Get a refresh token at **developers.google.com/oauthplayground**:
+   - Click the gear (top right) → tick **Use your own OAuth credentials** → paste
+     the Client ID + secret.
+   - In the left "Input your own scopes" box enter
+     `https://www.googleapis.com/auth/drive` → **Authorize APIs** → sign in as the
+     Hamsun Google account and allow.
+   - Click **Exchange authorization code for tokens** → copy the **Refresh token**.
+5. The **Hamsun_SOP** folder is already owned by that account, so no sharing step
+   is needed.
 
 ### Give the function its secrets and deploy
 
-These are **terminal** commands (PowerShell / bash), run in the `sopportaltt`
-folder — the same place you run `git` and `vercel`. **Not** the Supabase SQL
-Editor. If you don't have the CLI, prefix each command with `npx ` (e.g.
-`npx supabase login`).
+**Terminal** commands (PowerShell / bash), in the `sopportaltt` folder — not the
+SQL Editor. Prefix with `npx ` if you don't have the CLI installed.
 
 ```bash
 supabase login
 supabase link --project-ref ruqnjxxzeaazqohlpacx
-```
 
-Then store the service-account key as a secret. The key is multi-line JSON, so
-the reliable cross-platform way is to **base64-encode it** first (the function
-accepts raw JSON or base64):
+supabase secrets set GOOGLE_CLIENT_ID=your-client-id
+supabase secrets set GOOGLE_CLIENT_SECRET=your-client-secret
+supabase secrets set GOOGLE_REFRESH_TOKEN=your-refresh-token
 
-**Windows (PowerShell):**
-```powershell
-$b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\path\to\your-key.json"))
-supabase secrets set GOOGLE_SERVICE_ACCOUNT=$b64
-```
-
-**macOS / Linux:**
-```bash
-supabase secrets set GOOGLE_SERVICE_ACCOUNT="$(base64 -w0 /path/to/your-key.json)"
-```
-
-Finally, deploy:
-```bash
 supabase functions deploy upload-sop
 ```
 
 `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are injected
-automatically — you only set `GOOGLE_SERVICE_ACCOUNT`.
+automatically — you only set the three `GOOGLE_*` values.
 
 After it deploys, the **Add SOP** form on the live site really uploads: choose a
-PDF + video + folder → the files land in Hamsun_SOP view-only and the SOP appears
-on the board. (Keep videos reasonably sized; very large files may exceed the
-function request limit — resumable upload is a later enhancement.)
+PDF + video + folder → the files land in Hamsun_SOP view-only, owned by the
+Hamsun account, and the SOP appears on the board. (Keep videos reasonably sized;
+very large files may exceed the function request limit — resumable upload is a
+later enhancement.)
 
 ## Stage 3b — the remaining Edge Functions
 
