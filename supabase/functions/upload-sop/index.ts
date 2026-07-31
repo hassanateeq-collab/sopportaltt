@@ -26,6 +26,21 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 }
 
+/** Accept the service-account key as raw JSON or base64-encoded JSON. */
+function parseServiceAccount(raw: string): { client_email: string; private_key: string } {
+  const s = raw.trim()
+  try {
+    return JSON.parse(s)
+  } catch {
+    /* not raw JSON — try base64 */
+  }
+  try {
+    return JSON.parse(atob(s))
+  } catch {
+    throw new Error('GOOGLE_SERVICE_ACCOUNT is not valid JSON or base64 JSON.')
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405)
@@ -101,7 +116,7 @@ Deno.serve(async (req) => {
     if (codes.some((c) => c.toUpperCase() === code)) return json({ error: `Code ${code} is already in use.` }, 400)
 
     // ---- push files to Drive (view-only) ----
-    const token = await getAccessToken(JSON.parse(SA_RAW))
+    const token = await getAccessToken(parseServiceAccount(SA_RAW))
     const docId = await uploadToDrive(token, folderId, `${code} — ${title}.pdf`, 'application/pdf', await document.arrayBuffer())
     await makeViewOnly(token, docId)
 

@@ -110,14 +110,33 @@ function uses a **Google service account**.
 
 ### Give the function its secrets and deploy
 
-From the repo root (after `supabase login` and `supabase link --project-ref
-ruqnjxxzeaazqohlpacx`):
+These are **terminal** commands (PowerShell / bash), run in the `sopportaltt`
+folder — the same place you run `git` and `vercel`. **Not** the Supabase SQL
+Editor. If you don't have the CLI, prefix each command with `npx ` (e.g.
+`npx supabase login`).
 
 ```bash
-# store the service-account key as a secret (never committed, never in the browser)
-supabase secrets set GOOGLE_SERVICE_ACCOUNT="$(cat /path/to/your-service-account.json)"
+supabase login
+supabase link --project-ref ruqnjxxzeaazqohlpacx
+```
 
-# deploy the function
+Then store the service-account key as a secret. The key is multi-line JSON, so
+the reliable cross-platform way is to **base64-encode it** first (the function
+accepts raw JSON or base64):
+
+**Windows (PowerShell):**
+```powershell
+$b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\path\to\your-key.json"))
+supabase secrets set GOOGLE_SERVICE_ACCOUNT=$b64
+```
+
+**macOS / Linux:**
+```bash
+supabase secrets set GOOGLE_SERVICE_ACCOUNT="$(base64 -w0 /path/to/your-key.json)"
+```
+
+Finally, deploy:
+```bash
 supabase functions deploy upload-sop
 ```
 
