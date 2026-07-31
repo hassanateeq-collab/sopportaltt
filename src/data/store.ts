@@ -27,7 +27,7 @@ import { hashEmployeeCode, verifyEmployeeCode, generateEmployeeCode } from '../l
 import { addMonths } from '../lib/certs'
 import { nextDocCode, isDocCodeTaken, isValidDocCode } from '../lib/codes'
 import { appliesToStaff, scopeIncludes } from '../lib/scope'
-import { supabase, isSupabaseEnabled, functionsBase } from '../lib/supabase'
+import { supabase, isSupabaseEnabled, functionsBase, anonPublicKey } from '../lib/supabase'
 import { DRIVE_DEPARTMENT_FOLDERS } from '../lib/drive'
 import type {
   Acknowledgment,
@@ -149,9 +149,11 @@ export async function initStore(): Promise<void> {
   if (isSupabaseEnabled) {
     db = emptyDb()
     // Branches and departments are anon-readable, so the login funnels work
-    // before anyone signs in. A manager/admin session then hydrates the rest.
+    // before anyone signs in. A manager/admin session then hydrates the rest;
+    // failing that, a still-valid staff token resumes the staff portal.
     await hydratePublic()
     await resumeSupabaseSession()
+    await resumeSupabaseStaffSession()
     return
   }
 
@@ -417,6 +419,37 @@ export async function createDriveFolder(name: string): Promise<{ id: string; nam
   return j.folder as { id: string; name: string }
 }
 
+/**
+ * The staff sign-in name list for one branch. The staff table has no anon read
+ * access, so in Supabase mode this goes through the staff-directory Edge Function
+ * (service_role, returns only id/name/department — never a code). In demo mode it
+ * reads the seeded staff straight from the cache.
+ */
+export async function staffDirectory(
+  branchCode: string,
+): Promise<Array<{ id: string; name: string; department_id: string }>> {
+  if (!isSupabaseEnabled) {
+    const branch = read.branchByCode(branchCode)
+    if (!branch) return []
+    return read
+      .staff()
+      .filter((s) => s.branch_id === branch.id && s.active)
+      .map((s) => ({ id: s.id, name: s.name, department_id: s.department_id }))
+  }
+  try {
+    const res = await fetch(`${functionsBase}/staff-directory`, {
+      method: 'POST',
+      headers: staffFnHeaders(),
+      body: JSON.stringify({ branch_code: branchCode }),
+    })
+    if (!res.ok) return []
+    const j = await res.json().catch(() => ({ staff: [] }))
+    return Array.isArray(j.staff) ? j.staff : []
+  } catch {
+    return []
+  }
+}
+
 /** On boot, resume a still-valid manager/admin session and hydrate the cache. */
 async function resumeSupabaseSession(): Promise<void> {
   try {
@@ -430,6 +463,139 @@ async function resumeSupabaseSession(): Promise<void> {
     // A failed resume just lands the user back on the sign-in screen.
     resumedActor = null
   }
+}
+
+/* --------------------------------------------------- staff supabase mode ---- */
+
+/**
+ * Staff sign-in in Supabase mode.
+ *
+ * Staff have no Supabase Auth account, so they can't hold a real JWT and can't
+ * be served by RLS directly. Instead the staff-login Edge Function mints an
+ * OPAQUE session token (stored server-side as a hash), and every staff read or
+ * write goes through an Edge Function carrying that token. staff-data returns
+ * exactly what this member is allowed to see — computed server-side with the
+ * same derived-eligibility rule the RLS policies use — which we drop into the
+ * same in-memory `db` the screens already read from. So the staff screens are
+ * unchanged; only the source of their data moved.
+ */
+
+/** localStorage key for the staff session token (shared with App). */
+export const STAFF_TOKEN_KEY = 'hamsun-sop-portal/staff-token'
+
+/** The staff member resumed from a persisted token on boot, if any. */
+let resumedStaff: { staff: Staff; token: string } | null = null
+export function getResumedStaff(): { staff: Staff; token: string } | null {
+  return resumedStaff
+}
+
+/** Headers for staff-facing functions: anon key at the gateway, token in body. */
+function staffFnHeaders(): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    apikey: anonPublicKey,
+    Authorization: `Bearer ${anonPublicKey}`,
+  }
+}
+
+/** POST to a staff-facing Edge Function; returns parsed JSON or throws ApiError. */
+async function callStaffFn(name: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  let res: Response | null = null
+  try {
+    res = await fetch(`${functionsBase}/${name}`, { method: 'POST', headers: staffFnHeaders(), body: JSON.stringify(body) })
+  } catch {
+    throw new ApiError('Could not reach the server. Check your connection and try again.')
+  }
+  if (res.status === 404) throw new ApiError(`This feature isn’t deployed yet — deploy the ${name} function (see supabase/SETUP.md).`)
+  const j = (await res.json().catch(() => ({}))) as Record<string, unknown>
+  if (!res.ok) throw new ApiError((j.error as string) ?? 'Something went wrong. Try again.')
+  return j
+}
+
+/** Fetch the whole staff payload (optionally marking notifications read first). */
+async function fetchStaffData(token: string, markRead = false): Promise<Record<string, unknown> | null> {
+  let res: Response | null = null
+  try {
+    res = await fetch(`${functionsBase}/staff-data`, {
+      method: 'POST',
+      headers: staffFnHeaders(),
+      body: JSON.stringify({ token, mark_read: markRead }),
+    })
+  } catch {
+    return null
+  }
+  if (!res.ok) return null
+  return (await res.json().catch(() => null)) as Record<string, unknown> | null
+}
+
+/** Drop a staff-data payload into the in-memory cache and notify listeners. */
+function applyStaffData(payload: Record<string, unknown>): Staff | null {
+  const staffRow = payload.staff as Record<string, unknown> | null
+  db = {
+    ...emptyDb(),
+    branches: (payload.branches as Branch[]) ?? [],
+    departments: (payload.departments as Department[]) ?? [],
+    staff: staffRow ? [mapStaffRow(staffRow)] : [],
+    sops: (payload.sops as Sop[]) ?? [],
+    acknowledgments: (payload.acknowledgments as Acknowledgment[]) ?? [],
+    tests: (payload.tests as Test[]) ?? [],
+    questions: (payload.questions as Question[]) ?? [],
+    assignments: (payload.assignments as TestAssignment[]) ?? [],
+    attempts: (payload.attempts as Attempt[]) ?? [],
+    certifications: (payload.certifications as Certification[]) ?? [],
+    grants: (payload.grants as RetestGrant[]) ?? [],
+    notifications: (payload.notifications as Notification[]) ?? [],
+  }
+  snapshotVersion++
+  listeners.forEach((fn) => fn())
+  return db.staff[0] ?? null
+}
+
+/** Validate a token by loading its portal; returns the staff row or null. */
+async function activateStaffSession(token: string): Promise<Staff | null> {
+  const payload = await fetchStaffData(token)
+  if (!payload || payload.error) return null
+  return applyStaffData(payload)
+}
+
+/** On boot, resume a still-valid staff token and hydrate the cache. */
+async function resumeSupabaseStaffSession(): Promise<void> {
+  if (resumedActor) return // a manager/admin owns this tab
+  try {
+    const token = localStorage.getItem(STAFF_TOKEN_KEY)
+    if (!token) return
+    const staff = await activateStaffSession(token)
+    if (staff) resumedStaff = { staff, token }
+    else localStorage.removeItem(STAFF_TOKEN_KEY)
+  } catch {
+    resumedStaff = null
+  }
+}
+
+/** Headers for admin/manager functions: the caller's Auth JWT at the gateway. */
+async function adminFnHeaders(): Promise<Record<string, string>> {
+  const { data: { session } } = await supabase!.auth.getSession()
+  if (!session) throw new ApiError('Please sign in again.')
+  return {
+    'Content-Type': 'application/json',
+    apikey: anonPublicKey,
+    Authorization: `Bearer ${session.access_token}`,
+  }
+}
+
+/** POST to an admin/manager Edge Function; returns parsed JSON or throws. */
+async function callAdminFn(name: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const headers = await adminFnHeaders()
+  let res: Response | null = null
+  try {
+    res = await fetch(`${functionsBase}/${name}`, { method: 'POST', headers, body: JSON.stringify(body) })
+  } catch {
+    throw new ApiError('Could not reach the server. Check your connection and try again.')
+  }
+  if (res.status === 404) throw new ApiError(`Deploy the ${name} function first (see supabase/SETUP.md).`)
+  const j = (await res.json().catch(() => ({}))) as Record<string, unknown>
+  if (!res.ok) throw new ApiError((j.error as string) ?? 'Something went wrong. Try again.')
+  return j
 }
 
 async function seed(): Promise<void> {
@@ -795,10 +961,15 @@ export const api = {
    */
   async staffLogin(staffId: string, code: string): Promise<StaffSession> {
     if (isSupabaseEnabled) {
-      // Staff sign-in must be verified server-side (bcrypt + lockout + a minted
-      // JWT). That is the staff-login Edge Function, deployed in the next stage.
-      void code
-      throw new ApiError('Staff sign-in switches on in the next update, once the login function is deployed.')
+      // Verified server-side by the staff-login Edge Function (bcrypt + lockout).
+      // It returns an opaque session token; we then load the staff portal with it.
+      const j = await callStaffFn('staff-login', { staff_id: staffId, code })
+      const token = j.token as string
+      const staffRow = j.staff as Record<string, unknown>
+      applyStaffData({ staff: staffRow, branches: db.branches, departments: db.departments })
+      await activateStaffSession(token)
+      resumedStaff = { staff: mapStaffRow(staffRow), token }
+      return { staff_id: staffRow.id as string, token, expires_at: j.expires_at as string }
     }
     const staff = db.staff.find((s) => s.id === staffId)
     if (!staff || !staff.active) {
@@ -839,12 +1010,26 @@ export const api = {
   },
 
   staffLogout(token: string): void {
+    if (isSupabaseEnabled) {
+      // Clear the local session and reset the cache to the public shell so no
+      // staff data lingers. The opaque token simply expires server-side.
+      resumedStaff = null
+      db = { ...emptyDb(), branches: db.branches, departments: db.departments }
+      snapshotVersion++
+      listeners.forEach((fn) => fn())
+      return
+    }
     db.sessions = db.sessions.filter((s) => s.token !== token)
     commit()
   },
 
   /** Restores a session on page reload without a second code entry. */
   resumeStaffSession(token: string): Staff | null {
+    if (isSupabaseEnabled) {
+      // In Supabase mode the resume happens during initStore (async); the App
+      // reads getResumedStaff() instead of calling this.
+      return resumedStaff?.token === token ? resumedStaff.staff : null
+    }
     try {
       return validateStaffToken(token)
     } catch {
@@ -894,6 +1079,12 @@ export const api = {
   /* ---- sign-sop Edge Function ---- */
 
   async signSop(token: string, sopId: string): Promise<Acknowledgment> {
+    if (isSupabaseEnabled) {
+      const j = await callStaffFn('sign-sop', { token, sop_id: sopId })
+      await activateStaffSession(token) // re-hydrate so the stamp shows
+      return j.acknowledgment as Acknowledgment
+    }
+
     const staff = validateStaffToken(token)
     const sop = read.sop(sopId)
     if (!sop) throw new ApiError('That SOP no longer exists.')
@@ -931,6 +1122,12 @@ export const api = {
     answers: Array<number | null>,
     language: Language,
   ): Promise<{ attempt: Attempt; certification: Certification | null }> {
+    if (isSupabaseEnabled) {
+      const j = await callStaffFn('submit-attempt', { token, test_id: testId, answers, language })
+      await activateStaffSession(token) // re-hydrate scores + certificate
+      return { attempt: j.attempt as Attempt, certification: (j.certification as Certification | null) ?? null }
+    }
+
     const staff = validateStaffToken(token)
     const test = read.test(testId)
     if (!test) throw new ApiError('That test no longer exists.')
@@ -1006,20 +1203,11 @@ export const api = {
     if (isSupabaseEnabled) {
       const existing = openGrant(staffId, testId)
       if (existing) return existing
-      const { data, error } = await supabase!
-        .from('retest_grants')
-        .insert({
-          test_id: testId,
-          staff_id: staffId,
-          granted_by: actor.kind === 'admin' ? actor.admin.id : actor.manager.id,
-          granted_by_name: actorName(actor),
-          used: false,
-        })
-        .select('*')
-        .single()
-      if (error) throw new ApiError(error.message)
+      // RLS reserves retest_grants inserts for this function so the grant and the
+      // staff notification are written together as the service_role.
+      const j = await callAdminFn('grant-retest', { test_id: testId, staff_id: staffId })
       await hydrateFromSupabase()
-      return data as RetestGrant
+      return j.grant as RetestGrant
     }
 
     const staff = db.staff.find((s) => s.id === staffId)
@@ -1253,6 +1441,12 @@ export const api = {
   /* ---- notifications ---- */
 
   async markNotificationsRead(token: string): Promise<void> {
+    if (isSupabaseEnabled) {
+      const payload = await fetchStaffData(token, true)
+      if (payload && !payload.error) applyStaffData(payload)
+      return
+    }
+
     const staff = validateStaffToken(token)
     let changed = false
     for (const n of db.notifications) {
@@ -1303,6 +1497,20 @@ export const api = {
     actor: Actor,
     input: { name: string; department_id: string; branch_id: string; job_title: string },
   ): Promise<{ staff: Staff; code: string }> {
+    if (isSupabaseEnabled) {
+      // The manage-staff function generates the code, hashes it in Postgres, and
+      // returns the plaintext once. The hash never reaches the browser.
+      const j = await callAdminFn('manage-staff', {
+        action: 'create',
+        name: input.name,
+        department_id: input.department_id,
+        branch_id: input.branch_id,
+        job_title: input.job_title,
+      })
+      await hydrateFromSupabase()
+      return { staff: mapStaffRow(j.staff as Record<string, unknown>), code: j.code as string }
+    }
+
     requireAdmin(actor)
     if (!input.name.trim()) throw new ApiError('A staff member needs a name.')
 
@@ -1324,6 +1532,14 @@ export const api = {
 
   /** Offboarding is deactivating the row, which is what makes turnover cheap. */
   async setStaffActive(actor: Actor, staffId: string, active: boolean): Promise<void> {
+    if (isSupabaseEnabled) {
+      // A plain column flip — RLS lets admins (and a manager on her own patch) do
+      // it directly, so no Edge Function is needed.
+      const { error } = await supabase!.from('staff').update({ active }).eq('id', staffId)
+      if (error) throw new ApiError(error.message)
+      await hydrateFromSupabase()
+      return
+    }
     const staff = db.staff.find((s) => s.id === staffId)
     if (!staff) throw new ApiError('That staff record no longer exists.')
     assertCanTouchStaff(actor, staff)
@@ -1333,6 +1549,10 @@ export const api = {
   },
 
   async regenerateStaffCode(actor: Actor, staffId: string): Promise<string> {
+    if (isSupabaseEnabled) {
+      const j = await callAdminFn('manage-staff', { action: 'regenerate', staff_id: staffId })
+      return j.code as string
+    }
     const staff = db.staff.find((s) => s.id === staffId)
     if (!staff) throw new ApiError('That staff record no longer exists.')
     assertCanTouchStaff(actor, staff)
@@ -1343,10 +1563,28 @@ export const api = {
     return code
   },
 
+  /**
+   * Create a department manager. In Supabase mode this creates their Supabase
+   * Auth login (via the manage-managers function) and returns a generated
+   * password to share once, unless one was supplied.
+   */
   async addManager(
     actor: Actor,
-    input: { name: string; email: string; department_id: string; branch_id: string },
-  ): Promise<Manager> {
+    input: { name: string; email: string; department_id: string; branch_id: string; password?: string },
+  ): Promise<{ manager: Manager; password: string | null }> {
+    if (isSupabaseEnabled) {
+      const j = await callAdminFn('manage-managers', {
+        action: 'create',
+        name: input.name,
+        email: input.email,
+        department_id: input.department_id,
+        branch_id: input.branch_id,
+        password: input.password ?? '',
+      })
+      await hydrateFromSupabase()
+      return { manager: j.manager as Manager, password: (j.password as string | null) ?? null }
+    }
+
     requireAdmin(actor)
     const email = input.email.trim().toLowerCase()
     if (!input.name.trim()) throw new ApiError('A manager needs a name.')
@@ -1363,7 +1601,48 @@ export const api = {
     }
     db.managers.push(manager)
     commit()
-    return manager
+    return { manager, password: null }
+  },
+
+  /**
+   * Update a manager's posting (name / department / branch / active). These are
+   * plain column changes an admin does directly under RLS — no Auth user touched.
+   */
+  async updateManager(
+    actor: Actor,
+    managerId: string,
+    changes: { name?: string; department_id?: string; branch_id?: string; active?: boolean },
+  ): Promise<void> {
+    const patch: Record<string, unknown> = {}
+    if (changes.name !== undefined) patch.name = changes.name.trim()
+    if (changes.department_id !== undefined) patch.department_id = changes.department_id
+    if (changes.branch_id !== undefined) patch.branch_id = changes.branch_id
+    if (changes.active !== undefined) patch.active = changes.active
+    if (Object.keys(patch).length === 0) return
+
+    if (isSupabaseEnabled) {
+      const { error } = await supabase!.from('managers').update(patch).eq('id', managerId)
+      if (error) throw new ApiError(error.message)
+      await hydrateFromSupabase()
+      return
+    }
+    requireAdmin(actor)
+    const manager = db.managers.find((m) => m.id === managerId)
+    if (!manager) throw new ApiError('That manager no longer exists.')
+    Object.assign(manager, patch)
+    commit()
+  },
+
+  /** Remove a manager and (in Supabase mode) their Auth login. */
+  async deleteManager(actor: Actor, managerId: string): Promise<void> {
+    if (isSupabaseEnabled) {
+      await callAdminFn('manage-managers', { action: 'delete', manager_id: managerId })
+      await hydrateFromSupabase()
+      return
+    }
+    requireAdmin(actor)
+    db.managers = db.managers.filter((m) => m.id !== managerId)
+    commit()
   },
 
   /* ---- tests ---- */
@@ -1490,6 +1769,29 @@ export const api = {
     test.status = 'published'
     commit()
     return test
+  },
+
+  /**
+   * Delete a test and everything tied to it (questions, assignments, attempts,
+   * certifications, retest grants — all cascade via the foreign keys).
+   */
+  async deleteTest(actor: Actor, testId: string): Promise<void> {
+    if (isSupabaseEnabled) {
+      const { error } = await supabase!.from('tests').delete().eq('id', testId)
+      if (error) throw new ApiError(error.message)
+      await hydrateFromSupabase()
+      return
+    }
+    const test = read.test(testId)
+    if (!test) throw new ApiError('That test no longer exists.')
+    assertCanTouchScope(actor, test.department_id, test.branch_scope)
+    db.tests = db.tests.filter((t) => t.id !== testId)
+    db.questions = db.questions.filter((q) => q.test_id !== testId)
+    db.assignments = db.assignments.filter((a) => a.test_id !== testId)
+    db.attempts = db.attempts.filter((a) => a.test_id !== testId)
+    db.certifications = db.certifications.filter((c) => c.test_id !== testId)
+    db.grants = db.grants.filter((g) => g.test_id !== testId)
+    commit()
   },
 
   /* ---- generate-test Edge Function (Claude API) ---- */

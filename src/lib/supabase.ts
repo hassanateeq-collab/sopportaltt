@@ -47,6 +47,14 @@ export const supabase: SupabaseClient | null = isSupabaseEnabled
 /** Base URL for invoking Edge Functions, e.g. `${functionsBase}/staff-login`. */
 export const functionsBase = url ? `${url.replace(/\/$/, '')}/functions/v1` : ''
 
+/**
+ * The public anon key, used as the gateway credential when invoking Edge
+ * Functions that a not-yet-signed-in staff member calls (staff-login,
+ * staff-directory) or that carry their own opaque staff token in the body
+ * (staff-data, sign-sop, submit-attempt). It's public by design.
+ */
+export const anonPublicKey = anonKey ?? ''
+
 export function requireSupabase(): SupabaseClient {
   if (!supabase) {
     throw new Error('Supabase is not configured in this build.')

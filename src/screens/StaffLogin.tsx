@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { api, read, ApiError } from '../data/store'
+import { useEffect, useMemo, useState } from 'react'
+import { api, read, staffDirectory, ApiError } from '../data/store'
 import { DEMO_STAFF } from '../data/seed'
 import { sopsForStaff, testsForStaff } from '../lib/scope'
 import { isSupabaseEnabled } from '../lib/supabase'
@@ -23,16 +23,43 @@ export function StaffLogin({ onLoggedIn }: { onLoggedIn: (staff: Staff, token: s
   const departments = read.departments()
   const branch = branchCode ? read.branchByCode(branchCode) : null
 
+  // The staff table has no anon read access, so in Supabase mode the name list
+  // for a branch comes from the staff-directory Edge Function (id + name only).
+  const [directory, setDirectory] = useState<Array<{ id: string; name: string; department_id: string }>>([])
+  useEffect(() => {
+    if (!isSupabaseEnabled || !branchCode) {
+      setDirectory([])
+      return
+    }
+    let active = true
+    staffDirectory(branchCode).then((list) => {
+      if (active) setDirectory(list)
+    })
+    return () => {
+      active = false
+    }
+  }, [branchCode])
+
   const staffHere = useMemo(() => {
     if (!branch || !departmentId) return []
+    if (isSupabaseEnabled) {
+      return directory
+        .filter((s) => s.department_id === departmentId)
+        .sort((a, b) => a.name.localeCompare(b.name))
+    }
     return read
       .staff()
       .filter((s) => s.branch_id === branch.id && s.department_id === departmentId && s.active)
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [branch, departmentId, read.staff()])
+  }, [branch, departmentId, directory, read.staff()])
 
   function countsFor(deptId: string) {
     if (!branch) return { sops: 0, tests: 0, staff: 0 }
+    if (isSupabaseEnabled) {
+      // SOP/test counts need the tables staff can't read before signing in, so
+      // the picker shows only the headcount here.
+      return { sops: 0, tests: 0, staff: directory.filter((s) => s.department_id === deptId).length }
+    }
     const fake = { department_id: deptId, branch_id: branch.id } as Staff
     return {
       sops: sopsForStaff(read.sops(), fake, branch.code).length,
@@ -112,6 +139,8 @@ export function StaffLogin({ onLoggedIn }: { onLoggedIn: (staff: Staff, token: s
                 <div className="sub">
                   {off ? (
                     'No content at this branch yet'
+                  ) : isSupabaseEnabled ? (
+                    <><span className="mono">{c.staff}</span> staff</>
                   ) : (
                     <>
                       <span className="mono">{c.sops}</span> SOPs · <span className="mono">{c.tests}</span> tests ·{' '}
@@ -160,11 +189,6 @@ export function StaffLogin({ onLoggedIn }: { onLoggedIn: (staff: Staff, token: s
         <p>Pick your name and enter your employee code.</p>
       </div>
       <div className="kcard">
-        {isSupabaseEnabled && (
-          <div className="notice info" style={{ marginBottom: 16 }}>
-            Staff sign-in switches on in the next update, once the secure login function is deployed.
-          </div>
-        )}
         {staffHere.length === 0 ? (
           <div className="allclear">
             No staff registered for {read.department(departmentId)?.name} at {branchCode} yet.

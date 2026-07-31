@@ -14,7 +14,7 @@ import {
   ApiError,
 } from '../data/store'
 import type { Actor, DraftQuestion } from '../data/store'
-import type { Branch, BranchScope, Department, Difficulty, Language, Sop, Staff, Test } from '../types'
+import type { Branch, BranchScope, Department, Difficulty, Language, Manager, Sop, Staff, Test } from '../types'
 import { scopeIncludes } from '../lib/scope'
 import { certStatus, daysUntil } from '../lib/certs'
 import { fmtD } from '../lib/format'
@@ -321,6 +321,25 @@ function TestRow({
       ) : (
         <AssignPanel test={test} people={people} branch={branch} actor={actor} assignedIds={assignedIds} />
       )}
+
+      <details className="inline">
+        <summary>Manage this test</summary>
+        <div style={{ marginTop: 8 }}>
+          <p className="demo-hint" style={{ marginTop: 0 }}>
+            Deleting removes this test and everything tied to it — its questions, assignments, attempts,
+            certifications and retest approvals. This can't be undone.
+          </p>
+          <button
+            className="btn sm danger"
+            onClick={() => {
+              if (!confirm(`Delete the test "${test.title}"?\n\nThis also removes every assignment, attempt and certificate for it. It can't be undone.`)) return
+              run(() => api.deleteTest(actor, test.id), `"${test.title}" deleted`)
+            }}
+          >
+            ✕ Delete test
+          </button>
+        </div>
+      </details>
     </div>
   )
 }
@@ -781,11 +800,76 @@ function CreateTestForm({
 function AdminOrg({ actor, dept, branch }: { actor: Actor; dept: Department; branch: Branch }) {
   return (
     <>
+      <StaffRoster actor={actor} dept={dept} branch={branch} />
       <AddStaff actor={actor} dept={dept} branch={branch} />
+      <ManagerRoster actor={actor} dept={dept} branch={branch} />
       <AddManager actor={actor} dept={dept} branch={branch} />
       <AddBranch actor={actor} />
       <AddDepartment actor={actor} />
     </>
+  )
+}
+
+/* ---- staff roster: reveal a new code, deactivate / reactivate ---- */
+
+function StaffRoster({ actor, dept, branch }: { actor: Actor; dept: Department; branch: Branch }) {
+  const people = read
+    .staff()
+    .filter((s) => s.department_id === dept.id && s.branch_id === branch.id)
+    .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name))
+  const [reveal, setReveal] = useState<{ id: string; code: string } | null>(null)
+
+  return (
+    <details className="board">
+      <summary>Staff — {dept.name} · {branch.code}<span className="hint">{people.length} on file</span></summary>
+      <div className="card-body">
+        {people.length === 0 ? (
+          <div className="empty-row">No staff here yet — add one below.</div>
+        ) : (
+          people.map((s) => (
+            <div className="brow" key={s.id}>
+              <div className="brow-top">
+                <span className="brow-title">
+                  {s.name} <span className="ver">{s.job_title}</span>
+                  {!s.active && <span className="vidchip" style={{ marginLeft: 6 }}>INACTIVE</span>}
+                </span>
+              </div>
+              <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+                <button
+                  className="btn sm"
+                  onClick={() =>
+                    run(async () => {
+                      const code = await api.regenerateStaffCode(actor, s.id)
+                      setReveal({ id: s.id, code })
+                    })
+                  }
+                >
+                  ↻ New code
+                </button>
+                <button
+                  className="btn sm"
+                  onClick={() =>
+                    run(
+                      () => api.setStaffActive(actor, s.id, !s.active),
+                      s.active ? `${s.name} deactivated` : `${s.name} reactivated`,
+                    )
+                  }
+                >
+                  {s.active ? 'Deactivate' : 'Reactivate'}
+                </button>
+              </div>
+              {reveal?.id === s.id && (
+                <div className="notice info" style={{ marginTop: 8 }}>
+                  New employee code for <strong>{s.name}</strong>: <span className="mono">{reveal.code}</span> — share it
+                  privately. It won't be shown again.{' '}
+                  <button className="btn sm" style={{ marginLeft: 6 }} onClick={() => setReveal(null)}>Done</button>
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </details>
   )
 }
 
@@ -794,6 +878,9 @@ function AddStaff({ actor, dept, branch }: { actor: Actor; dept: Department; bra
   const [deptId, setDeptId] = useState(dept.id)
   const [branchId, setBranchId] = useState(branch.id)
   const [job, setJob] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [issued, setIssued] = useState<{ name: string; code: string } | null>(null)
+
   return (
     <details className="board">
       <summary>Add staff member<span className="hint">code auto-generated</span></summary>
@@ -808,33 +895,122 @@ function AddStaff({ actor, dept, branch }: { actor: Actor; dept: Department; bra
         </div>
         <button
           className="btn primary block"
+          disabled={busy}
           onClick={async () => {
             if (!name.trim()) { toast('Enter the staff member’s name'); return }
+            setBusy(true)
             try {
               const { code } = await api.addStaff(actor, { name, department_id: deptId, branch_id: branchId, job_title: job })
-              toast(`${name} added — employee code ${code} (share it privately)`)
+              setIssued({ name: name.trim(), code })
+              toast(`${name} added`)
               setName(''); setJob('')
-            } catch (e) { toast(e instanceof ApiError ? e.message : 'Could not add staff.') }
+            } catch (e) {
+              toast(e instanceof ApiError ? e.message : 'Could not add staff.')
+            } finally {
+              setBusy(false)
+            }
           }}
         >
-          Add staff
+          {busy ? <span className="spinner" /> : 'Add staff'}
         </button>
+        {issued && (
+          <div className="notice info" style={{ marginTop: 12 }}>
+            <strong>{issued.name}</strong> added. Employee code: <span className="mono">{issued.code}</span> — share it
+            privately; it won't be shown again.{' '}
+            <button className="btn sm" style={{ marginLeft: 6 }} onClick={() => setIssued(null)}>Done</button>
+          </div>
+        )}
       </div>
     </details>
+  )
+}
+
+/* ---- manager roster: reassign posting, disable / enable, delete ---- */
+
+function ManagerRoster({ actor, dept, branch }: { actor: Actor; dept: Department; branch: Branch }) {
+  const managers = read
+    .managers()
+    .filter((m) => m.department_id === dept.id && m.branch_id === branch.id)
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  return (
+    <details className="board">
+      <summary>Managers — {dept.name} · {branch.code}<span className="hint">{managers.length} with access</span></summary>
+      <div className="card-body">
+        {managers.length === 0 ? (
+          <div className="empty-row">No manager has access here yet — add one below.</div>
+        ) : (
+          managers.map((m) => <ManagerRow key={m.id} actor={actor} manager={m} />)
+        )}
+      </div>
+    </details>
+  )
+}
+
+function ManagerRow({ actor, manager }: { actor: Actor; manager: Manager }) {
+  const [deptId, setDeptId] = useState(manager.department_id)
+  const [branchId, setBranchId] = useState(manager.branch_id)
+  const dirty = deptId !== manager.department_id || branchId !== manager.branch_id
+
+  return (
+    <div className="brow">
+      <div className="brow-top">
+        <span className="brow-title">
+          {manager.name} <span className="ver mono">{manager.email}</span>
+          {!manager.active && <span className="vidchip" style={{ marginLeft: 6 }}>DISABLED</span>}
+        </span>
+      </div>
+      <div className="fieldrow" style={{ marginTop: 6 }}>
+        <div className="field"><label>Department</label>
+          <select value={deptId} onChange={(e) => setDeptId(e.target.value)}>{read.departments().map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
+        <div className="field"><label>Branch</label>
+          <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{read.branches().map((b) => <option key={b.id} value={b.id}>{b.code}</option>)}</select></div>
+      </div>
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+        <button
+          className="btn sm primary"
+          disabled={!dirty}
+          onClick={() => run(() => api.updateManager(actor, manager.id, { department_id: deptId, branch_id: branchId }), `${manager.name} reassigned`)}
+        >
+          Save posting
+        </button>
+        <button
+          className="btn sm"
+          onClick={() => run(() => api.updateManager(actor, manager.id, { active: !manager.active }), manager.active ? `${manager.name} disabled` : `${manager.name} enabled`)}
+        >
+          {manager.active ? 'Disable login' : 'Enable login'}
+        </button>
+        <button
+          className="btn sm danger"
+          onClick={() => {
+            if (!confirm(`Delete manager ${manager.name} (${manager.email})?\n\nThis removes their login for good. It can't be undone.`)) return
+            run(() => api.deleteManager(actor, manager.id), `${manager.name} deleted`)
+          }}
+        >
+          ✕ Delete
+        </button>
+      </div>
+    </div>
   )
 }
 
 function AddManager({ actor, dept, branch }: { actor: Actor; dept: Department; branch: Branch }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [deptId, setDeptId] = useState(dept.id)
   const [branchId, setBranchId] = useState(branch.id)
+  const [busy, setBusy] = useState(false)
+  const [issued, setIssued] = useState<{ name: string; email: string; password: string | null } | null>(null)
+
   return (
     <details className="board">
-      <summary>Add department manager</summary>
+      <summary>Add department manager<span className="hint">creates their sign-in</span></summary>
       <div className="card-body">
         <div className="field"><label>Name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Faisal" /></div>
         <div className="field"><label>Email (their Supabase Auth login)</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@hamsun.example" /></div>
+        <div className="field"><label>Temporary password — blank = auto-generate</label>
+          <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="at least 8 characters, or leave blank" /></div>
         <div className="fieldrow">
           <div className="field"><label>Department</label>
             <select value={deptId} onChange={(e) => setDeptId(e.target.value)}>{read.departments().map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
@@ -843,16 +1019,41 @@ function AddManager({ actor, dept, branch }: { actor: Actor; dept: Department; b
         </div>
         <button
           className="btn primary block"
-          onClick={() =>
-            run(async () => {
-              if (!name.trim()) throw new ApiError('Enter the manager’s name')
-              await api.addManager(actor, { name, email, department_id: deptId, branch_id: branchId })
-              setName(''); setEmail('')
-            }, `${name} added as ${read.department(deptId)?.name} manager`)
-          }
+          disabled={busy}
+          onClick={async () => {
+            if (!name.trim()) { toast('Enter the manager’s name'); return }
+            setBusy(true)
+            try {
+              const { password: pw } = await api.addManager(actor, {
+                name,
+                email,
+                department_id: deptId,
+                branch_id: branchId,
+                password: password || undefined,
+              })
+              setIssued({ name: name.trim(), email: email.trim().toLowerCase(), password: pw })
+              toast(`${name} added as ${read.department(deptId)?.name} manager`)
+              setName(''); setEmail(''); setPassword('')
+            } catch (e) {
+              toast(e instanceof ApiError ? e.message : 'Could not add manager.')
+            } finally {
+              setBusy(false)
+            }
+          }}
         >
-          Add manager
+          {busy ? <span className="spinner" /> : 'Add manager'}
         </button>
+        {issued && (
+          <div className="notice info" style={{ marginTop: 12 }}>
+            <strong>{issued.name}</strong> can sign in at <span className="mono">{issued.email}</span>
+            {issued.password ? (
+              <> with password <span className="mono">{issued.password}</span> — share it privately; it won't be shown again.</>
+            ) : (
+              <> with the password you set.</>
+            )}{' '}
+            <button className="btn sm" style={{ marginLeft: 6 }} onClick={() => setIssued(null)}>Done</button>
+          </div>
+        )}
       </div>
     </details>
   )

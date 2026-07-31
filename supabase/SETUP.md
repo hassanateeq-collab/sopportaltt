@@ -189,12 +189,64 @@ Then, in **Create a test → Generate the test from an SOP**, pick a source SOP,
 difficulty and count → **Generate questions** drafts them from the real document.
 Until it's deployed, the button explains it's needed.
 
-## Stage 3b — the remaining Edge Functions
+## Stage 3b — staff sign-in + admin management  ✅ built
 
-`staff-directory`, `staff-login` (bcrypt code + server-side lockout + a
-short-lived staff JWT), `sign-sop`, `submit-attempt` (retest gate + certificate),
-`grant-retest`. Deployed the same way; the `service_role` and any Anthropic key
-live only in their secrets.
+This turns on the **staff side** (sign in by name + code, see assigned SOPs and
+tests, sign SOPs, take tests) and the **admin management** of managers and staff.
+
+Staff have no Supabase Auth account, so they can't hold a JWT and can't be served
+by RLS directly. Instead `staff-login` verifies the bcrypt-hashed code and mints
+an **opaque session token** (only its SHA-256 is stored, in `staff_sessions`);
+every staff read/write then goes through an Edge Function carrying that token,
+and the function returns exactly what that member may see — computed server-side
+with the same derived-eligibility rule the RLS policies use. No employee-code
+hash ever reaches the browser.
+
+### 1. Run the second migration
+
+Open **SQL Editor → New query**, paste
+[`migrations/0002_staff_functions.sql`](./migrations/0002_staff_functions.sql),
+**Run**. It adds the `staff_sessions` table and three bcrypt helpers
+(`create_staff`, `set_staff_code`, `verify_staff_code`) that hash and verify
+employee codes inside Postgres with pgcrypto. Safe to re-run.
+
+### 2. Deploy the functions
+
+No new secrets — every function below runs on the auto-injected `SUPABASE_URL`
+and `SUPABASE_SERVICE_ROLE_KEY`.
+
+```bash
+# staff side
+supabase functions deploy staff-directory   # names for the sign-in dropdown
+supabase functions deploy staff-login        # bcrypt verify + lockout + session
+supabase functions deploy staff-data         # the signed-in member's portal payload
+supabase functions deploy sign-sop           # record an SOP acknowledgment
+supabase functions deploy submit-attempt     # score + retest gate + certificate
+
+# manager / admin
+supabase functions deploy grant-retest        # approve one retest (grant + notify)
+supabase functions deploy manage-staff        # add staff / re-issue a code
+supabase functions deploy manage-managers     # create/delete a manager's login
+```
+
+After they deploy:
+
+- **Staff** → pick branch, department, your name, enter your code → your SOPs and
+  tests. Three wrong codes locks the record for fifteen minutes (counted
+  server-side). Signing an SOP and taking a test are recorded live.
+- **Admin → Staff** roster: add a member (a six-digit code is generated and shown
+  once), re-issue a code, deactivate/reactivate.
+- **Admin → Managers** roster: add a manager (creates their Supabase Auth login;
+  a temporary password is shown once unless you set one), reassign their
+  department/branch, disable/enable, or delete (removes the login).
+
+Deactivating a staff member and reassigning a manager are plain column changes an
+admin makes directly under RLS — only the writes that touch a bcrypt hash or a
+Supabase Auth user need the functions above.
+
+> **Sessions.** A staff token lasts about one shift (9 h) and is cleared from the
+> browser on sign-out. There's no separate revoke endpoint — the token simply
+> expires. On a shared device, always sign out.
 
 ## Stage 4 — Cut over + redeploy
 
