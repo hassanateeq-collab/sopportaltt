@@ -204,12 +204,17 @@ function mapStaffRow(row: Record<string, unknown>): Staff {
   }
 }
 
-async function fetchAll<T>(table: string): Promise<T[]> {
+async function fetchAll<T>(table: string, columns = '*'): Promise<T[]> {
   const client = supabase!
-  const { data, error } = await client.from(table).select('*')
+  const { data, error } = await client.from(table).select(columns)
   if (error) throw new ApiError(`Could not load ${table}: ${error.message}`)
   return (data ?? []) as T[]
 }
+
+// The employee-code hash column is not granted to the browser, so staff must be
+// selected by explicit columns — a plain `select *` trips the column privilege
+// and Postgres answers "permission denied for table staff".
+const STAFF_COLUMNS = 'id,name,department_id,branch_id,job_title,active,created_at'
 
 /** Load just the anon-readable org shell (branches + departments) for the login funnels. */
 async function hydratePublic(): Promise<void> {
@@ -247,7 +252,7 @@ async function hydrateFromSupabase(): Promise<void> {
   ] = await Promise.all([
     fetchAll<Branch>('branches'),
     fetchAll<Department>('departments'),
-    fetchAll<Record<string, unknown>>('staff'),
+    fetchAll<Record<string, unknown>>('staff', STAFF_COLUMNS),
     fetchAll<Manager>('managers'),
     fetchAll<Admin>('admins'),
     fetchAll<Sop>('sops'),
