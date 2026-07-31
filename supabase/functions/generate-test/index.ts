@@ -138,10 +138,11 @@ Deno.serve(async (req) => {
     parts.push({ text: intro })
 
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // Header auth works for both the classic AIza… keys and the newer AQ.… keys.
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI },
         body: JSON.stringify({
           contents: [{ role: 'user', parts }],
           generationConfig: { responseMimeType: 'application/json', temperature: 0.6, maxOutputTokens: 2048 },
