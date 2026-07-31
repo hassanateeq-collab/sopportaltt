@@ -7,389 +7,362 @@ import {
   attemptsFor,
   latestCertification,
   attemptPermission,
+  openGrant,
   assignedTestsFor,
   ApiError,
 } from '../data/store'
 import type { Attempt, Certification, Sop, Staff, Test } from '../types'
 import { sopsForStaff } from '../lib/scope'
-import { certStatus, needsAttention, formatDate, formatDateTime } from '../lib/certs'
-import { TopBar, Badge, CertBadge, Notice, Empty, Spinner } from '../components/ui'
-import { NotificationBell } from '../components/NotificationBell'
+import { certStatus, daysUntil } from '../lib/certs'
+import { fmt, fmtD } from '../lib/format'
+import { toast } from '../lib/toast'
+import { DocIcon, TestIcon } from '../components/icons'
 import { Viewer } from '../components/Viewer'
 import { TestRunner } from './TestRunner'
 
 /**
- * The staff portal. Two tabs: the SOP library they owe sign-offs on, and the
- * tests assigned to them. Everything is scoped to this one person — they see
- * their own department's SOPs, their own assigned tests, their own scores and
- * certificates, and nothing about anyone else.
+ * The staff portal — the signed-in member's own page: the SOPs they owe
+ * sign-offs on, and the tests assigned to them, each as a tile. Everything is
+ * scoped to this one person.
  */
 export function StaffPortal({ staff, token, onLogout }: { staff: Staff; token: string; onLogout: () => void }) {
-  const [tab, setTab] = useState<'sops' | 'tests'>('sops')
   const branch = read.branch(staff.branch_id)!
-  const department = read.department(staff.department_id)!
 
-  const [viewer, setViewer] = useState<{ sop: Sop; tab: 'document' | 'video' } | null>(null)
-  const [runner, setRunner] = useState<Test | null>(null)
-  const [result, setResult] = useState<{ attempt: Attempt; certification: Certification | null; test: Test } | null>(
-    null,
-  )
+  const [view, setView] = useState<{ sop: Sop; kind: 'doc' | 'video'; justSigned?: boolean } | null>(null)
+  const [testView, setTestView] = useState<string | null>(null)
+  const [taking, setTaking] = useState<Test | null>(null)
 
-  const sops = useMemo(
-    () => sopsForStaff(read.sops(), staff, branch.code),
-    [staff, branch.code, read.sops()],
-  )
-  const tests = useMemo(() => assignedTestsFor(staff), [staff])
+  const sops = useMemo(() => sopsForStaff(read.sops(), staff, branch.code), [staff, branch.code, read.sops()])
+  const tests = useMemo(() => assignedTestsFor(staff), [staff, read.assignments(), read.tests()])
 
-  const outstandingSigns = sops.filter((s) => !hasSigned(staff.id, s)).length
-  const certAlerts = tests.filter((t) => needsAttention(certStatus(latestCertification(staff.id, t.id)))).length
-
-  if (runner) {
+  if (taking) {
     return (
       <TestRunner
-        test={runner}
+        test={taking}
         token={token}
-        onDone={(r) => {
-          setRunner(null)
-          if (r) setResult({ ...r, test: runner })
-        }}
+        onDone={() => setTaking(null)}
+        crumbs={<Crumbs staff={staff} onLogout={onLogout} />}
       />
     )
   }
 
-  return (
-    <div className="app">
-      <TopBar
-        title={staff.name}
-        subtitle={`${department.name} · ${branch.name}`}
-        actions={
-          <>
-            <NotificationBell staffId={staff.id} token={token} />
-            <button className="iconbtn" onClick={onLogout} aria-label="Sign out">
-              ⎋
-            </button>
-          </>
-        }
-      />
-
-      <div className="tabs" style={{ padding: '12px 14px 0', marginBottom: 0 }}>
-        <button className={`tab ${tab === 'sops' ? 'tab--on' : ''}`} onClick={() => setTab('sops')}>
-          SOPs {outstandingSigns > 0 && <span className="badge badge--accent" style={{ marginLeft: 6 }}>{outstandingSigns}</span>}
-        </button>
-        <button className={`tab ${tab === 'tests' ? 'tab--on' : ''}`} onClick={() => setTab('tests')}>
-          Tests {certAlerts > 0 && <span className="badge badge--warn" style={{ marginLeft: 6 }}>{certAlerts}</span>}
-        </button>
-      </div>
-
-      <main className="main">
-        {tab === 'sops' ? (
-          <SopLibrary
-            staff={staff}
-            sops={sops}
-            onOpen={(sop, which) => setViewer({ sop, tab: which })}
-          />
-        ) : (
-          <TestList staff={staff} tests={tests} onOpenViewer={(sop) => setViewer({ sop, tab: 'document' })} onStart={(t) => setRunner(t)} />
-        )}
-      </main>
-
-      {viewer && (
-        <Viewer
-          sop={viewer.sop}
-          initialTab={viewer.tab}
-          onClose={() => setViewer(null)}
-          footer={<SignOff staff={staff} sop={viewer.sop} token={token} />}
-        />
-      )}
-
-      {result && (
-        <ResultSheet
-          result={result}
-          onClose={() => setResult(null)}
-          onReviewSop={(sop) => {
-            setResult(null)
-            setViewer({ sop, tab: 'document' })
-          }}
-        />
-      )}
-    </div>
-  )
-}
-
-/* ---------------------------------------------------------------- SOP tab -- */
-
-function SopLibrary({
-  staff,
-  sops,
-  onOpen,
-}: {
-  staff: Staff
-  sops: Sop[]
-  onOpen: (sop: Sop, tab: 'document' | 'video') => void
-}) {
-  if (sops.length === 0) {
-    return <Empty icon="📄" title="No SOPs for your department yet" >When your manager publishes one it appears here.</Empty>
-  }
-
-  const outstanding = sops.filter((s) => !hasSigned(staff.id, s))
+  const pending = sops.filter((s) => !hasSigned(staff.id, s)).length
+  const certIssues = tests.filter((t) => {
+    const c = latestCertification(staff.id, t.id)
+    return c && certStatus(c) !== 'valid'
+  })
 
   return (
     <>
-      {outstanding.length > 0 && (
-        <div style={{ marginBottom: 14 }}>
-          <Notice tone="warn">
-            You have {outstanding.length} SOP{outstanding.length === 1 ? '' : 's'} to read and sign. Tap a tile
-            to open it.
-          </Notice>
-        </div>
+      <Crumbs staff={staff} onLogout={onLogout} />
+
+      {testView ? (
+        <TestDetail
+          test={read.test(testView)!}
+          staff={staff}
+          onBack={() => setTestView(null)}
+          onReviewSop={(sop, kind) => setView({ sop, kind })}
+          onStart={(t) => { setTestView(null); setTaking(t) }}
+        />
+      ) : (
+        <>
+          {certIssues.length > 0 && (
+            <div className="notice">
+              ⚠{' '}
+              {certIssues
+                .map((t) => {
+                  const c = latestCertification(staff.id, t.id)!
+                  const s = certStatus(c)
+                  return `${t.title}${s === 'expired' ? ' certification has expired' : ` certification expires in ${daysUntil(c.expires_at)} days`}`
+                })
+                .join(' · ')}{' '}
+              — tap the test tile to renew.
+            </div>
+          )}
+
+          <div className="duty-note">
+            <h2 className="section">My SOPs</h2>
+            <span className="duty-count">{pending} to sign</span>
+          </div>
+          {sops.length ? (
+            <div className="tilegrid">
+              {sops.map((s) => (
+                <SopTile key={s.id} sop={s} staff={staff} onOpen={(kind) => setView({ sop: s, kind })} />
+              ))}
+            </div>
+          ) : (
+            <div className="allclear">No SOPs for this department at this branch yet.</div>
+          )}
+
+          <div className="duty-note">
+            <h2 className="section">My tests &amp; scores</h2>
+            <span className="duty-count">{tests.length} assigned</span>
+          </div>
+          {tests.length ? (
+            <div className="tilegrid">
+              {tests.map((t) => (
+                <TestTile key={t.id} test={t} staff={staff} onOpen={() => setTestView(t.id)} />
+              ))}
+            </div>
+          ) : (
+            <div className="allclear">No tests assigned to you yet — your manager assigns tests by name.</div>
+          )}
+        </>
       )}
 
-      <div className="tiles">
-        {sops.map((sop) => {
-          const signed = hasSigned(staff.id, sop)
-          const ack = acknowledgmentFor(staff.id, sop)
-          return (
-            <div className="tile" key={sop.id}>
-              <button className="tile__body" onClick={() => onOpen(sop, 'document')}>
-                <div className="tile__top">
-                  <span className="tile__code">{sop.code}</span>
-                  <span className="tiny">v{sop.version}</span>
-                </div>
-                <div className="tile__title">{sop.title}</div>
-                <div className="tile__summary">{sop.summary}</div>
-                <div className="tile__meta">
-                  {signed ? (
-                    <Badge tone="ok">✓ Signed</Badge>
-                  ) : (
-                    <Badge tone="accent">Needs sign-off</Badge>
-                  )}
-                  {ack && <span className="tiny">on {formatDate(ack.signed_at)}</span>}
-                </div>
-              </button>
-              <button
-                className="tile__video"
-                onClick={() => onOpen(sop, 'video')}
-                disabled={!sop.video_file_id}
-                title={sop.video_file_id ? 'Watch the training video' : 'No training video attached yet'}
-              >
-                ▶ Video
-              </button>
-            </div>
-          )
-        })}
-      </div>
+      {view && (
+        <Viewer
+          sop={view.sop}
+          initialKind={view.kind}
+          onClose={() => setView(null)}
+          footer={
+            <SignOff
+              sop={view.sop}
+              staff={staff}
+              token={token}
+              justSigned={!!view.justSigned}
+              onSigned={() => setView({ ...view, justSigned: true })}
+            />
+          }
+        />
+      )}
     </>
   )
 }
 
-/** The read-and-understood sign-off, sitting under both the document and video. */
-function SignOff({ staff, sop, token }: { staff: Staff; sop: Sop; token: string }) {
-  const signed = hasSigned(staff.id, sop)
-  const ack = acknowledgmentFor(staff.id, sop)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+function Crumbs({ staff, onLogout }: { staff: Staff; onLogout: () => void }) {
+  const branch = read.branch(staff.branch_id)
+  const dept = read.department(staff.department_id)
+  return (
+    <div className="crumbs">
+      <span className="here">{branch?.code}</span>
+      <span className="sep">/</span>
+      <span className="here">{dept?.name}</span>
+      <span className="who">
+        {staff.name} ·{' '}
+        <button onClick={onLogout} style={{ color: 'var(--pine)', fontWeight: 600 }}>Sign out</button>
+      </span>
+    </div>
+  )
+}
 
-  if (signed && ack) {
+function SopTile({ sop, staff, onOpen }: { sop: Sop; staff: Staff; onOpen: (kind: 'doc' | 'video') => void }) {
+  const signed = hasSigned(staff.id, sop)
+  return (
+    <div className="tile">
+      <button className="tile-main" onClick={() => onOpen('doc')}>
+        <span className="kind"><DocIcon /></span>
+        <span className="t-title">{sop.title}</span>
+        <span className="ver">{sop.code} · v{sop.version}</span>
+        {signed ? <span className="chip signed">✓ Signed</span> : <span className="chip pending">Read &amp; sign</span>}
+      </button>
+      <button
+        className={`tile-video ${sop.video_file_id ? '' : 'none'}`}
+        onClick={() => onOpen('video')}
+        title={sop.video_file_id ? 'Watch the training video' : 'No training video attached yet'}
+      >
+        ▶ Video
+      </button>
+    </div>
+  )
+}
+
+function TestTile({ test, staff, onOpen }: { test: Test; staff: Staff; onOpen: () => void }) {
+  const cert = latestCertification(staff.id, test.id)
+  let chip: React.ReactNode
+  if (cert) {
+    const s = certStatus(cert)
+    chip =
+      s === 'valid' ? <span className="chip signed">✓ Certified</span>
+        : s === 'expiring_soon' ? <span className="chip pending">Expires {daysUntil(cert.expires_at)} d</span>
+          : <span className="chip expired">Expired</span>
+  } else {
+    const last = attemptsFor(staff.id, test.id)[0]
+    if (last && !last.passed) {
+      chip = openGrant(staff.id, test.id)
+        ? <span className="chip signed">✓ Retest approved</span>
+        : <span className="chip expired">Awaiting approval</span>
+    } else {
+      chip = <span className="chip pending">Take test</span>
+    }
+  }
+  const qCount = read.questionsFor(test.id).length
+  return (
+    <div className="tile">
+      <button className="tile-main" onClick={onOpen}>
+        <span className="kind testk"><TestIcon /></span>
+        <span className="t-title">{test.title}</span>
+        <span className="signed-ts">{qCount} Qs · pass {test.pass_mark}%</span>
+        {chip}
+      </button>
+    </div>
+  )
+}
+
+function SignOff({
+  sop,
+  staff,
+  token,
+  justSigned,
+  onSigned,
+}: {
+  sop: Sop
+  staff: Staff
+  token: string
+  justSigned: boolean
+  onSigned: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const ack = acknowledgmentFor(staff.id, sop)
+  const branch = read.branch(staff.branch_id)
+  const dept = read.department(staff.department_id)
+
+  if (ack) {
     return (
-      <Notice tone="ok">
-        You signed {sop.code} v{sop.version} on {formatDateTime(ack.signed_at)}.
-      </Notice>
+      <div className="stampbox">
+        <span className={`stamp ${justSigned ? 'animate' : ''}`}>SIGNED</span>
+        <div className="stampmeta">
+          <strong>{staff.name}</strong> — {dept?.name} · {branch?.code}
+          <br />
+          <span className="mono">{fmt(ack.signed_at)} · v{sop.version}</span>
+        </div>
+      </div>
     )
   }
 
   return (
-    <div className="stack">
-      {error && <Notice tone="bad">{error}</Notice>}
+    <>
+      <div className="who">
+        Signing as <strong>{staff.name}</strong> · {dept?.name} · {branch?.code} — signing confirms you have read this SOP.
+      </div>
       <button
-        className="btn btn--accent btn--block"
+        className="btn primary block"
         disabled={busy}
         onClick={async () => {
           setBusy(true)
-          setError(null)
           try {
             await api.signSop(token, sop.id)
+            toast(`Signed — ${sop.code} v${sop.version}`)
+            onSigned()
           } catch (e) {
-            setError(e instanceof ApiError ? e.message : 'Could not record your sign-off.')
+            toast(e instanceof ApiError ? e.message : 'Could not record your sign-off.')
           } finally {
             setBusy(false)
           }
         }}
       >
-        {busy ? <Spinner /> : `I have read and understood ${sop.code}`}
+        {busy ? <span className="spinner" /> : 'Read & understood — sign the register'}
       </button>
-      <p className="tiny" style={{ textAlign: 'center' }}>
-        Your name and the time are recorded against {sop.code} v{sop.version}.
-      </p>
-    </div>
+    </>
   )
 }
 
-/* --------------------------------------------------------------- Test tab -- */
+/* ---- test detail ---- */
 
-function TestList({
-  staff,
-  tests,
-  onOpenViewer,
-  onStart,
-}: {
-  staff: Staff
-  tests: Test[]
-  onOpenViewer: (sop: Sop) => void
-  onStart: (test: Test) => void
-}) {
-  if (tests.length === 0) {
-    return <Empty icon="📝" title="No tests assigned to you">When your manager assigns one it appears here with your attempt history.</Empty>
-  }
-  return (
-    <div className="stack">
-      {tests.map((test) => (
-        <TestCard key={test.id} staff={staff} test={test} onOpenViewer={onOpenViewer} onStart={onStart} />
-      ))}
-    </div>
-  )
-}
-
-function TestCard({
-  staff,
+function TestDetail({
   test,
-  onOpenViewer,
+  staff,
+  onBack,
+  onReviewSop,
   onStart,
 }: {
-  staff: Staff
   test: Test
-  onOpenViewer: (sop: Sop) => void
+  staff: Staff
+  onBack: () => void
+  onReviewSop: (sop: Sop, kind: 'doc' | 'video') => void
   onStart: (test: Test) => void
 }) {
-  const attempts = attemptsFor(staff.id, test.id)
   const cert = latestCertification(staff.id, test.id)
-  const status = certStatus(cert)
+  const hist = attemptsFor(staff.id, test.id)
   const permission = attemptPermission(staff.id, test.id)
-  const relatedSop = test.related_sop_id ? read.sop(test.related_sop_id) : null
+  const grant = openGrant(staff.id, test.id)
+  const rel = test.related_sop_id ? read.sop(test.related_sop_id) : null
+
+  let certLine: React.ReactNode
+  if (cert) {
+    const s = certStatus(cert)
+    certLine =
+      s === 'valid' ? (
+        <div className="stampbox">
+          <span className="stamp">CERTIFIED</span>
+          <div className="stampmeta">
+            <strong>{staff.name}</strong>
+            <br />
+            <span className="mono">valid until {fmtD(cert.expires_at)}</span>
+          </div>
+        </div>
+      ) : (
+        <div className="failbox">
+          <div className="fh">{s === 'expiring_soon' ? 'RENEWAL DUE' : 'CERTIFICATION EXPIRED'}</div>
+          <div style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
+            {s === 'expiring_soon'
+              ? `Expires in ${daysUntil(cert.expires_at)} days — retake below to renew.`
+              : `Expired ${Math.abs(daysUntil(cert.expires_at))} days ago — retake below.`}
+          </div>
+        </div>
+      )
+  } else {
+    certLine = <div className="allclear" style={{ padding: 14 }}>Not certified yet{hist.length ? ' — see your attempts below' : ''}.</div>
+  }
 
   return (
-    <div className="card">
-      <div className="spread">
-        <div style={{ minWidth: 0 }}>
-          <div className="card__title">{test.title}</div>
-          <p className="tiny" style={{ marginTop: 3 }}>
-            Pass {test.pass_mark}% · valid {test.validity_months} months
-          </p>
-        </div>
-        <CertBadge status={status} />
+    <div className="kcard">
+      <div className="kmeta">
+        <span>{test.title}</span>
+        <span className="mono">pass {test.pass_mark}% · valid {test.validity_months} mo</span>
       </div>
-
-      {needsAttention(status) && cert && (
-        <div style={{ marginTop: 11 }}>
-          <Notice tone={status === 'expired' ? 'bad' : 'warn'}>
-            {status === 'expired'
-              ? `Your certificate expired on ${formatDate(cert.expires_at)}.`
-              : `Your certificate expires on ${formatDate(cert.expires_at)}.`}{' '}
-            Renew it below.
-          </Notice>
+      {certLine}
+      {!permission.allowed && permission.reason === 'locked_after_failure' && (
+        <div className="notice" style={{ margin: '12px 0 0' }}>
+          Retest locked — only your manager can approve a retest after a fail. You'll get a notification here when it's
+          approved.
         </div>
       )}
-
-      {attempts.length > 0 && (
-        <div style={{ marginTop: 12 }}>
-          <div className="eyebrow" style={{ marginBottom: 6 }}>
-            Your attempts
-          </div>
-          <div className="stack" style={{ gap: 6 }}>
-            {attempts.map((a) => (
-              <div className="spread" key={a.id} style={{ fontSize: '0.86rem' }}>
-                <span>{formatDateTime(a.attempted_at)}</span>
-                <span className="row" style={{ gap: 8 }}>
-                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>{a.percentage}%</span>
-                  <Badge tone={a.passed ? 'ok' : 'bad'}>{a.passed ? 'Pass' : 'Fail'}</Badge>
-                </span>
-              </div>
-            ))}
+      {grant && (
+        <div className="stampbox" style={{ marginTop: 12 }}>
+          <span className="stamp">APPROVED</span>
+          <div className="stampmeta">
+            Retest approved by <strong>{grant.granted_by_name}</strong>
+            <br />
+            <span className="mono">{fmt(grant.granted_at)} · one attempt</span>
           </div>
         </div>
       )}
 
-      <div className="stack" style={{ marginTop: 14, gap: 9 }}>
-        {relatedSop && (
-          <button className="btn btn--ghost btn--block" onClick={() => onOpenViewer(relatedSop)}>
-            Review {relatedSop.code} &amp; its video
-          </button>
-        )}
+      <div className="duty-note" style={{ margin: '18px 0 4px' }}>
+        <h2 className="section" style={{ fontSize: 14.5 }}>My previous attempts</h2>
+        <span className="duty-count">{hist.length}</span>
+      </div>
+      {hist.length ? (
+        <ul className="attempts">
+          {hist.map((a: Attempt) => (
+            <li key={a.id}>
+              <span className="ts">{fmt(a.attempted_at)}</span>
+              <span className="sc">{a.score}/{a.total} · {a.percentage}%</span>
+              <span className={`pf ${a.passed ? 'p' : 'f'}`}>{a.passed ? 'PASS' : 'FAIL'}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div style={{ fontSize: 13, color: 'var(--ink-soft)', padding: '6px 0 2px' }}>No attempts yet.</div>
+      )}
 
-        {permission.allowed ? (
-          <button className="btn btn--block" onClick={() => onStart(test)}>
-            {permission.reason === 'first_attempt'
-              ? 'Start test'
-              : permission.reason === 'renewal'
-                ? 'Renew certificate'
-                : 'Start approved retest'}
-          </button>
-        ) : (
-          <Notice tone="warn">
-            {permission.reason === 'not_assigned'
-              ? 'This test is no longer assigned to you.'
-              : 'This test is locked after your last attempt. Your manager must approve a retest before you can try again — this turns a fail into a review of the SOP, not a re-guess.'}
-          </Notice>
+      <div className="backlink">
+        {rel && (
+          <>
+            <button className="btn" onClick={() => onReviewSop(rel, 'doc')}>Review SOP</button>
+            <button className="btn" onClick={() => onReviewSop(rel, 'video')}>▶ Video</button>
+          </>
         )}
+        {permission.allowed && (
+          <button className="btn primary" onClick={() => onStart(test)}>
+            {hist.length || cert ? 'Retake test' : 'Start test'}
+          </button>
+        )}
+        <button className="btn" onClick={onBack}>Back</button>
       </div>
     </div>
   )
 }
 
-/* --------------------------------------------------------------- result --- */
-
-function ResultSheet({
-  result,
-  onClose,
-  onReviewSop,
-}: {
-  result: { attempt: Attempt; certification: Certification | null; test: Test }
-  onClose: () => void
-  onReviewSop: (sop: Sop) => void
-}) {
-  const { attempt, certification, test } = result
-  const relatedSop = test.related_sop_id ? read.sop(test.related_sop_id) : null
-  const passed = attempt.passed
-
-  return (
-    <div className="sheet" onClick={onClose}>
-      <div className="sheet__panel" onClick={(e) => e.stopPropagation()} style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: '2.6rem' }} aria-hidden>
-          {passed ? '🎉' : '📋'}
-        </div>
-        <h2 style={{ marginTop: 6 }}>{passed ? 'You passed' : 'Not this time'}</h2>
-        <div className="codebox" style={{ margin: '14px 0', fontSize: '2.4rem' }}>
-          {attempt.percentage}%
-        </div>
-        <p className="muted">
-          {attempt.score} of {attempt.total} correct · pass mark {test.pass_mark}%
-        </p>
-
-        {passed && certification ? (
-          <div style={{ marginTop: 14 }}>
-            <Notice tone="ok">
-              Certificate issued, valid until {formatDate(certification.expires_at)}.
-            </Notice>
-          </div>
-        ) : (
-          <div style={{ marginTop: 14 }}>
-            <Notice tone="warn">
-              The test is now locked. Ask your manager to approve a retest — and use the chance to go back over
-              the SOP first.
-            </Notice>
-          </div>
-        )}
-
-        <div className="stack" style={{ marginTop: 16 }}>
-          {!passed && relatedSop && (
-            <button className="btn btn--ghost btn--block" onClick={() => onReviewSop(relatedSop)}>
-              Review {relatedSop.code}
-            </button>
-          )}
-          <button className="btn btn--block" onClick={onClose}>
-            Done
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
+export type { Certification }

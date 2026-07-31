@@ -3,44 +3,36 @@ import { initStore, api, read, getResumedActor } from './data/store'
 import type { Actor } from './data/store'
 import type { Staff } from './types'
 import { useStore } from './lib/useStore'
-import { Landing } from './screens/Landing'
 import { StaffLogin } from './screens/StaffLogin'
 import { StaffPortal } from './screens/StaffPortal'
 import { ManagerLogin } from './screens/ManagerLogin'
 import { ManagerPortal } from './screens/ManagerPortal'
-import { Spinner } from './components/ui'
+import { NotificationBell } from './components/NotificationBell'
+import { Toaster } from './lib/toast'
 
-type Route =
-  | { name: 'landing' }
-  | { name: 'staff-login' }
-  | { name: 'staff'; staff: Staff; token: string }
-  | { name: 'manager-login' }
-  | { name: 'manager'; actor: Actor }
-
+type Section = 'staff' | 'mgmt'
 const STAFF_TOKEN_KEY = 'hamsun-sop-portal/staff-token'
 
 export function App() {
   const [ready, setReady] = useState(false)
-  const [route, setRoute] = useState<Route>({ name: 'landing' })
+  const [section, setSection] = useState<Section>('staff')
+  const [staffSession, setStaffSession] = useState<{ staff: Staff; token: string } | null>(null)
+  const [actor, setActor] = useState<Actor | null>(null)
   useStore()
 
   useEffect(() => {
     let active = true
     initStore().then(() => {
       if (!active) return
-      // In Supabase mode, resume a still-valid manager/admin session (initStore
-      // hydrated the cache already) so a reload doesn't force a re-login.
       const resumed = getResumedActor()
       if (resumed) {
-        setRoute({ name: 'manager', actor: resumed })
-        setReady(true)
-        return
+        setActor(resumed)
+        setSection('mgmt')
       }
-      // Resume a staff shift session across a reload without a second code entry.
       const token = localStorage.getItem(STAFF_TOKEN_KEY)
       if (token) {
         const staff = api.resumeStaffSession(token)
-        if (staff) setRoute({ name: 'staff', staff, token })
+        if (staff) setStaffSession({ staff, token })
         else localStorage.removeItem(STAFF_TOKEN_KEY)
       }
       setReady(true)
@@ -50,68 +42,75 @@ export function App() {
     }
   }, [])
 
-  if (!ready) {
-    return (
-      <div className="app" style={{ display: 'grid', placeItems: 'center' }}>
-        <div className="row" style={{ color: 'var(--brand)' }}>
-          <Spinner /> <span className="muted">Loading portal…</span>
+  const mgmtLabel = actor ? (actor.kind === 'admin' ? 'Admin' : 'Manager') : 'Manager · Admin'
+
+  return (
+    <>
+      <header className="topbar">
+        <div className="topbar-in">
+          <div className="wordmark">
+            <span className="brand">HAMSUN</span>
+            <span className="app">SOP Portal</span>
+          </div>
+          <div className="seg" role="group" aria-label="View">
+            <button aria-pressed={section === 'staff'} onClick={() => setSection('staff')}>
+              Staff
+            </button>
+            <button aria-pressed={section === 'mgmt'} onClick={() => setSection('mgmt')}>
+              {mgmtLabel}
+            </button>
+          </div>
+          <span className="bell-slot">
+            {ready && section === 'staff' && staffSession && (
+              <NotificationBell staffId={staffSession.staff.id} token={staffSession.token} />
+            )}
+          </span>
         </div>
-      </div>
-    )
-  }
+      </header>
 
-  switch (route.name) {
-    case 'landing':
-      return (
-        <Landing
-          onStaff={() => setRoute({ name: 'staff-login' })}
-          onManager={() => setRoute({ name: 'manager-login' })}
-        />
-      )
+      <main className="wrap">
+        {!ready ? (
+          <p className="foot" style={{ marginTop: 60 }}>
+            Loading portal…
+          </p>
+        ) : section === 'staff' ? (
+          staffSession ? (
+            <StaffPortal
+              staff={read.staffMember(staffSession.staff.id) ?? staffSession.staff}
+              token={staffSession.token}
+              onLogout={() => {
+                api.staffLogout(staffSession.token)
+                localStorage.removeItem(STAFF_TOKEN_KEY)
+                setStaffSession(null)
+              }}
+            />
+          ) : (
+            <StaffLogin
+              onLoggedIn={(staff, token) => {
+                localStorage.setItem(STAFF_TOKEN_KEY, token)
+                setStaffSession({ staff, token })
+              }}
+            />
+          )
+        ) : actor ? (
+          <ManagerPortal
+            actor={actor}
+            onLogout={() => {
+              void api.managerLogout()
+              setActor(null)
+            }}
+          />
+        ) : (
+          <ManagerLogin onLoggedIn={(a) => setActor(a)} />
+        )}
+        <p className="foot">
+          STAFF = NAME + HASHED CODE VIA EDGE FUNCTION · MANAGERS &amp; ADMIN = SUPABASE AUTH
+          <br />
+          VIEW-ONLY ENFORCED IN GOOGLE DRIVE SHARE SETTINGS
+        </p>
+      </main>
 
-    case 'staff-login':
-      return (
-        <StaffLogin
-          onBack={() => setRoute({ name: 'landing' })}
-          onLoggedIn={(staff, token) => {
-            localStorage.setItem(STAFF_TOKEN_KEY, token)
-            setRoute({ name: 'staff', staff, token })
-          }}
-        />
-      )
-
-    case 'staff': {
-      const fresh = read.staffMember(route.staff.id) ?? route.staff
-      return (
-        <StaffPortal
-          staff={fresh}
-          token={route.token}
-          onLogout={() => {
-            api.staffLogout(route.token)
-            localStorage.removeItem(STAFF_TOKEN_KEY)
-            setRoute({ name: 'landing' })
-          }}
-        />
-      )
-    }
-
-    case 'manager-login':
-      return (
-        <ManagerLogin
-          onBack={() => setRoute({ name: 'landing' })}
-          onLoggedIn={(actor) => setRoute({ name: 'manager', actor })}
-        />
-      )
-
-    case 'manager':
-      return (
-        <ManagerPortal
-          actor={route.actor}
-          onLogout={() => {
-            void api.managerLogout()
-            setRoute({ name: 'landing' })
-          }}
-        />
-      )
-  }
+      <Toaster />
+    </>
+  )
 }

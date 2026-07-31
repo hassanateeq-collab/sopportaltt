@@ -1,0 +1,1511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hamsun SOP Portal — Prototype v10</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ground:#F2F4EF; --card:#FFFFFF;
+    --line:#E2E6DC; --line-strong:#C7CEBF;
+    --ink:#182B25; --ink-soft:#4E5D56; --ink-faint:#8A948C;
+    --pine:#1E4D3F; --pine-deep:#143528; --pine-tint:#E4EDE7;
+    --brass:#A07E2C; --brass-deep:#83671F; --brass-soft:#F5EEDB; --brass-line:#DCCB9C;
+    --pend:#8F5714; --pend-bg:#F7EAD6; --pend-line:#E6D1A8;
+    --exp:#993B2B; --exp-bg:#F6E0DA; --exp-line:#E3BBB0;
+    --focus:#2F6B57; --r:8px; --r-sm:6px;
+    --mono:'IBM Plex Mono',ui-monospace,monospace;
+    --disp:'Archivo',sans-serif;
+    --body:'Public Sans',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
+  body{font-family:var(--body);color:var(--ink);background:var(--ground);font-size:14.5px;line-height:1.5;min-height:100vh}
+  button{font:inherit;cursor:pointer;background:none;border:none;color:inherit}
+  :focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}
+  .mono{font-family:var(--mono)}
+
+  .topbar{background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:40}
+  .topbar-in{max-width:920px;margin:0 auto;padding:0 20px;height:58px;display:flex;align-items:center;gap:14px}
+  .wordmark{display:flex;align-items:baseline;gap:10px}
+  .wordmark .brand{font-family:var(--disp);font-weight:700;letter-spacing:.22em;font-size:15px;color:var(--pine-deep)}
+  .wordmark .app{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--ink-faint);text-transform:uppercase;white-space:nowrap}
+  .seg{margin-left:auto;display:flex;background:var(--ground);border:1px solid var(--line);border-radius:999px;padding:3px;gap:2px}
+  .seg button{padding:6px 13px;border-radius:999px;font-weight:600;font-size:13px;color:var(--ink-soft);white-space:nowrap}
+  .seg button[aria-pressed="true"]{background:var(--pine);color:#fff}
+
+  .wrap{max-width:920px;margin:0 auto;padding:26px 20px 80px}
+
+  .crumbs{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:20px;font-size:13px}
+  .crumbs button{font-weight:600;color:var(--pine);padding:2px 4px}
+  .crumbs .sep{color:var(--ink-faint)}
+  .crumbs .here{font-weight:600;color:var(--ink)}
+  .crumbs .who{font-family:var(--mono);font-size:12px;color:var(--brass-deep);margin-left:auto}
+
+  .lead{text-align:center;margin-bottom:24px}
+  .lead .kb{font-family:var(--mono);font-size:11px;letter-spacing:.18em;color:var(--brass-deep);text-transform:uppercase}
+  .lead h2{font-family:var(--disp);font-size:20px;font-weight:600;margin-top:4px}
+  .lead p{font-size:13px;color:var(--ink-soft);margin-top:4px}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .pick{
+    text-align:left;background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+    padding:22px 20px;transition:border-color .15s,transform .08s;display:block;width:100%;
+  }
+  .pick:hover{border-color:var(--pine)}
+  .pick:active{transform:scale(.985)}
+  .pick .code{font-family:var(--mono);font-weight:600;font-size:16px;letter-spacing:.1em;color:var(--pine-deep)}
+  .pick .name{font-family:var(--disp);font-weight:600;font-size:17px;margin-top:3px}
+  .pick .sub{font-size:12.5px;color:var(--ink-soft);margin-top:7px}
+  .pick .sub .mono{font-size:11.5px}
+  .pick.off{opacity:.55;cursor:not-allowed}
+  .pick.off:hover{border-color:var(--line)}
+
+  .tilegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(152px,1fr));gap:10px}
+  .tile{
+    background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+    display:flex;flex-direction:column;overflow:hidden;transition:border-color .15s;min-height:170px;
+  }
+  .tile:hover{border-color:var(--pine)}
+  .tile-main{
+    flex:1;padding:16px 12px 12px;display:flex;flex-direction:column;align-items:center;gap:9px;
+    text-align:center;width:100%;
+  }
+  .tile-main:active{transform:scale(.98)}
+  .tile .kind{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:var(--pine-tint);color:var(--pine)}
+  .tile .kind svg{width:21px;height:21px}
+  .tile .kind.testk{background:var(--brass-soft);color:var(--brass-deep)}
+  .tile .t-title{font-weight:600;font-size:13.5px;line-height:1.35;flex:1}
+  .tile-video{
+    width:100%;border-top:1px solid var(--line);padding:9px 8px;font-size:12.5px;font-weight:600;
+    color:var(--brass-deep);display:flex;align-items:center;justify-content:center;gap:6px;background:var(--brass-soft);
+  }
+  .tile-video.none{color:var(--ink-faint);background:var(--ground)}
+  .tile-video:hover{filter:brightness(.97)}
+  .ver{font-family:var(--mono);font-size:11px;color:var(--ink-faint);border:1px solid var(--line);border-radius:4px;padding:1px 6px;background:var(--ground)}
+  .livechip{font-family:var(--mono);font-size:10.5px;color:var(--pine);border:1px solid var(--pine-tint);background:var(--pine-tint);border-radius:4px;padding:1px 6px}
+  .vidchip{font-family:var(--mono);font-size:10.5px;color:var(--brass-deep);border:1px solid var(--brass-line);background:var(--brass-soft);border-radius:4px;padding:1px 6px}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;border-radius:999px;padding:4px 11px}
+  .chip.signed{background:var(--pine-tint);color:var(--pine)}
+  .chip.pending{background:var(--pend-bg);color:var(--pend);border:1px solid var(--pend-line)}
+  .chip.expired{background:var(--exp-bg);color:var(--exp);border:1px solid var(--exp-line)}
+  .signed-ts{font-family:var(--mono);font-size:10px;color:var(--ink-faint)}
+
+  .duty-note{display:flex;gap:10px;align-items:baseline;margin:26px 0 12px}
+  .duty-note:first-of-type{margin-top:0}
+  h2.section{font-family:var(--disp);font-weight:600;font-size:16.5px;letter-spacing:-.01em}
+  .duty-count{font-family:var(--mono);font-size:12px;color:var(--ink-faint)}
+  .allclear{background:var(--card);border:1px dashed var(--line-strong);border-radius:var(--r);padding:22px;text-align:center;color:var(--ink-soft);font-size:13.5px}
+  .notice{
+    display:flex;gap:10px;align-items:flex-start;background:var(--pend-bg);border:1px solid var(--pend-line);
+    border-radius:var(--r);padding:12px 15px;font-size:13px;color:var(--pend);font-weight:500;margin-bottom:18px;
+  }
+
+  .kcard{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px;max-width:560px;margin:0 auto}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:6px}
+  .field input,.field select{
+    width:100%;font:inherit;padding:10px 12px;border:1px solid var(--line-strong);border-radius:var(--r-sm);
+    background:var(--card);color:var(--ink);
+  }
+  .field input:focus,.field select:focus{outline:2px solid var(--focus);outline-offset:1px}
+  .fieldrow{display:flex;gap:12px}
+  .fieldrow .field{flex:1}
+  .err{font-size:12.5px;font-weight:600;color:var(--exp);margin:-4px 0 12px}
+  .demo-hint{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);margin-top:8px;line-height:1.6}
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px;border-radius:var(--r-sm);
+    padding:10px 16px;border:1px solid var(--line-strong);background:var(--card);color:var(--ink);
+  }
+  .btn:hover{border-color:var(--pine)}
+  .btn.primary{background:var(--pine);border-color:var(--pine);color:#fff}
+  .btn.primary:hover{background:var(--pine-deep)}
+  .btn.block{width:100%;justify-content:center;padding:13px 16px;font-size:14px}
+  .btn.sm{padding:5px 11px;font-size:12px}
+
+  .attempts{list-style:none;margin:6px 0 2px}
+  .attempts li{display:grid;grid-template-columns:120px 1fr auto;gap:10px;padding:8px 2px;border-bottom:1px dotted var(--line-strong);font-size:13px;align-items:baseline}
+  .attempts li:last-child{border-bottom:none}
+  .attempts .ts{font-family:var(--mono);font-size:11px;color:var(--ink-faint);white-space:nowrap}
+  .attempts .sc{font-family:var(--mono);font-size:12.5px}
+  .pf{font-size:11px;font-weight:600;border-radius:999px;padding:2px 9px}
+  .pf.p{background:var(--pine-tint);color:var(--pine)}
+  .pf.f{background:var(--exp-bg);color:var(--exp)}
+
+  /* document / video viewer */
+  .viewer{position:fixed;inset:0;z-index:80;background:var(--ground);display:none;flex-direction:column}
+  .viewer.open{display:flex}
+  .v-head{background:var(--card);border-bottom:1px solid var(--line);padding:12px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .v-title{font-family:var(--disp);font-weight:600;font-size:15px;flex:1;min-width:150px}
+  .v-title .ver{margin-left:6px}
+  .vseg{display:flex;background:var(--ground);border:1px solid var(--line);border-radius:999px;padding:3px;gap:2px}
+  .vseg button{padding:4px 13px;border-radius:999px;font-weight:600;font-size:12.5px;color:var(--ink-soft)}
+  .vseg button[aria-pressed="true"]{background:var(--pine);color:#fff}
+  .vo{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;color:var(--pend);border:1px solid var(--pend-line);background:var(--pend-bg);border-radius:4px;padding:2px 8px;white-space:nowrap}
+  .v-close{flex:none;width:32px;height:32px;border-radius:6px;display:grid;place-items:center;color:var(--ink-soft);border:1px solid var(--line);background:var(--card)}
+  .v-doc{flex:1;position:relative;overflow:auto;padding:16px}
+  .v-doc iframe{width:100%;height:100%;min-height:60vh;border:1px solid var(--line);border-radius:var(--r);background:#fff;display:block}
+  .v-frame-wrap{position:relative;height:100%}
+  .noext{position:absolute;top:1px;right:1px;width:58px;height:52px;border-radius:0 var(--r) 0 0}
+  .paper{max-width:680px;margin:0 auto;background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:38px 42px;position:relative;overflow:hidden}
+  .paper .wm{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;font-family:var(--mono);font-weight:600;font-size:52px;letter-spacing:.3em;color:var(--ink);opacity:.045;transform:rotate(-24deg);white-space:nowrap}
+  .paper .ph-brand{font-family:var(--mono);font-size:10.5px;letter-spacing:.2em;color:var(--brass-deep);text-transform:uppercase}
+  .paper h1{font-family:var(--disp);font-size:22px;font-weight:700;margin:6px 0 2px}
+  .paper .ph-meta{font-family:var(--mono);font-size:11px;color:var(--ink-faint);margin-bottom:22px}
+  .paper h2{font-family:var(--disp);font-size:14.5px;font-weight:600;margin:20px 0 6px}
+  .paper p{font-size:13.5px;color:var(--ink-soft);margin-bottom:8px}
+  .paper .ph-foot{margin-top:26px;padding-top:12px;border-top:1px dotted var(--line-strong);font-family:var(--mono);font-size:10.5px;color:var(--ink-faint)}
+  .playph{display:flex;flex-direction:column;align-items:center;gap:14px;padding:34px 0 20px}
+  .playph .pcirc{width:74px;height:74px;border-radius:50%;border:2px solid var(--brass);display:grid;place-items:center;color:var(--brass-deep);font-size:26px;background:var(--brass-soft)}
+  .v-foot{background:var(--card);border-top:1px solid var(--line);padding:14px 18px}
+  .v-foot-in{max-width:680px;margin:0 auto}
+  .v-foot .who{font-size:12px;color:var(--ink-faint);margin-bottom:10px}
+  .v-foot .who strong{color:var(--ink)}
+  .linkedit{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+  .linkedit input{flex:1;min-width:180px;font:inherit;font-size:12.5px;padding:7px 10px;border:1px solid var(--line-strong);border-radius:var(--r-sm)}
+  .stampbox{border:1.5px solid var(--brass-line);background:var(--brass-soft);border-radius:var(--r);padding:14px 18px;display:flex;align-items:center;gap:16px}
+  .stamp{flex:none;font-family:var(--mono);font-weight:600;font-size:13px;letter-spacing:.2em;color:var(--brass-deep);border:2px solid var(--brass);border-radius:6px;padding:7px 12px;transform:rotate(-4deg);position:relative}
+  .stamp::after{content:"";position:absolute;inset:2.5px;border:1px solid var(--brass);border-radius:3px;opacity:.55}
+  .stamp.animate{animation:stampin .26s cubic-bezier(.2,1.4,.4,1)}
+  @keyframes stampin{0%{transform:rotate(-14deg) scale(1.7);opacity:0}100%{transform:rotate(-4deg) scale(1);opacity:1}}
+  @media (prefers-reduced-motion:reduce){.stamp.animate{animation:none}}
+  .stampmeta{font-size:12.5px;color:var(--ink-soft);line-height:1.5}
+  .stampmeta .mono{font-size:11.5px;color:var(--brass-deep)}
+  .failbox{border:1.5px solid var(--pend-line);background:var(--pend-bg);border-radius:var(--r);padding:18px}
+  .failbox .fh{font-family:var(--mono);font-weight:600;letter-spacing:.14em;color:var(--pend);font-size:12px;margin-bottom:6px}
+
+  .kmeta{font-family:var(--mono);font-size:12px;color:var(--ink-soft);margin-bottom:14px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .kbar{height:3px;background:var(--line);border-radius:2px;margin:0 0 18px;overflow:hidden}
+  .kbar i{display:block;height:100%;background:var(--brass)}
+  .qtext{font-family:var(--disp);font-size:16.5px;font-weight:600;line-height:1.45;margin-bottom:16px}
+  .opt{
+    width:100%;text-align:left;border:1px solid var(--line-strong);border-radius:var(--r-sm);
+    padding:14px 15px;margin-bottom:9px;background:var(--card);font-size:14px;font-weight:500;transition:border-color .12s,background .12s;
+  }
+  .opt:hover{border-color:var(--pine);background:var(--pine-tint)}
+  .score{font-family:var(--mono);font-size:14px;margin:12px 0 4px}
+  .backlink{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap}
+
+  .filters{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px}
+  .filters .field{margin:0;flex:1;min-width:170px}
+  .board{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:18px}
+  .board-head{padding:13px 18px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:10px}
+  .board-head h3{font-family:var(--disp);font-size:15px;font-weight:600}
+  .board-head .hint{font-size:12px;color:var(--ink-faint);margin-left:auto;text-align:right}
+  .brow{padding:13px 18px;border-bottom:1px solid var(--line)}
+  .brow:last-child{border-bottom:none}
+  .brow-top{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .brow-title{font-weight:600;font-size:14px;flex:1;min-width:160px}
+  .brow-frac{font-family:var(--mono);font-size:12.5px}
+  .brow-frac.full{color:var(--pine)}
+  .brow-frac.gap{color:var(--pend)}
+  .names{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .nm{font-size:11.5px;font-weight:600;border-radius:999px;padding:2px 10px;border:1px solid var(--line);background:var(--ground);color:var(--ink-soft)}
+  .nm.ok{background:var(--pine-tint);border-color:var(--pine-tint);color:var(--pine)}
+  .nm.warn{background:var(--pend-bg);border-color:var(--pend-line);color:var(--pend)}
+  .nm.bad{background:var(--exp-bg);border-color:var(--exp-line);color:var(--exp)}
+  .empty-row{padding:16px 18px;font-size:13.5px;color:var(--ink-soft)}
+  .card-body{padding:16px 18px}
+  .radio-row{display:flex;gap:14px;flex-wrap:wrap}
+  .radio-row label,.asgn label{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;font-weight:500;text-transform:none;letter-spacing:0;margin:0}
+  input[type=checkbox],input[type=radio]{accent-color:var(--pine);width:15px;height:15px}
+  details.inline{margin-top:10px;border-top:1px dotted var(--line-strong);padding-top:10px}
+  details.inline summary{list-style:none;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--pine)}
+  details.inline summary::-webkit-details-marker{display:none}
+  .asgn{display:flex;gap:12px;flex-wrap:wrap;margin:10px 0}
+  .qb-item{display:flex;gap:10px;align-items:baseline;padding:8px 2px;border-bottom:1px dotted var(--line-strong);font-size:13px}
+  .qb-item:last-child{border-bottom:none}
+  .qb-item .n{font-family:var(--mono);font-size:11px;color:var(--ink-faint);flex:none}
+  .qb-item .q{flex:1}
+  .qb-item button{color:var(--exp);font-weight:600;font-size:12px}
+
+  .genblock{border:1.5px dashed var(--brass-line);background:var(--brass-soft);border-radius:var(--r);padding:14px;margin-bottom:16px}
+  .genblock .gh{font-family:var(--disp);font-weight:600;font-size:13.5px;color:var(--brass-deep);margin-bottom:4px}
+  .genblock .gs{font-size:12px;color:var(--ink-soft);margin-bottom:12px}
+  .field textarea{width:100%;font:inherit;font-size:13.5px;padding:10px 12px;border:1px solid var(--line-strong);border-radius:var(--r-sm);min-height:110px;resize:vertical;background:var(--card);color:var(--ink)}
+  .field textarea:focus{outline:2px solid var(--focus);outline-offset:1px}
+  .field input[type=file]{padding:9px;border:1.5px dashed var(--line-strong);background:var(--ground);border-radius:var(--r-sm);width:100%;font-size:13px}
+  .pdfchip{display:flex;gap:12px;align-items:center;flex-wrap:wrap;border:1px solid var(--brass-line);background:var(--card);border-radius:var(--r-sm);padding:9px 12px;font-size:12.5px}
+  .spk{
+    width:34px;height:34px;border-radius:50%;border:1.5px solid var(--brass);color:var(--brass-deep);
+    background:var(--brass-soft);display:grid;place-items:center;flex:none;
+  }
+  .spk:hover{background:var(--brass-line)}
+  .spk svg{width:17px;height:17px}
+  .qtext[dir=rtl],.opt[dir=rtl]{direction:rtl;text-align:right;line-height:1.9;font-size:15.5px}
+
+  details.board summary{
+    list-style:none;padding:13px 18px;display:flex;align-items:center;gap:10px;cursor:pointer;
+    font-family:var(--disp);font-size:15px;font-weight:600;
+  }
+  details.board summary::-webkit-details-marker{display:none}
+  details.board summary::after{content:"›";margin-left:auto;color:var(--ink-faint);transform:rotate(90deg);transition:transform .15s;font-size:16px}
+  details.board[open] summary::after{transform:rotate(-90deg)}
+  details.board[open] summary{border-bottom:1px solid var(--line)}
+  details.board summary .hint{font-size:12px;color:var(--ink-faint);font-family:var(--body);font-weight:500;margin-left:auto;padding-right:8px}
+
+  #bell-slot{position:relative}
+  .bell{position:relative;width:34px;height:34px;border:1px solid var(--line);border-radius:8px;display:grid;place-items:center;color:var(--ink-soft);background:var(--card)}
+  .bell:hover{border-color:var(--pine);color:var(--pine)}
+  .bell svg{width:17px;height:17px}
+  .bell .badge{position:absolute;top:-6px;right:-6px;background:var(--exp);color:#fff;font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:999px;display:grid;place-items:center;padding:0 4px;font-family:var(--mono)}
+  .notifpanel{position:absolute;top:42px;right:0;width:min(330px,88vw);background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 8px 24px rgba(24,43,37,.14);z-index:60;overflow:hidden}
+  .notifpanel .np-head{padding:10px 14px;border-bottom:1px solid var(--line);font-family:var(--disp);font-weight:600;font-size:13.5px}
+  .notifpanel ul{list-style:none;max-height:300px;overflow:auto}
+  .notifpanel li{padding:10px 14px;border-bottom:1px dotted var(--line-strong);font-size:12.5px;line-height:1.45}
+  .notifpanel li:last-child{border-bottom:none}
+  .notifpanel li.unread{border-left:3px solid var(--brass);background:var(--brass-soft)}
+  .notifpanel .nts{font-family:var(--mono);font-size:10px;color:var(--ink-faint);display:block;margin-top:2px}
+  .notifempty{padding:16px 14px;font-size:12.5px;color:var(--ink-soft)}
+
+  .toast{
+    position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(12px);
+    background:var(--pine-deep);color:#fff;font-size:13.5px;font-weight:500;padding:11px 18px;border-radius:999px;
+    opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:90;max-width:90vw;text-align:center;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .foot{margin-top:34px;font-family:var(--mono);font-size:11px;color:var(--ink-faint);text-align:center;letter-spacing:.04em;line-height:1.8}
+
+  @media (max-width:640px){
+    .grid2{grid-template-columns:1fr}
+    .tilegrid{grid-template-columns:1fr 1fr}
+    .paper{padding:26px 20px}
+    .seg button{padding:6px 9px;font-size:12px}
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-in">
+    <div class="wordmark"><span class="brand">HAMSUN</span><span class="app">SOP Portal</span></div>
+    <div class="seg" role="group" aria-label="View">
+      <button id="tab-staff" aria-pressed="true" onclick="setRole('staff')">Staff</button>
+      <button id="tab-manager" aria-pressed="false" onclick="setRole('manager')">Manager</button>
+      <button id="tab-admin" aria-pressed="false" onclick="setRole('admin')">Admin</button>
+    </div>
+    <span id="bell-slot"></span>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="view"></div>
+  <p class="foot">PROTOTYPE · IN-MEMORY DATA · RESETS ON REFRESH<br>PRODUCTION: STAFF = NAME + HASHED CODE VIA EDGE FUNCTION · MANAGERS &amp; ADMIN = SUPABASE AUTH · VIEW-ONLY ENFORCED IN DRIVE SHARE SETTINGS</p>
+</main>
+
+<div class="viewer" id="viewer" role="dialog" aria-label="Document viewer"></div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+/* ================= data ================= */
+let BRANCHES=[
+  {code:'FSL',name:'Shahrah-e-Faisal'},
+  {code:'EXT',name:'Extension'},
+  {code:'CLF',name:'Clifton'},
+  {code:'DHA',name:'DHA · pre-opening'}
+];
+let DEPTS=['Front Desk','Housekeeping','Kitchen','Maintenance','Quality & Compliance'];
+
+/* every SOP = code + document + related training video · scope:null = all branches */
+let SOPS=[
+ {id:1,code:'FD-001',title:'Check-in & Guest Registration',dept:'Front Desk',ver:'2.1',scope:null,link:'',video:'',updated:'12 Jun 2026',
+  summary:'ID verification, registration card, WhatsApp group creation on arrival, and folio opening for walk-ins and OTA bookings.'},
+ {id:2,code:'FD-002',title:'Cash Handling & Shift Close',dept:'Front Desk',ver:'1.3',scope:null,link:'',video:'',updated:'02 Jul 2026',
+  summary:'Float count at handover, receipt sequencing, deposit drop, and the shift-close reconciliation against PMS payments.'},
+ {id:3,code:'FD-003',title:'Night Audit Procedure',dept:'Front Desk',ver:'1.0',scope:null,link:'',video:'',updated:'18 May 2026',
+  summary:'End-of-day audit walkthrough: pending charges, no-show handling, date roll, and the morning summary to management.'},
+ {id:4,code:'HK-001',title:'Hamsun Room Product Standard',dept:'Housekeeping',ver:'1.0',scope:null,link:'',video:'',updated:'30 Jun 2026',
+  summary:'The room standard: linen spec, amenity placement, minibar set, lighting preset, and photographic reference per category.'},
+ {id:5,code:'HK-002',title:'Room Inspection & Turnover',dept:'Housekeeping',ver:'1.2',scope:null,link:'',video:'',updated:'08 Jul 2026',
+  summary:'Supervisor inspection sequence after turnover — checklist order, common misses, and release criteria.'},
+ {id:6,code:'HK-003',title:'Sea-Facing Room Setup',dept:'Housekeeping',ver:'1.0',scope:['CLF'],link:'',video:'',updated:'10 Jul 2026',
+  summary:'Clifton-only: curtain and balcony presentation for sea-facing rooms, salt-air glass cleaning cycle, and outdoor furniture check.'},
+ {id:7,code:'HK-004',title:'Pre-Opening Room Snag Reporting',dept:'Housekeeping',ver:'1.0',scope:['DHA'],link:'',video:'',updated:'15 Jul 2026',
+  summary:'DHA fit-out phase: how to log snags room by room with photos so defects are cleared before soft launch.'},
+ {id:8,code:'KT-001',title:'CORTI Food Safety & Hygiene',dept:'Kitchen',ver:'1.4',scope:['FSL'],link:'',video:'',updated:'05 Jul 2026',
+  summary:'CORTI café HACCP basics: temperature logs, storage zoning, allergen labelling, and daily close-down cleaning.'},
+ {id:9,code:'KT-002',title:'Breakfast Service Standard',dept:'Kitchen',ver:'1.0',scope:['FSL','EXT','CLF'],link:'',video:'',updated:'20 Jun 2026',
+  summary:'Buffet setup timing, live-station rules, replenishment thresholds, and clear-down.'},
+ {id:10,code:'MT-001',title:'Generator Changeover & Fuel Log',dept:'Maintenance',ver:'1.1',scope:null,link:'',video:'',updated:'14 Jun 2026',
+  summary:'Load-shedding changeover steps, warm-up and cool-down timing, fuel log entries, and fault escalation contacts.'},
+ {id:11,code:'QC-001',title:'Incident Reporting & Escalation',dept:'Quality & Compliance',ver:'1.0',scope:null,link:'',video:'',updated:'01 Jul 2026',
+  summary:'What counts as an incident, the reporting window, evidence capture, and the escalation path.'}
+];
+
+let TESTS=[
+ {id:1,title:'Cash Handling & Shift Close',dept:'Front Desk',scope:null,sopId:2,passPct:80,validMonths:12,
+  langs:['en','ur','ps'], /* ur/ps seeded as draft translations — managers review, English is the record copy */
+  questions:[
+   {q:'A guest pays Rs 12,000 cash at 11:40 pm, twenty minutes before shift close. What happens first?',
+    opts:['Hold it in the drawer for the morning shift','Post it to the folio and print the receipt in sequence','Send a photo to the manager on WhatsApp','Add it to tomorrow\u2019s float'],ans:1,
+    tr:{ur:{q:'مہمان رات 11:40 بجے، شفٹ بند ہونے سے بیس منٹ پہلے، 12,000 روپے نقد دیتا ہے۔ سب سے پہلے کیا کریں گے؟',
+            opts:['رقم دراز میں رکھ کر صبح کی شفٹ کے لیے چھوڑ دیں','فولیو میں درج کریں اور ترتیب سے رسید پرنٹ کریں','مینیجر کو واٹس ایپ پر تصویر بھیج دیں','کل کے فلوٹ میں شامل کر دیں']},
+        ps:{q:'میلمه د شپې 11:40 بجې، د شفټ له تړل کېدو شل دقیقې مخکې، 12,000 روپۍ نغدې ورکوي. لومړی به څه کوئ؟',
+            opts:['پیسې په دراز کې د سهار شفټ لپاره پرېږدئ','په فولیو کې یې ثبت کړئ او رسید په ترتیب چاپ کړئ','مینیجر ته په واټس اپ کې عکس ولېږئ','د سبا په فلوټ کې یې شامل کړئ']}}},
+   {q:'Your closing float count is Rs 500 short of the PMS figure. The SOP requires you to:',
+    opts:['Cover it from tips and move on','Adjust the PMS payment entry to match the cash','Record the variance, recount with the incoming shift, and flag it on the shift-close form','Wait and see if tomorrow balances'],ans:2,
+    tr:{ur:{q:'شفٹ بند کرتے وقت فلوٹ PMS کے حساب سے 500 روپے کم ہے۔ SOP کیا کہتا ہے؟',
+            opts:['ٹپ سے پوری کر کے آگے بڑھ جائیں','PMS کی پیمنٹ انٹری بدل کر نقدی سے ملا دیں','فرق درج کریں، آنے والی شفٹ کے ساتھ دوبارہ گنیں، اور شفٹ کلوز فارم پر نشان لگائیں','انتظار کریں، شاید کل حساب برابر ہو جائے']},
+        ps:{q:'د شفټ تړلو پر مهال فلوټ د PMS له حساب څخه 500 روپۍ کم دی. SOP څه وايي؟',
+            opts:['له ټِپ څخه یې پوره کړئ او مخکې لاړ شئ','د PMS د تادیې اندراج بدل کړئ چې له نغدو سره برابر شي','توپیر ثبت کړئ، له راتلونکي شفټ سره بیا وشمېرئ، او د شفټ کلوز فارم کې یې په نښه کړئ','صبر وکړئ، ښايي سبا حساب برابر شي']}}},
+   {q:'Who must be present for the deposit drop?',
+    opts:['Any one staff member','The cashier alone, after hours','Two people — the closing cashier plus the incoming shift or supervisor','The branch manager only'],ans:2,
+    tr:{ur:{q:'ڈپازٹ ڈراپ کے وقت کون موجود ہونا ضروری ہے؟',
+            opts:['کوئی بھی ایک ملازم','صرف کیشیئر، اوقات کے بعد','دو افراد — بند کرنے والا کیشیئر اور آنے والی شفٹ یا سپروائزر','صرف برانچ مینیجر']},
+        ps:{q:'د ډیپازټ اچولو پر مهال باید څوک حاضر وي؟',
+            opts:['هر یو کارکوونکی','یوازې کیشیئر، له وخت وروسته','دوه کسان — تړونکی کیشیئر او راتلونکی شفټ یا سپروایزر','یوازې د څانګې مینیجر']}}},
+   {q:'A receipt is spoiled while printing. The correct action is:',
+    opts:['Throw it away','Mark it VOID, keep it in sequence, note it on the shift report','Reprint using the same number','Hand it to the guest anyway'],ans:1,
+    tr:{ur:{q:'پرنٹ کے دوران رسید خراب ہو گئی۔ درست عمل کیا ہے؟',
+            opts:['پھینک دیں','VOID لکھ کر ترتیب میں رکھیں اور شفٹ رپورٹ میں درج کریں','اسی نمبر سے دوبارہ پرنٹ کریں','ویسے ہی مہمان کو دے دیں']},
+        ps:{q:'د چاپ پر مهال رسید خراب شو. سمه لاره کومه ده؟',
+            opts:['ویې غورځوئ','VOID ولیکئ، په ترتیب کې یې وساتئ او د شفټ راپور کې یې ثبت کړئ','په همدې نمبر بیا چاپ کړئ','همداسې میلمه ته یې ورکړئ']}}},
+   {q:'Shift-close reconciliation compares the cash count against:',
+    opts:['Yesterday\u2019s total','The booking calendar','PMS payments recorded for the shift','The OTA dashboard'],ans:2,
+    tr:{ur:{q:'شفٹ کلوز کی ریکنسیلیشن نقدی کی گنتی کا موازنہ کس سے کرتی ہے؟',
+            opts:['کل کے ٹوٹل سے','بکنگ کیلنڈر سے','اس شفٹ میں PMS میں درج پیمنٹس سے','OTA ڈیش بورڈ سے']},
+        ps:{q:'د شفټ کلوز حساب کتاب د نغدو شمېرنه له څه سره پرتله کوي؟',
+            opts:['د پرون له مجموعې سره','د بکینګ له کلنډر سره','په دې شفټ کې د PMS له ثبت شویو تادیاتو سره','د OTA له ډشبورډ سره']}}}
+  ]},
+ {id:2,title:'CORTI Food Safety & Hygiene',dept:'Kitchen',scope:['FSL'],sopId:8,passPct:80,validMonths:12,
+  questions:[
+   {q:'Raw chicken is delivered during breakfast service. Where does it go?',
+    opts:['Top shelf of the fridge','Bottom shelf, below ready-to-eat items','Next to the milk','On the counter until service ends'],ans:1},
+   {q:'The milk fridge reads 9\u00B0C on the morning log. The SOP requires you to:',
+    opts:['Log it and continue','Move the stock, flag the unit, and inform the supervisor before service','Lower the thermostat and recheck tomorrow','Do nothing if the milk smells fine'],ans:1},
+   {q:'A guest asks whether the brownie contains nuts and you are not sure. You should:',
+    opts:['Say no, to be helpful','Check the allergen label or recipe card before answering','Guess from the taste','Offer the guest a small piece to try'],ans:1},
+   {q:'Close-down cleaning of the espresso machine happens:',
+    opts:['Weekly','Only when it looks dirty','Every day at close, per the checklist','Monthly, by maintenance'],ans:2}
+  ]},
+ {id:3,title:'Hamsun Room Product Standard',dept:'Housekeeping',scope:null,sopId:4,passPct:75,validMonths:12,
+  questions:[
+   {q:'Amenity placement in a room is defined by:',
+    opts:['Whatever looks neat','The photographic reference for that room category','The attendant\u2019s own preference','Guest requests only'],ans:1},
+   {q:'A pillowcase is clean but has a small tear. The SOP says:',
+    opts:['Use it — it is clean','Reject it to the worn-stock pile and draw fresh linen','Turn the tear to the back','Keep it for staff rooms'],ans:1},
+   {q:'Before a room is released to front desk, it must be:',
+    opts:['Sprayed with air freshener','Inspected against the checklist and signed off by the supervisor','Photographed','Left open to air out'],ans:1},
+   {q:'The minibar set is restocked:',
+    opts:['Only when empty','To the standard list at every turnover','Once a week','Only on guest request'],ans:1}
+  ]}
+];
+
+let STAFF=[
+ {id:1, name:'Bilal',    dept:'Front Desk',   branch:'FSL', code:'4821'},
+ {id:2, name:'Kiran',    dept:'Front Desk',   branch:'FSL', code:'7302'},
+ {id:3, name:'Hira',     dept:'Front Desk',   branch:'EXT', code:'5610'},
+ {id:4, name:'Sana',     dept:'Front Desk',   branch:'CLF', code:'2947'},
+ {id:5, name:'Omar',     dept:'Front Desk',   branch:'CLF', code:'8153'},
+ {id:6, name:'Mahnoor',  dept:'Front Desk',   branch:'DHA', code:'6428'},
+ {id:7, name:'Rubina',   dept:'Housekeeping', branch:'FSL', code:'3765'},
+ {id:8, name:'Naveed',   dept:'Housekeeping', branch:'FSL', code:'9081'},
+ {id:9, name:'Shazia',   dept:'Housekeeping', branch:'EXT', code:'1594'},
+ {id:10,name:'Ayesha',   dept:'Housekeeping', branch:'CLF', code:'7246'},
+ {id:11,name:'Bushra',   dept:'Housekeeping', branch:'CLF', code:'4380'},
+ {id:12,name:'Tariq',    dept:'Housekeeping', branch:'DHA', code:'8517'},
+ {id:13,name:'Farhan',   dept:'Kitchen',      branch:'FSL', code:'6093'},
+ {id:14,name:'Junaid',   dept:'Kitchen',      branch:'FSL', code:'2758'},
+ {id:15,name:'Imran',    dept:'Kitchen',      branch:'EXT', code:'9432'},
+ {id:16,name:'Danish',   dept:'Kitchen',      branch:'CLF', code:'5871'},
+ {id:17,name:'Aslam',    dept:'Maintenance',  branch:'FSL', code:'3149'},
+ {id:18,name:'Rafiq',    dept:'Maintenance',  branch:'EXT', code:'7625'},
+ {id:19,name:'Yousuf',   dept:'Maintenance',  branch:'CLF', code:'1983'},
+ {id:20,name:'Altamash', dept:'Quality & Compliance', branch:'FSL', code:'8460'}
+];
+
+/* department managers — each owns ONE department at ONE branch */
+let MANAGERS=[
+ {id:1,name:'Salman',  dept:'Kitchen',      branch:'FSL',code:'5127'},
+ {id:2,name:'Kamran',  dept:'Front Desk',   branch:'CLF',code:'3906'},
+ {id:3,name:'Rukhsana',dept:'Housekeeping', branch:'CLF',code:'8241'},
+ {id:4,name:'Zoya',    dept:'Housekeeping', branch:'DHA',code:'6752'}
+];
+
+let ASSIGNS=[
+ {testId:1,staffId:1},{testId:1,staffId:2},{testId:1,staffId:3},{testId:1,staffId:4},{testId:1,staffId:5},
+ {testId:2,staffId:13},{testId:2,staffId:14},
+ {testId:3,staffId:7},{testId:3,staffId:8},{testId:3,staffId:9},{testId:3,staffId:10},{testId:3,staffId:11}
+];
+
+const PENDING=new Set(['4-2','4-3','5-2','3-3','6-2','6-3','12-4','12-7','10-6','11-5','16-9','13-9','14-8']);
+let ACKS=[];
+(function seed(){
+  const base=new Date('2026-06-01T09:00:00');
+  for(const st of STAFF){
+    for(const s of SOPS){
+      if(!requires(st,s)) continue;
+      if(PENDING.has(st.id+'-'+s.id)) continue;
+      const t=new Date(base);
+      t.setDate(t.getDate()+((st.id*3+s.id*5)%45));
+      t.setHours(9+((st.id+s.id)%9),(st.id*7+s.id*11)%60);
+      ACKS.push({staffId:st.id,sopId:s.id,ts:t});
+    }
+  }
+})();
+
+let ATTEMPTS=[
+ {staffId:1, testId:1,score:5,total:5,passed:true, ts:new Date('2026-02-15T11:20:00')},
+ {staffId:2, testId:1,score:4,total:5,passed:true, ts:new Date('2026-02-15T11:40:00')},
+ {staffId:4, testId:1,score:3,total:5,passed:false,ts:new Date('2026-06-12T16:05:00')},
+ {staffId:13,testId:2,score:4,total:4,passed:true, ts:new Date('2025-08-10T10:15:00')},
+ {staffId:14,testId:2,score:4,total:4,passed:true, ts:new Date('2025-06-05T10:30:00')},
+ {staffId:7, testId:3,score:4,total:4,passed:true, ts:new Date('2026-03-02T09:50:00')},
+ {staffId:10,testId:3,score:2,total:4,passed:false,ts:new Date('2026-06-20T15:10:00')}
+];
+let LOCKS=new Set();
+/* retest grants — only a manager (or admin) can allow a retest after a fail */
+let RID=0;
+let RETESTS=[];   /* {id,testId,staffId,by,ts,used} */
+/* staff notifications */
+let NID=0;
+let NOTIFS=[
+ {id:++NID,staffId:4,text:'SOP FD-002 — Cash Handling & Shift Close updated to v1.3. Read & sign.',ts:new Date('2026-07-02T10:00:00'),read:false}
+];
+function notify(staffId,text){NOTIFS.push({id:++NID,staffId,text,ts:new Date(),read:false})}
+function unreadOf(staffId){return NOTIFS.filter(n=>n.staffId===staffId&&!n.read)}
+let CERTS=[
+ {staffId:13,type:'CORTI Food Safety & Hygiene', issued:new Date('2025-08-10'),expires:new Date('2026-08-10')},
+ {staffId:14,type:'CORTI Food Safety & Hygiene', issued:new Date('2025-06-05'),expires:new Date('2026-06-05')},
+ {staffId:1, type:'Cash Handling & Shift Close', issued:new Date('2026-02-15'),expires:new Date('2027-02-15')},
+ {staffId:2, type:'Cash Handling & Shift Close', issued:new Date('2026-02-15'),expires:new Date('2027-02-15')},
+ {staffId:7, type:'Hamsun Room Product Standard',issued:new Date('2026-03-02'),expires:new Date('2027-03-02')}
+];
+
+/* ================= derived logic ================= */
+function inScope(x,branch){return !x.scope||x.scope.includes(branch)}
+function requires(st,sop){return st.dept===sop.dept&&inScope(sop,st.branch)}
+function ackOf(staffId,sopId){return ACKS.find(a=>a.staffId===staffId&&a.sopId===sopId)}
+function sopsFor(dept,branch){return SOPS.filter(s=>s.dept===dept&&inScope(s,branch))}
+function testsFor(dept,branch){return TESTS.filter(t=>t.dept===dept&&inScope(t,branch))}
+function staffFor(dept,branch){return STAFF.filter(x=>x.dept===dept&&x.branch===branch)}
+function isAssigned(testId,staffId){return ASSIGNS.some(a=>a.testId===testId&&a.staffId===staffId)}
+function myTests(st){return TESTS.filter(t=>t.dept===st.dept&&inScope(t,st.branch)&&isAssigned(t.id,st.id))}
+function attemptsOf(staffId,testId){return ATTEMPTS.filter(a=>a.staffId===staffId&&a.testId===testId).sort((a,b)=>b.ts-a.ts)}
+function certOf(staffId,test){return CERTS.find(c=>c.staffId===staffId&&c.type===test.title)}
+function certStatus(c){const d=Math.ceil((c.expires-Date.now())/86400000);return d<0?'expired':d<=30?'expiring':'valid'}
+function certDays(c){return Math.ceil((c.expires-Date.now())/86400000)}
+
+/* SOP codes — document control numbering per department */
+const DEPT_ABBR={'Front Desk':'FD','Housekeeping':'HK','Kitchen':'KT','Maintenance':'MT','Quality & Compliance':'QC'};
+function deptAbbr(d){
+  if(DEPT_ABBR[d])return DEPT_ABBR[d];
+  const w=d.trim().split(/\s+/);
+  const a=((w.length>1?w.map(x=>x[0]).join(''):d.slice(0,2)).toUpperCase().replace(/[^A-Z]/g,'').slice(0,3))||'GN';
+  DEPT_ABBR[d]=a;return a;
+}
+function nextSopCode(dept){
+  const p=deptAbbr(dept);
+  let n=SOPS.filter(s=>s.dept===dept).length+1,c;
+  do{c=p+'-'+String(n).padStart(3,'0');n++}while(SOPS.some(s=>s.code===c));
+  return c;
+}
+
+/* retest gate: free first attempt; free renewal after a pass; after a FAIL only a manager grant unlocks */
+function grantOf(testId,staffId){return RETESTS.find(r=>r.testId===testId&&r.staffId===staffId&&!r.used)}
+function canAttempt(staffId,t){
+  const h=attemptsOf(staffId,t.id);
+  if(h.length===0)return{ok:true};
+  if(h[0].passed)return{ok:true};
+  const g=grantOf(t.id,staffId);
+  return g?{ok:true,g}:{ok:false};
+}
+
+function drivePreview(url){
+  if(!url)return null;
+  let m=url.match(/drive\.google\.com\/file\/d\/([\w-]+)/);
+  if(m)return 'https://drive.google.com/file/d/'+m[1]+'/preview';
+  m=url.match(/drive\.google\.com\/open\?id=([\w-]+)/);
+  if(m)return 'https://drive.google.com/file/d/'+m[1]+'/preview';
+  m=url.match(/docs\.google\.com\/(document|presentation|spreadsheets)\/d\/([\w-]+)/);
+  if(m)return 'https://docs.google.com/'+m[1]+'/d/'+m[2]+'/preview';
+  m=url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)/);
+  if(m)return 'https://www.youtube-nocookie.com/embed/'+m[1];
+  return null;
+}
+
+/* ================= helpers ================= */
+const MO=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function fmt(d){return String(d.getDate()).padStart(2,'0')+' '+MO[d.getMonth()]+' '+d.getFullYear()+' · '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
+function fmtD(d){return String(d.getDate()).padStart(2,'0')+' '+MO[d.getMonth()]+' '+d.getFullYear()}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+const ICON={
+  doc:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 12h6M9 16h6"/></svg>',
+  test:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 5h6M9 3.5A1.5 1.5 0 0 1 10.5 2h3A1.5 1.5 0 0 1 15 3.5V5H9zM7 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-1"/><path d="M9 12l2 2 4-4.5"/></svg>'
+};
+let toastT;
+function toast(msg){
+  const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2800);
+}
+function newCode(){
+  let c;do{c=String(Math.floor(1000+Math.random()*9000))}
+  while(STAFF.some(s=>s.code===c)||MANAGERS.some(m=>m.code===c));
+  return c;
+}
+
+/* ================= state ================= */
+let state={
+  role:'staff',
+  branch:null,dept:null,userId:null,tries:0,err:'',
+  taking:null,testView:null,
+  viewing:null,          /* {sopId, mode:'staff'|'admin', kind:'doc'|'video', justSigned} */
+  mgrId:null,mgrTries:0,mgrErr:'',
+  aBranch:'CLF',aDept:'Front Desk',
+  qdraft:[],
+  gText:'',gLevel:'medium',gCount:5,genBusy:false,genErr:'',gPdf:null,
+  tTitle:'',tPass:'80',tValid:'12',tSop:'',tLangs:{ur:false,ps:false},pubBusy:false,
+  testLang:'en'
+};
+function resetDraft(){
+  state.qdraft=[];state.gText='';state.gLevel='medium';state.gCount=5;state.genBusy=false;state.genErr='';state.gPdf=null;
+  state.tTitle='';state.tPass='80';state.tValid='12';state.tSop='';state.tLangs={ur:false,ps:false};state.pubBusy=false;
+}
+
+function setRole(r){
+  state.role=r;state.taking=null;state.testView=null;resetDraft();closeViewer(true);
+  for(const id of ['staff','manager','admin'])
+    document.getElementById('tab-'+id).setAttribute('aria-pressed',id===r);
+  render();
+}
+function goBranch(){state.branch=null;state.dept=null;state.userId=null;state.taking=null;state.testView=null;state.err='';render()}
+function goDept(){state.dept=null;state.userId=null;state.taking=null;state.testView=null;state.err='';render()}
+function goIdent(){state.userId=null;state.taking=null;state.testView=null;state.err='';state.tries=0;render()}
+
+/* ================= staff flow (tiles) ================= */
+function renderStaffFlow(){
+  if(!state.branch)return pickBranch();
+  if(!state.dept)return pickDept();
+  if(!state.userId)return identify();
+  if(state.taking)return takeTest();
+  if(state.testView)return testDetail();
+  return myPage();
+}
+function crumbs(){
+  const me=state.userId?STAFF.find(s=>s.id===state.userId):null;
+  let h='<div class="crumbs">';
+  h+=state.branch?`<button onclick="goBranch()">Branches</button>`:'<span class="here">Branches</span>';
+  if(state.branch){h+=`<span class="sep">/</span>`;
+    h+=state.dept?`<button onclick="goDept()">${esc(state.branch)}</button>`:`<span class="here">${esc(state.branch)}</span>`}
+  if(state.dept){h+=`<span class="sep">/</span>`;
+    h+=me?`<button onclick="goIdent()">${esc(state.dept)}</button>`:`<span class="here">${esc(state.dept)}</span>`}
+  if(me)h+=`<span class="who">${esc(me.name)} · signed in</span>`;
+  return h+'</div>';
+}
+function pickBranch(){
+  return `<div class="lead"><div class="kb">Hamsun SOP Portal</div><h2>Choose your branch</h2></div>
+  <div class="grid2">
+    ${BRANCHES.map(b=>{
+      const n=STAFF.filter(s=>s.branch===b.code).length;
+      return `<button class="pick" onclick="state.branch='${esc(b.code)}';render()">
+        <div class="code">${esc(b.code)}</div><div class="name">${esc(b.name)}</div>
+        <div class="sub mono">${n} staff</div>
+      </button>`}).join('')}
+  </div>`;
+}
+function pickDept(){
+  return crumbs()+`
+  <div class="lead"><h2>Choose your department</h2></div>
+  <div class="grid2">
+    ${DEPTS.map(d=>{
+      const ns=sopsFor(d,state.branch).length, nt=testsFor(d,state.branch).length, np=staffFor(d,state.branch).length;
+      const off=ns===0&&nt===0&&np===0;
+      return `<button class="pick ${off?'off':''}" ${off?'disabled':''} onclick="state.dept='${d.replace(/'/g,"\\'")}';render()">
+        <div class="name">${esc(d)}</div>
+        <div class="sub">${off?'No content at this branch yet':`<span class="mono">${ns}</span> SOPs · <span class="mono">${nt}</span> tests · <span class="mono">${np}</span> staff`}</div>
+      </button>`}).join('')}
+  </div>`;
+}
+function identify(){
+  const pool=staffFor(state.dept,state.branch);
+  return crumbs()+`
+  <div class="lead"><h2>Who are you?</h2><p>Pick your name and enter your employee code.</p></div>
+  <div class="kcard">
+    ${pool.length===0?`<div class="allclear">No staff registered for ${esc(state.dept)} at ${esc(state.branch)} yet.</div>`:`
+    <div class="field"><label for="k-name">Your name</label>
+      <select id="k-name" onchange="state.err='';state.tries=0">
+        <option value="">Select your name…</option>
+        ${pool.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}
+      </select></div>
+    <div class="field"><label for="k-code">Employee code</label>
+      <input type="password" id="k-code" inputmode="numeric" maxlength="6" placeholder="••••" autocomplete="off">
+      <div class="demo-hint">Prototype demo codes: ${pool.map(p=>esc(p.name)+' '+p.code).join(' · ')}</div>
+    </div>
+    ${state.err?`<div class="err">${esc(state.err)}</div>`:''}
+    <button class="btn primary block" onclick="enter()">Enter</button>`}
+  </div>`;
+}
+function enter(){
+  const id=+document.getElementById('k-name').value;
+  if(!id){state.err='Select your name first.';render();return}
+  const me=STAFF.find(s=>s.id===id);
+  const key='stf-'+state.branch+'-'+id;
+  if(LOCKS.has(key)){state.err='Too many wrong attempts. Ask your manager to reset your code.';render();return}
+  const code=document.getElementById('k-code').value;
+  if(code!==me.code){
+    state.tries++;
+    if(state.tries>=3){LOCKS.add(key);state.err='Too many wrong attempts. Ask your manager to reset your code.';}
+    else state.err='Wrong employee code — attempt '+state.tries+' of 3.';
+    render();return;
+  }
+  state.userId=id;state.err='';state.tries=0;render();
+}
+function sopTile(s,me){
+  const a=ackOf(me.id,s.id);
+  const hasVid=!!drivePreview(s.video);
+  return `<div class="tile">
+    <button class="tile-main" onclick="openViewer(${s.id},'staff','doc')">
+      <span class="kind" aria-hidden="true">${ICON.doc}</span>
+      <span class="t-title">${esc(s.title)}</span>
+      <span class="ver">${esc(s.code)} · v${s.ver}</span>
+      ${a?`<span class="chip signed">✓ Signed</span>`:`<span class="chip pending">Read &amp; sign</span>`}
+    </button>
+    <button class="tile-video ${hasVid?'':'none'}" onclick="openViewer(${s.id},'staff','video')">▶ Video</button>
+  </div>`;
+}
+function testTile(t,me){
+  const c=certOf(me.id,t);
+  let chip;
+  if(c){const s=certStatus(c);
+    chip=s==='valid'?`<span class="chip signed">✓ Certified</span>`
+      :s==='expiring'?`<span class="chip pending">Expires ${certDays(c)} d</span>`
+      :`<span class="chip expired">Expired</span>`;
+  }else{
+    const last=attemptsOf(me.id,t.id)[0];
+    if(last&&!last.passed){
+      chip=grantOf(t.id,me.id)?`<span class="chip signed">✓ Retest approved</span>`:`<span class="chip expired">Awaiting approval</span>`;
+    }else chip=`<span class="chip pending">Take test</span>`;
+  }
+  return `<div class="tile"><button class="tile-main" onclick="state.testView=${t.id};render()">
+    <span class="kind testk" aria-hidden="true">${ICON.test}</span>
+    <span class="t-title">${esc(t.title)}</span>
+    <span class="signed-ts">${t.questions.length} Qs · pass ${t.passPct}%</span>
+    ${chip}
+  </button></div>`;
+}
+function myPage(){
+  const me=STAFF.find(s=>s.id===state.userId);
+  const sops=sopsFor(state.dept,state.branch);
+  const tests=myTests(me);
+  const pending=sops.filter(s=>!ackOf(me.id,s.id)).length;
+  const certIssues=tests.filter(t=>{const c=certOf(me.id,t);return c&&certStatus(c)!=='valid'});
+
+  let h=crumbs();
+  if(certIssues.length){
+    h+=`<div class="notice">⚠ ${certIssues.map(t=>{
+      const c=certOf(me.id,t);const s=certStatus(c);
+      return esc(t.title)+(s==='expired'?' certification has expired':' certification expires in '+certDays(c)+' days')}).join(' · ')} — tap the test tile to renew.</div>`;
+  }
+  h+=`<div class="duty-note"><h2 class="section">My SOPs</h2><span class="duty-count">${pending} to sign</span></div>`;
+  h+=sops.length?`<div class="tilegrid">${sops.map(s=>sopTile(s,me)).join('')}</div>`
+    :`<div class="allclear">No SOPs for this department at this branch yet.</div>`;
+
+  h+=`<div class="duty-note"><h2 class="section">My tests &amp; scores</h2><span class="duty-count">${tests.length} assigned</span></div>`;
+  h+=tests.length?`<div class="tilegrid">${tests.map(t=>testTile(t,me)).join('')}</div>`
+    :`<div class="allclear">No tests assigned to you yet — your manager assigns tests by name.</div>`;
+  return h;
+}
+
+/* ---- staff test detail ---- */
+function testDetail(){
+  const me=STAFF.find(s=>s.id===state.userId);
+  const t=TESTS.find(x=>x.id===state.testView);
+  const c=certOf(me.id,t);
+  const hist=attemptsOf(me.id,t.id);
+  const rel=t.sopId?SOPS.find(s=>s.id===t.sopId):null;
+
+  let certLine='';
+  if(c){const s=certStatus(c);
+    certLine=s==='valid'
+      ?`<div class="stampbox"><span class="stamp">CERTIFIED</span>
+         <div class="stampmeta"><strong>${esc(me.name)}</strong><br><span class="mono">valid until ${fmtD(c.expires)}</span></div></div>`
+      :`<div class="failbox"><div class="fh">${s==='expiring'?'RENEWAL DUE':'CERTIFICATION EXPIRED'}</div>
+         <div style="font-size:13px;color:var(--ink-soft)">${s==='expiring'?'Expires in '+certDays(c)+' days — retake below to renew.':'Expired '+Math.abs(certDays(c))+' days ago — retake below.'}</div></div>`;
+  }else{
+    certLine=`<div class="allclear" style="padding:14px">Not certified yet${hist.length?' — see your attempts below':''}.</div>`;
+  }
+
+  const ca=canAttempt(me.id,t);
+  const TL=testLangs(t);
+  const curLang=TL.includes(state.testLang)?state.testLang:'en';
+  return crumbs()+`<div class="kcard">
+    <div class="kmeta"><span>${esc(t.title)}</span><span class="mono">pass ${t.passPct}% · valid ${t.validMonths} mo</span></div>
+    ${TL.length>1?`<div class="field"><label>Test language · زبان · ژبه</label>
+      <div class="vseg" role="group" aria-label="Language" style="display:inline-flex">
+        ${TL.map(l=>`<button aria-pressed="${curLang===l}" onclick="state.testLang='${l}';render()">${LANG_META[l].label}</button>`).join('')}
+      </div></div>`:''}
+    ${certLine}
+    ${!ca.ok?`<div class="notice" style="margin:12px 0 0">Retest locked — only your manager can approve a retest after a fail. You\u2019ll get a notification here when it\u2019s approved.</div>`:''}
+    ${ca.g?`<div class="stampbox" style="margin-top:12px"><span class="stamp">APPROVED</span>
+      <div class="stampmeta">Retest approved by <strong>${esc(ca.g.by)}</strong><br><span class="mono">${fmt(ca.g.ts)} · one attempt</span></div></div>`:''}
+    <div class="duty-note" style="margin:18px 0 4px"><h2 class="section" style="font-size:14.5px">My previous attempts</h2><span class="duty-count">${hist.length}</span></div>
+    ${hist.length?`<ul class="attempts">${hist.map(a=>`
+      <li><span class="ts">${fmt(a.ts)}</span><span class="sc">${a.score}/${a.total} · ${Math.round(a.score/a.total*100)}%</span>
+      <span class="pf ${a.passed?'p':'f'}">${a.passed?'PASS':'FAIL'}</span></li>`).join('')}</ul>`
+    :`<div style="font-size:13px;color:var(--ink-soft);padding:6px 0 2px">No attempts yet.</div>`}
+    <div class="backlink">
+      ${rel?`<button class="btn" onclick="openViewer(${rel.id},'staff','doc')">Review SOP</button>
+             <button class="btn" onclick="openViewer(${rel.id},'staff','video')">▶ Video</button>`:''}
+      ${ca.ok?`<button class="btn primary" onclick="startTest(${t.id})">${hist.length||c?'Retake test':'Start test'}</button>`:''}
+      <button class="btn" onclick="state.testView=null;render()">Back</button>
+    </div>
+  </div>`;
+}
+
+/* ================= viewer: document + video, sign underneath ================= */
+function openViewer(sopId,mode,kind){
+  state.viewing={sopId,mode,kind:kind||'doc',justSigned:false};
+  drawViewer();
+  document.getElementById('viewer').classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function switchKind(k){if(state.viewing){state.viewing.kind=k;drawViewer();}}
+function closeViewer(silent){
+  state.viewing=null;
+  document.getElementById('viewer').classList.remove('open');
+  document.body.style.overflow='';
+  if(!silent)render();
+}
+function placeholderDoc(s){
+  return `<div class="paper">
+    <div class="wm">VIEW ONLY</div>
+    <div class="ph-brand">Hamsun Hospitality · ${esc(s.dept)}</div>
+    <h1>${esc(s.title)}</h1>
+    <div class="ph-meta">${esc(s.code)} · v${s.ver} · updated ${s.updated} · applies to ${s.scope?s.scope.join(', '):'all branches'}</div>
+    <h2>1. Purpose</h2>
+    <p>${esc(s.summary)}</p>
+    <h2>2. Procedure</h2>
+    <p>The full step-by-step procedure appears here, streamed live from the controlled Google Drive file once a document link is attached. It always shows the current version — no copies floating on WhatsApp.</p>
+    <h2>3. Responsibility</h2>
+    <p>Every ${esc(s.dept)} team member covered by the scope above must read this document and sign the register below.</p>
+    <div class="ph-foot">CONTROLLED DOCUMENT · HAMSUN SOP PORTAL · DO NOT DISTRIBUTE</div>
+  </div>`;
+}
+function placeholderVideo(s){
+  return `<div class="paper">
+    <div class="wm">VIEW ONLY</div>
+    <div class="ph-brand">Hamsun Hospitality · ${esc(s.dept)}</div>
+    <h1>${esc(s.title)} — Training Video</h1>
+    <div class="ph-meta">${esc(s.code)} · v${s.ver} · ${s.scope?s.scope.join(', '):'all branches'}</div>
+    <div class="playph"><div class="pcirc">▶</div>
+      <p style="text-align:center;max-width:420px">The training video for this SOP plays here once a Google Drive or YouTube link is attached in Manager or Admin. Staff watch inside the portal only.</p>
+    </div>
+    <div class="ph-foot">CONTROLLED CONTENT · HAMSUN SOP PORTAL</div>
+  </div>`;
+}
+function drawViewer(){
+  const v=state.viewing;if(!v)return;
+  const s=SOPS.find(x=>x.id===v.sopId);
+  const me=v.mode==='staff'?STAFF.find(x=>x.id===state.userId):null;
+  const a=me?ackOf(me.id,s.id):null;
+  const src=v.kind==='video'?s.video:s.link;
+  const prev=drivePreview(src);
+  const doc=prev
+    ?`<div class="v-frame-wrap"><iframe src="${esc(prev)}" allow="autoplay; encrypted-media" allowfullscreen title="${esc(s.title)}"></iframe><div class="noext" title="View only"></div></div>`
+    :(v.kind==='video'?placeholderVideo(s):placeholderDoc(s));
+
+  let foot='';
+  if(v.mode==='staff'){
+    foot=`<div class="v-foot"><div class="v-foot-in">
+      ${a?`<div class="stampbox">
+            <span class="stamp ${v.justSigned?'animate':''}">SIGNED</span>
+            <div class="stampmeta"><strong>${esc(me.name)}</strong> — ${esc(me.dept)} · ${esc(me.branch)}<br>
+            <span class="mono">${fmt(a.ts)} · v${s.ver}</span></div>
+          </div>`
+        :`<div class="who">Signing as <strong>${esc(me.name)}</strong> · ${esc(me.dept)} · ${esc(me.branch)} — signing confirms you have read this SOP.</div>
+          <button class="btn primary block" onclick="signInViewer(${s.id})">Read &amp; understood — sign the register</button>`}
+    </div></div>`;
+  }else{
+    foot=`<div class="v-foot"><div class="v-foot-in">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:12.5px;color:var(--ink-faint)">Preview.</span>
+        ${src?`<a class="btn sm" href="${esc(src)}" target="_blank" rel="noopener">Open in Drive ↗</a>`:''}
+      </div>
+      <div class="linkedit">
+        <input type="text" id="vl-doc" placeholder="Document link (Drive)" value="${esc(s.link)}">
+        <input type="text" id="vl-vid" placeholder="Video link (Drive / YouTube)" value="${esc(s.video)}">
+        <button class="btn sm primary" onclick="saveLinks(${s.id})">Save links</button>
+      </div>
+    </div></div>`;
+  }
+
+  document.getElementById('viewer').innerHTML=`
+   <div class="v-head">
+     <span class="v-title"><span class="mono" style="font-size:12px;color:var(--brass-deep)">${esc(s.code)}</span> ${esc(s.title)}<span class="ver">v${s.ver}</span></span>
+     <div class="vseg" role="group" aria-label="Content">
+       <button aria-pressed="${v.kind==='doc'}" onclick="switchKind('doc')">Document</button>
+       <button aria-pressed="${v.kind==='video'}" onclick="switchKind('video')">▶ Video</button>
+     </div>
+     ${v.mode==='staff'?'<span class="vo">VIEW ONLY</span>':''}
+     <button class="v-close" onclick="closeViewer()" aria-label="Close">✕</button>
+   </div>
+   <div class="v-doc">${doc}</div>
+   ${foot}`;
+}
+function saveLinks(sopId){
+  const s=SOPS.find(x=>x.id===sopId);
+  const dl=document.getElementById('vl-doc').value.trim();
+  const vl=document.getElementById('vl-vid').value.trim();
+  if(dl&&!drivePreview(dl)){toast('Document link not recognised — use a Drive / Docs share link');return}
+  if(vl&&!drivePreview(vl)){toast('Video link not recognised — use a Drive or YouTube share link');return}
+  s.link=dl;s.video=vl;
+  toast('Links saved — content streams live in the viewer');
+  drawViewer();
+}
+function signInViewer(sopId){
+  if(ackOf(state.userId,sopId))return;
+  ACKS.push({staffId:state.userId,sopId,ts:new Date()});
+  state.viewing.justSigned=true;
+  const s=SOPS.find(x=>x.id===sopId);
+  toast('Signed — '+s.title+' v'+s.ver);
+  drawViewer();
+}
+
+/* ================= test taking ================= */
+function startTest(testId){
+  const t=TESTS.find(x=>x.id===testId);
+  const ca=canAttempt(state.userId,t);
+  if(!ca.ok){toast('Retest needs your manager\u2019s approval first');return}
+  const TL=testLangs(t);
+  const lang=TL.includes(state.testLang)?state.testLang:'en';
+  state.taking={testId,qi:0,answers:[],result:null,grantId:ca.g?ca.g.id:null,lang};
+  render();
+}
+function takeTest(){
+  const me=STAFF.find(s=>s.id===state.userId);
+  const t=TESTS.find(x=>x.id===state.taking.testId);
+  const k=state.taking;
+  if(k.result){
+    const r=k.result;
+    return crumbs()+`<div class="kcard">
+      <div class="kmeta"><span>${esc(t.title)}</span><span>${esc(me.name)} · ${esc(state.branch)}</span></div>
+      ${r.passed?`
+        <div class="stampbox">
+          <span class="stamp animate">CERTIFIED</span>
+          <div class="stampmeta"><strong>${esc(me.name)}</strong> — ${esc(t.title)}<br>
+          <span class="mono">Score ${r.score}/${r.total} · valid until ${fmtD(r.expires)}</span></div>
+        </div>`
+      :`
+        <div class="failbox">
+          <div class="fh">NOT PASSED</div>
+          <div class="score">Score ${r.score}/${r.total} — pass mark is ${t.passPct}%</div>
+          <div style="font-size:13px;color:var(--ink-soft)">Only your manager can approve a retest. Review the SOP — you\u2019ll get a notification when your retest is approved.</div>
+        </div>`}
+      <div class="backlink">
+        <button class="btn primary" onclick="state.taking=null;render()">Back to my scores</button>
+      </div>
+    </div>`;
+  }
+  const q=t.questions[k.qi];
+  const L=k.lang||'en';
+  const dir=LANG_META[L].dir;
+  return crumbs()+`<div class="kcard">
+    <div class="kmeta"><span>${esc(t.title)}</span>
+      <span style="display:inline-flex;align-items:center;gap:10px">
+        <button class="spk" onclick="speakQuestion()" aria-label="Listen to this question">${SPK}</button>
+        <span class="mono">Question ${k.qi+1} / ${t.questions.length}</span>
+      </span></div>
+    <div class="kbar"><i style="width:${Math.round(k.qi/t.questions.length*100)}%"></i></div>
+    <div class="qtext" dir="${dir}">${esc(qText(q,L))}</div>
+    ${optText(q,L).map((o,i)=>`<button class="opt" dir="${dir}" onclick="answer(${i})">${esc(o)}</button>`).join('')}
+    <div class="backlink"><button class="btn" onclick="stopSpeech();state.taking=null;render()">Cancel test</button></div>
+  </div>`;
+}
+function answer(i){
+  stopSpeech();
+  const k=state.taking;
+  const t=TESTS.find(x=>x.id===k.testId);
+  k.answers[k.qi]=i;
+  if(k.qi<t.questions.length-1){k.qi++;render();return}
+  const total=t.questions.length;
+  const score=t.questions.reduce((n,q,idx)=>n+(k.answers[idx]===q.ans?1:0),0);
+  const passed=(score/total*100)>=t.passPct;
+  ATTEMPTS.push({staffId:state.userId,testId:t.id,score,total,passed,ts:new Date()});
+  if(k.grantId){const g=RETESTS.find(r=>r.id===k.grantId);if(g)g.used=true;}
+  let expires=null;
+  if(passed){
+    expires=new Date();expires.setMonth(expires.getMonth()+t.validMonths);
+    CERTS=CERTS.filter(c=>!(c.staffId===state.userId&&c.type===t.title));
+    CERTS.push({staffId:state.userId,type:t.title,issued:new Date(),expires});
+    toast('Certified — '+t.title);
+  }
+  notify(state.userId,'Score recorded — '+t.title+': '+score+'/'+total+(passed?' · PASS, certified until '+fmtD(expires):' · Not passed'));
+  k.result={score,total,passed,expires};
+  render();
+}
+
+/* ================= shared boards ================= */
+function sopBoard(d,b,mode){
+  const people=staffFor(d,b);
+  const sops=sopsFor(d,b);
+  return `<div class="board">
+    <div class="board-head"><h3>SOP sign-off — ${esc(d)} · ${esc(b)}</h3><span class="hint">${people.length} staff</span></div>
+    ${sops.length===0?`<div class="empty-row">No SOPs here yet — add one below.</div>`:
+      sops.map(s=>{
+        const pend=people.filter(p=>!ackOf(p.id,s.id));
+        const full=pend.length===0&&people.length>0;
+        return `<div class="brow">
+          <div class="brow-top">
+            <span class="brow-title"><span class="ver">${esc(s.code)}</span> ${esc(s.title)} <span class="ver">v${s.ver}</span> ${drivePreview(s.link)?'<span class="livechip">LIVE · DRIVE</span>':''} ${drivePreview(s.video)?'<span class="vidchip">▶ VIDEO</span>':''}</span>
+            <button class="btn sm" onclick="openViewer(${s.id},'${mode}','doc')">Doc</button>
+            <button class="btn sm" onclick="openViewer(${s.id},'${mode}','video')">▶ Video</button>
+            <span class="brow-frac ${full?'full':'gap'}">${people.length-pend.length}/${people.length} signed</span>
+          </div>
+          ${people.length===0?'<div class="names"><span class="nm">No staff here yet</span></div>':
+            `<div class="names">${people.map(p=>{
+              const a=ackOf(p.id,s.id);
+              return `<span class="nm ${a?'ok':''}">${a?'✓ ':''}${esc(p.name)}</span>`}).join('')}</div>`}
+        </div>`}).join('')}
+  </div>`;
+}
+function testBoard(d,b,granter){
+  const people=staffFor(d,b);
+  const tests=testsFor(d,b);
+  return `<div class="board">
+    <div class="board-head"><h3>Tests &amp; scores — ${esc(d)} · ${esc(b)}</h3><span class="hint">Assign by name · latest score shown</span></div>
+    ${tests.length===0?`<div class="empty-row">No tests for this department at this branch — create one below.</div>`:
+      tests.map(t=>{
+        const asg=people.filter(p=>isAssigned(t.id,p.id));
+        const valid=asg.filter(p=>{const c=certOf(p.id,t);return c&&certStatus(c)==='valid'}).length;
+        const fails=asg.filter(p=>{const h=attemptsOf(p.id,t.id);return h.length&&!h[0].passed});
+        return `<div class="brow">
+          <div class="brow-top">
+            <span class="brow-title">${esc(t.title)} <span class="ver">${t.questions.length} Qs · pass ${t.passPct}%</span></span>
+            <span class="brow-frac ${valid===asg.length&&asg.length>0?'full':'gap'}">${valid}/${asg.length} certified</span>
+          </div>
+          ${asg.length===0?'<div class="names"><span class="nm">Nobody assigned yet</span></div>':
+            `<div class="names">${asg.map(p=>{
+              const c=certOf(p.id,t);
+              const last=attemptsOf(p.id,t.id)[0];
+              const sc=last?` · ${last.score}/${last.total}`:'';
+              if(!c)return `<span class="nm ${last&&!last.passed?'bad':''}">${esc(p.name)}${sc||' · not attempted'}</span>`;
+              const s=certStatus(c);
+              if(s==='valid')return `<span class="nm ok">✓ ${esc(p.name)}${sc} · until ${fmtD(c.expires)}</span>`;
+              if(s==='expiring')return `<span class="nm warn">⚠ ${esc(p.name)}${sc} · ${certDays(c)} d left</span>`;
+              return `<span class="nm bad">✗ ${esc(p.name)}${sc} · expired</span>`}).join('')}</div>`}
+          ${fails.length?`<div class="names" style="align-items:center">
+            <span class="nm" style="border:none;background:none;padding-left:0">Retest approval:</span>
+            ${fails.map(p=>grantOf(t.id,p.id)
+              ?`<span class="nm ok">✓ ${esc(p.name)} — approved, awaiting attempt</span>`
+              :`<button class="btn sm" onclick="grantRetest(${t.id},${p.id},'${esc(granter)}')">Allow ${esc(p.name)}</button>`).join('')}
+          </div>`:''}
+          <details class="inline">
+            <summary>Assign staff by name</summary>
+            <div class="asgn">
+              ${people.length===0?'<span class="nm">No staff in this department here</span>':
+                people.map(p=>`<label><input type="checkbox" class="as-${t.id}" value="${p.id}" ${isAssigned(t.id,p.id)?'checked':''}> ${esc(p.name)}</label>`).join('')}
+            </div>
+            ${people.length?`<div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn sm" onclick="document.querySelectorAll('.as-${t.id}').forEach(c=>c.checked=true)">Select all</button>
+              <button class="btn sm primary" onclick="saveAssign(${t.id},'${d.replace(/'/g,"\\'")}','${esc(b)}')">Save assignment</button>
+            </div>`:''}
+          </details>
+        </div>`}).join('')}
+  </div>`;
+}
+function grantRetest(testId,staffId,by){
+  if(grantOf(testId,staffId))return;
+  RETESTS.push({id:++RID,testId,staffId,by,ts:new Date(),used:false});
+  const t=TESTS.find(x=>x.id===testId);
+  notify(staffId,'Retest approved — '+t.title+' (by '+by+'). One attempt unlocked.');
+  toast('Retest approved for '+STAFF.find(s=>s.id===staffId).name);
+  render();
+}
+function saveAssign(testId,d,b){
+  const local=staffFor(d,b).map(p=>p.id);
+  const before=new Set(ASSIGNS.filter(a=>a.testId===testId&&local.includes(a.staffId)).map(a=>a.staffId));
+  const checked=[...document.querySelectorAll('.as-'+testId+':checked')].map(c=>+c.value);
+  ASSIGNS=ASSIGNS.filter(a=>!(a.testId===testId&&local.includes(a.staffId)));
+  for(const id of checked)ASSIGNS.push({testId,staffId:id});
+  const t=TESTS.find(x=>x.id===testId);
+  checked.filter(id=>!before.has(id)).forEach(id=>notify(id,'New test assigned — '+t.title+'. Open your tests to take it.'));
+  toast('Assignment saved — '+checked.length+' assigned at '+b);
+  render();
+}
+function addSopForm(d,b,lockBranch){
+  return `<details class="board">
+    <summary>Add SOP<span class="hint">document + video · to ${esc(d)}${lockBranch?' · '+esc(b)+' only':''}</span></summary>
+    <div class="card-body">
+      <div class="field"><label for="f-title">Title</label><input type="text" id="f-title" placeholder="e.g. Guest Complaint Handling"></div>
+      <div class="field"><label for="f-code">SOP code — blank = auto</label><input type="text" id="f-code" placeholder="${esc(nextSopCode(d))}" style="text-transform:uppercase"></div>
+      <div class="field"><label for="f-link">Document link (Google Drive)</label>
+        <input type="text" id="f-link" placeholder="https://drive.google.com/file/d/…"></div>
+      <div class="field"><label for="f-vlink">Video link (Drive / YouTube)</label>
+        <input type="text" id="f-vlink" placeholder="https://youtu.be/… or Drive video link">
+        <div class="demo-hint">Both stream live inside the viewer. Set Drive files to Viewer + "Viewers can't download, print, or copy".</div>
+      </div>
+      ${lockBranch?`<div class="field"><label>Scope</label><div style="font-size:13.5px">${esc(d)} · ${esc(b)} only — department managers publish to their own department at their branch.</div></div>`:`
+      <div class="field"><label>Scope</label>
+        <div class="radio-row">
+          <label><input type="radio" name="f-scope" value="one" checked> ${esc(b)} only</label>
+          <label><input type="radio" name="f-scope" value="all"> All branches</label>
+        </div></div>`}
+      <button class="btn primary block" onclick="addSop('${d.replace(/'/g,"\\'")}','${esc(b)}',${lockBranch?'true':'false'})">Publish to ${esc(d)}</button>
+    </div>
+  </details>`;
+}
+function addSop(d,b,lockBranch){
+  const title=document.getElementById('f-title').value.trim();
+  if(!title){toast('Give the SOP a title first');return}
+  let code=document.getElementById('f-code').value.trim().toUpperCase();
+  if(!code)code=nextSopCode(d);
+  if(SOPS.some(s=>s.code===code)){toast('SOP code '+code+' already exists — pick another');return}
+  const link=document.getElementById('f-link').value.trim();
+  const video=document.getElementById('f-vlink').value.trim();
+  if(link&&!drivePreview(link)){toast('Document link not recognised — use a Drive / Docs share link');return}
+  if(video&&!drivePreview(video)){toast('Video link not recognised — use a Drive or YouTube share link');return}
+  const one=lockBranch?true:document.querySelector('input[name=f-scope]:checked').value==='one';
+  const ns={id:Math.max(...SOPS.map(s=>s.id))+1,code,title,dept:d,ver:'1.0',link,video,
+    scope:one?[b]:null,updated:fmtD(new Date()),
+    summary:'Newly published — pending its first sign-offs.'};
+  SOPS.push(ns);
+  STAFF.filter(st=>requires(st,ns)).forEach(st=>notify(st.id,'New SOP '+code+' — '+title+'. Read & sign.'));
+  toast('Published as '+code+' — matching '+d+' staff notified');
+  render();
+}
+function createTestForm(d,b,lockBranch){
+  return `<details class="board" ${state.qdraft.length?'open':''}>
+    <summary>Create a test<span class="hint">for ${esc(d)}${lockBranch?' · '+esc(b)+' only':''}</span></summary>
+    <div class="card-body">
+      <div class="genblock">
+        <div class="gh">✦ Generate the test from an SOP</div>
+        <div class="gs">Claude reads the SOP text and drafts the questions at your chosen level. You stay the examiner — review every question and its marked answer before publishing. Prototype: paste the text. Production: the portal fetches the document from Drive itself.</div>
+        <div class="fieldrow">
+          <div class="field"><label for="g-sop">Prefill from SOP</label>
+            <select id="g-sop"><option value="">— choose —</option>
+              ${sopsFor(d,b).map(s=>`<option value="${s.id}">${esc(s.code)} · ${esc(s.title)}</option>`).join('')}
+            </select></div>
+          <div class="field" style="flex:0 0 auto;align-self:flex-end"><button class="btn sm" onclick="prefillFromSop()">Use summary</button></div>
+        </div>
+        <div class="field"><label>SOP document (PDF)</label>
+          ${state.gPdf
+            ?`<div class="pdfchip"><span class="mono">📄 ${esc(state.gPdf.name)}</span><span class="mono" style="color:var(--ink-faint)">${(state.gPdf.size/1024).toFixed(0)} KB</span><button class="btn sm" onclick="clearPdf()">✕ Remove</button></div>`
+            :`<input type="file" id="g-pdf" accept="application/pdf,.pdf" onchange="handlePdf(this)">
+              <div class="demo-hint">Claude reads the PDF directly — no pasting. Under 4.5 MB.</div>`}
+        </div>
+        <div class="field"><label for="g-text">Or paste text instead</label>
+          <textarea id="g-text" style="min-height:70px" placeholder="Optional — used only if no PDF is uploaded…">${esc(state.gText)}</textarea></div>
+        <div class="fieldrow">
+          <div class="field"><label for="g-level">Difficulty</label>
+            <select id="g-level">
+              <option value="low" ${state.gLevel==='low'?'selected':''}>Low — recall the SOP</option>
+              <option value="medium" ${state.gLevel==='medium'?'selected':''}>Medium — apply to a scenario</option>
+              <option value="high" ${state.gLevel==='high'?'selected':''}>High — exceptions &amp; judgment</option>
+            </select></div>
+          <div class="field"><label for="g-count">Questions (3–6)</label>
+            <input type="text" id="g-count" inputmode="numeric" value="${esc(String(state.gCount))}"></div>
+        </div>
+        ${state.genErr?`<div class="err">${esc(state.genErr)}</div>`:''}
+        <button class="btn primary block" ${state.genBusy?'disabled':''} onclick="generateQuestions()">${state.genBusy?'Generating… (a few seconds)':'✦ Generate questions'}</button>
+      </div>
+      <div class="field"><label for="t-title">Test title</label><input type="text" id="t-title" value="${esc(state.tTitle)}" placeholder="e.g. Linen Handling Test"></div>
+      <div class="fieldrow">
+        <div class="field"><label for="t-pass">Pass mark %</label><input type="text" id="t-pass" inputmode="numeric" value="${esc(state.tPass)}"></div>
+        <div class="field"><label for="t-valid">Cert valid (months)</label><input type="text" id="t-valid" inputmode="numeric" value="${esc(state.tValid)}"></div>
+      </div>
+      <div class="field"><label for="t-sop">Related SOP (optional)</label>
+        <select id="t-sop"><option value="">— none —</option>
+          ${sopsFor(d,b).map(s=>`<option value="${s.id}" ${String(s.id)===state.tSop?'selected':''}>${esc(s.code)} · ${esc(s.title)}</option>`).join('')}
+        </select></div>
+      ${lockBranch?'':`<div class="field"><label>Scope</label>
+        <div class="radio-row">
+          <label><input type="radio" name="t-scope" value="one" checked> ${esc(b)} only</label>
+          <label><input type="radio" name="t-scope" value="all"> All branches</label>
+        </div></div>`}
+      <div class="field"><label>Test languages</label>
+        <div class="radio-row">
+          <label><input type="checkbox" checked disabled> English — record copy</label>
+          <label><input type="checkbox" class="t-lang" value="ur" ${state.tLangs.ur?'checked':''} onchange="stashGen()"> اردو Urdu</label>
+          <label><input type="checkbox" class="t-lang" value="ps" ${state.tLangs.ps?'checked':''} onchange="stashGen()"> پښتو Pashto</label>
+        </div>
+        <div class="demo-hint">Extra languages are auto-translated by Claude when you publish — review them like any controlled content. English remains the official version; scoring is identical in every language.</div>
+      </div>
+      <div class="field"><label>Questions in draft (${state.qdraft.length})</label>
+        ${state.qdraft.length?state.qdraft.map((q,i)=>`
+          <div class="qb-item"><span class="n">Q${i+1}</span><span class="q">${esc(q.q)}<br><span style="color:var(--pine);font-size:12px">✓ ${esc(q.opts[q.ans])}</span></span>
+          <button onclick="stashGen();state.qdraft.splice(${i},1);render()">remove</button></div>`).join('')
+        :'<div style="font-size:13px;color:var(--ink-soft)">Generate above, or add at least 3 questions manually below.</div>'}
+      </div>
+      <div class="field"><label for="q-text">New question</label><input type="text" id="q-text" placeholder="Question text"></div>
+      ${[0,1,2,3].map(i=>`
+      <div class="field" style="margin-bottom:8px"><label for="q-o${i}" style="display:flex;align-items:center;gap:8px">Option ${i+1}
+        <span style="font-weight:500;text-transform:none;letter-spacing:0"><input type="radio" name="q-ans" value="${i}" ${i===0?'checked':''}> correct</span></label>
+        <input type="text" id="q-o${i}" placeholder="Option ${i+1}"></div>`).join('')}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 14px">
+        <button class="btn sm" onclick="addQuestion()">＋ Add question</button>
+      </div>
+      <button class="btn primary block" ${state.pubBusy?'disabled':''} onclick="publishTest('${d.replace(/'/g,"\\'")}','${esc(b)}',${lockBranch?'true':'false'})">${state.pubBusy?'Publishing… translating languages':'Publish test'}</button>
+      <div class="demo-hint">After publishing, open "Assign staff by name" on the test to choose who takes it.</div>
+    </div>
+  </details>`;
+}
+function addQuestion(){
+  stashGen();
+  const q=document.getElementById('q-text').value.trim();
+  const opts=[0,1,2,3].map(i=>document.getElementById('q-o'+i).value.trim());
+  if(!q||opts.some(o=>!o)){toast('Fill the question and all four options');return}
+  const ans=+document.querySelector('input[name=q-ans]:checked').value;
+  state.qdraft.push({q,opts,ans});
+  toast('Question added — '+state.qdraft.length+' so far');
+  render();
+}
+
+/* ---------- AI test generation (calls the Claude API live) ---------- */
+function stashGen(){
+  const set=(k,i)=>{const e=document.getElementById(i);if(e&&typeof e.value==='string')state[k]=e.value};
+  set('gText','g-text');set('gLevel','g-level');set('gCount','g-count');
+  set('tTitle','t-title');set('tPass','t-pass');set('tValid','t-valid');set('tSop','t-sop');
+  document.querySelectorAll('.t-lang').forEach(c=>{state.tLangs[c.value]=!!c.checked});
+}
+function prefillFromSop(){
+  stashGen();
+  const id=+document.getElementById('g-sop').value;
+  if(!id){toast('Pick an SOP first');return}
+  const s=SOPS.find(x=>x.id===id);
+  state.gText=s.title+' ('+s.code+'). '+s.summary;
+  if(!state.tTitle)state.tTitle=s.title+' Test';
+  state.tSop=String(id);
+  toast('Summary loaded — paste the full SOP text for stronger questions');
+  render();
+}
+function parseGenQuestions(raw){
+  let t=String(raw).replace(/```json|```/g,'').trim();
+  const m=t.match(/\{[\s\S]*\}/);if(m)t=m[0];
+  let d;try{d=JSON.parse(t)}catch(e){return[]}
+  const qs=Array.isArray(d.questions)?d.questions:[];
+  return qs.filter(q=>q&&typeof q.q==='string'&&q.q.trim()
+      &&Array.isArray(q.opts)&&q.opts.length===4&&q.opts.every(o=>typeof o==='string'&&o.trim())
+      &&Number.isInteger(q.ans)&&q.ans>=0&&q.ans<4)
+    .map(q=>({q:q.q.trim(),opts:q.opts.map(o=>o.trim()),ans:q.ans}));
+}
+const GEN_LEVELS={
+  low:'LOW difficulty — direct recall: ask what the SOP itself states. One clearly correct option.',
+  medium:'MEDIUM difficulty — application: put the rule inside a simple, realistic on-shift scenario.',
+  high:'HIGH difficulty — judgment: multi-step or exception scenarios; wrong options must be plausible near-miss mistakes.'
+};
+
+/* ---------- languages · per-question audio ---------- */
+const LANG_META={
+  en:{label:'English',dir:'ltr',tts:'en-US'},
+  ur:{label:'اردو',dir:'rtl',tts:'ur-PK'},
+  ps:{label:'پښتو',dir:'rtl',tts:'ps-AF'}
+};
+function qText(q,l){return l!=='en'&&q.tr&&q.tr[l]?q.tr[l].q:q.q}
+function optText(q,l){return l!=='en'&&q.tr&&q.tr[l]?q.tr[l].opts:q.opts}
+function testLangs(t){return t.langs&&t.langs.length?t.langs:['en']}
+const SPK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>';
+function speakText(text,langCode){
+  if(typeof speechSynthesis==='undefined'){toast('This device has no text-to-speech');return}
+  speechSynthesis.cancel();
+  const meta=LANG_META[langCode]||LANG_META.en;
+  const u=new SpeechSynthesisUtterance(text);
+  u.lang=meta.tts;u.rate=.95;
+  const vs=speechSynthesis.getVoices();
+  const v=vs.find(x=>x.lang&&x.lang.toLowerCase().startsWith(langCode))
+        ||vs.find(x=>x.lang&&x.lang.toLowerCase().startsWith(meta.tts.split('-')[0].toLowerCase()));
+  if(v)u.voice=v;
+  else if(langCode!=='en')toast('No '+meta.label+' voice installed on this device — production serves recorded audio');
+  speechSynthesis.speak(u);
+}
+function stopSpeech(){if(typeof speechSynthesis!=='undefined')speechSynthesis.cancel()}
+function speakQuestion(){
+  const k=state.taking;if(!k)return;
+  const t=TESTS.find(x=>x.id===k.testId);
+  const q=t.questions[k.qi];
+  const L=k.lang||'en';
+  const text=qText(q,L)+'. '+optText(q,L).join('. ');
+  speakText(text,L);
+}
+
+/* ---------- PDF upload for generation ---------- */
+async function handlePdf(inp){
+  const f=inp.files&&inp.files[0];if(!f)return;
+  if(f.type!=='application/pdf'&&!f.name.toLowerCase().endsWith('.pdf')){toast('Upload a PDF file');inp.value='';return}
+  if(f.size>4.5*1024*1024){toast('PDF too large — keep it under 4.5 MB');inp.value='';return}
+  stashGen();
+  try{
+    const data=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=()=>rej(new Error('read'));r.readAsDataURL(f)});
+    state.gPdf={name:f.name,size:f.size,data};
+    toast('PDF loaded — '+f.name);
+  }catch(e){toast('Could not read that file')}
+  render();
+}
+function clearPdf(){stashGen();state.gPdf=null;render()}
+
+/* ---------- translation at publish (Claude API) ---------- */
+async function translateSet(qs,langCode){
+  const names={ur:'Urdu, written in proper Urdu script',ps:'Pashto, written in Pashto (Arabic) script'};
+  const src=qs.map(q=>({q:q.q,opts:q.opts}));
+  const prompt='Translate these hotel staff quiz questions into '+names[langCode]+'. Simple spoken register for hotel line staff. '
+    +'Keep the SAME order and count, exactly 4 options per question, keep numbers and currency as digits, keep terms like PMS, SOP, VOID, OTA in Latin letters.\n'
+    +'Respond with ONLY this JSON, no markdown fences, no preamble:\n'
+    +'{"questions":[{"q":"...","opts":["...","...","...","..."]}]}\n'
+    +JSON.stringify({questions:src});
+  const response=await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,messages:[{role:'user',content:prompt}]})
+  });
+  const data=await response.json();
+  const text=(data.content||[]).map(i=>i.type==='text'?i.text:'').join('\n');
+  let t=String(text).replace(/```json|```/g,'').trim();
+  const m=t.match(/\{[\s\S]*\}/);if(m)t=m[0];
+  const d=JSON.parse(t);
+  const out=Array.isArray(d.questions)?d.questions:[];
+  if(out.length!==qs.length)throw new Error('count mismatch');
+  return out.map(x=>{
+    if(!x||typeof x.q!=='string'||!Array.isArray(x.opts)||x.opts.length!==4)throw new Error('bad item');
+    return {q:x.q.trim(),opts:x.opts.map(o=>String(o).trim())};
+  });
+}
+async function generateQuestions(){
+  stashGen();
+  const txt=(state.gText||'').trim();
+  if(!state.gPdf&&txt.length<40){toast('Upload the SOP PDF, or paste a few sentences of text');return}
+  const n=Math.min(6,Math.max(3,parseInt(state.gCount)||5));
+  state.genBusy=true;state.genErr='';render();
+  try{
+    const rules='Difficulty: '+GEN_LEVELS[state.gLevel]+'\n'
+      +'Write exactly '+n+' multiple-choice questions based ONLY on this SOP. Do not invent policies not in it. '
+      +'Each question: max 35 words. Exactly 4 options, max 12 words each, exactly one correct. Wrong options must be realistic mistakes staff actually make. Vary the position of the correct answer.\n'
+      +'Respond with ONLY this JSON, no markdown fences, no preamble:\n'
+      +'{"questions":[{"q":"...","opts":["...","...","...","..."],"ans":0}]}\n'
+      +'"ans" is the 0-based index of the correct option.';
+    let content;
+    if(state.gPdf){
+      content=[
+        {type:'document',source:{type:'base64',media_type:'application/pdf',data:state.gPdf.data}},
+        {type:'text',text:'You write staff certification quiz questions for a boutique hotel group in Karachi. Staff read simple English. Read the attached SOP document.\n'+rules}
+      ];
+    }else{
+      content='You write staff certification quiz questions for a boutique hotel group in Karachi. Staff read simple English.\n'
+        +'SOP text:\n"""'+txt.slice(0,6000)+'"""\n'+rules;
+    }
+    const response=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,messages:[{role:'user',content}]})
+    });
+    const data=await response.json();
+    const text=(data.content||[]).map(i=>i.type==='text'?i.text:'').join('\n');
+    const qs=parseGenQuestions(text);
+    if(!qs.length)throw new Error('no valid questions');
+    state.qdraft=qs;
+    toast('Generated '+qs.length+' '+state.gLevel+'-level questions from '+(state.gPdf?'the PDF':'the text')+' — review before publishing');
+  }catch(e){
+    state.genErr='Generation failed — try again, use a smaller PDF, or add questions manually.';
+  }
+  state.genBusy=false;
+  render();
+}
+async function publishTest(d,b,lockBranch){
+  stashGen();
+  const title=state.tTitle.trim();
+  if(!title){toast('Give the test a title');return}
+  if(state.qdraft.length<3){toast('Add at least 3 questions first');return}
+  const passPct=Math.min(100,Math.max(1,parseInt(state.tPass)||80));
+  const validMonths=Math.min(60,Math.max(1,parseInt(state.tValid)||12));
+  const sopId=+state.tSop||null;
+  const scopeEl=document.querySelector('input[name=t-scope]:checked');
+  const one=lockBranch?true:(scopeEl?scopeEl.value:'one')==='one';
+  const langs=['en'];
+  const wanted=['ur','ps'].filter(l=>state.tLangs[l]);
+  state.pubBusy=true;render();
+  for(const l of wanted){
+    try{
+      const tr=await translateSet(state.qdraft,l);
+      state.qdraft.forEach((q,i)=>{q.tr=q.tr||{};q.tr[l]=tr[i]});
+      langs.push(l);
+    }catch(e){toast(LANG_META[l].label+' translation failed — publishing without it')}
+  }
+  TESTS.push({id:Math.max(...TESTS.map(t=>t.id))+1,title,dept:d,scope:one?[b]:null,sopId,passPct,validMonths,langs,
+    questions:state.qdraft});
+  resetDraft();
+  toast('Test published in '+langs.map(l=>LANG_META[l].label).join(' · ')+' — now assign staff by name');
+  render();
+}
+
+/* ================= manager ================= */
+function renderManager(){
+  if(!state.mgrId){
+    return `<div class="lead"><div class="kb">Manager</div><h2>Manager sign-in</h2>
+      <p>Department managers publish SOPs and tests for their own department at their branch, and assign tests by name.</p></div>
+    <div class="kcard">
+      <div class="field"><label for="m-name">Manager</label>
+        <select id="m-name" onchange="state.mgrErr='';state.mgrTries=0">
+          <option value="">Select…</option>
+          ${MANAGERS.map(m=>`<option value="${m.id}">${esc(m.name)} — ${esc(m.dept)} · ${esc(m.branch)}</option>`).join('')}
+        </select></div>
+      <div class="field"><label for="m-code">Code</label>
+        <input type="password" id="m-code" inputmode="numeric" maxlength="6" placeholder="••••" autocomplete="off">
+        <div class="demo-hint">Prototype demo codes: ${MANAGERS.map(m=>esc(m.name)+' '+m.code).join(' · ')}<br>In production managers sign in with Supabase Auth, scoped to their department and branch.</div>
+      </div>
+      ${state.mgrErr?`<div class="err">${esc(state.mgrErr)}</div>`:''}
+      <button class="btn primary block" onclick="mgrEnter()">Sign in</button>
+    </div>`;
+  }
+  const m=MANAGERS.find(x=>x.id===state.mgrId);
+  const b=m.branch,d=m.dept;
+  return `
+  <div class="crumbs"><span class="here">${esc(m.name)} — ${esc(d)} Manager</span><span class="sep">·</span><span class="here mono">${esc(b)}</span>
+    <span class="who"><button onclick="state.mgrId=null;resetDraft();render()" style="color:var(--pine);font-weight:600">Sign out</button></span></div>
+  ${sopBoard(d,b,'manager')}
+  ${testBoard(d,b,m.name)}
+  ${addSopForm(d,b,true)}
+  ${createTestForm(d,b,true)}`;
+}
+function mgrEnter(){
+  const id=+document.getElementById('m-name').value;
+  if(!id){state.mgrErr='Select your name first.';render();return}
+  const m=MANAGERS.find(x=>x.id===id);
+  const key='mgr-'+id;
+  if(LOCKS.has(key)){state.mgrErr='Too many wrong attempts. Ask admin to reset your code.';render();return}
+  const code=document.getElementById('m-code').value;
+  if(code!==m.code){
+    state.mgrTries++;
+    if(state.mgrTries>=3){LOCKS.add(key);state.mgrErr='Too many wrong attempts. Ask admin to reset your code.';}
+    else state.mgrErr='Wrong code — attempt '+state.mgrTries+' of 3.';
+    render();return;
+  }
+  state.mgrId=id;state.mgrErr='';state.mgrTries=0;render();
+}
+
+/* ================= admin ================= */
+function renderAdmin(){
+  const d=state.aDept,b=state.aBranch;
+  return `
+  <div class="filters">
+    <div class="field"><label for="a-branch">Branch</label>
+      <select id="a-branch" onchange="state.aBranch=this.value;resetDraft();render()">
+        ${BRANCHES.map(x=>`<option value="${esc(x.code)}" ${x.code===b?'selected':''}>${esc(x.code)} — ${esc(x.name)}</option>`).join('')}
+      </select></div>
+    <div class="field"><label for="a-dept">Department</label>
+      <select id="a-dept" onchange="state.aDept=this.value;resetDraft();render()">
+        ${DEPTS.map(x=>`<option ${x===d?'selected':''}>${esc(x)}</option>`).join('')}
+      </select></div>
+  </div>
+  ${sopBoard(d,b,'admin')}
+  ${testBoard(d,b,'Admin')}
+  ${addSopForm(d,b,false)}
+  ${createTestForm(d,b,false)}
+  <details class="board">
+    <summary>Add staff member<span class="hint">code auto-generated</span></summary>
+    <div class="card-body">
+      <div class="field"><label for="s-name">Name</label><input type="text" id="s-name" placeholder="e.g. Areeba"></div>
+      <div class="fieldrow">
+        <div class="field"><label for="s-dept">Department</label>
+          <select id="s-dept">${DEPTS.map(x=>`<option ${x===d?'selected':''}>${esc(x)}</option>`).join('')}</select></div>
+        <div class="field"><label for="s-branch">Branch</label>
+          <select id="s-branch">${BRANCHES.map(x=>`<option value="${esc(x.code)}" ${x.code===b?'selected':''}>${esc(x.code)}</option>`).join('')}</select></div>
+      </div>
+      <button class="btn primary block" onclick="addStaff()">Add staff</button>
+    </div>
+  </details>
+  <details class="board">
+    <summary>Add department manager</summary>
+    <div class="card-body">
+      <div class="field"><label for="m2-name">Name</label><input type="text" id="m2-name" placeholder="e.g. Faisal"></div>
+      <div class="fieldrow">
+        <div class="field"><label for="m2-dept">Department</label>
+          <select id="m2-dept">${DEPTS.map(x=>`<option ${x===d?'selected':''}>${esc(x)}</option>`).join('')}</select></div>
+        <div class="field"><label for="m2-branch">Branch</label>
+          <select id="m2-branch">${BRANCHES.map(x=>`<option value="${esc(x.code)}" ${x.code===b?'selected':''}>${esc(x.code)}</option>`).join('')}</select></div>
+      </div>
+      <button class="btn primary block" onclick="addManager()">Add manager</button>
+    </div>
+  </details>
+  <details class="board">
+    <summary>Add branch</summary>
+    <div class="card-body">
+      <div class="field"><label for="b-code">Branch code</label><input type="text" id="b-code" maxlength="4" placeholder="e.g. GLB" style="text-transform:uppercase"></div>
+      <div class="field"><label for="b-name">Branch name</label><input type="text" id="b-name" placeholder="e.g. Gulberg"></div>
+      <button class="btn primary block" onclick="addBranch()">Add branch</button>
+    </div>
+  </details>
+  <details class="board">
+    <summary>Add department</summary>
+    <div class="card-body">
+      <div class="field"><label for="d-name">Department name</label><input type="text" id="d-name" placeholder="e.g. Security"></div>
+      <button class="btn primary block" onclick="addDept()">Add department</button>
+    </div>
+  </details>`;
+}
+function addStaff(){
+  const name=document.getElementById('s-name').value.trim();
+  if(!name){toast('Enter the staff member\u2019s name');return}
+  const dept=document.getElementById('s-dept').value;
+  const branch=document.getElementById('s-branch').value;
+  const code=newCode();
+  STAFF.push({id:Math.max(...STAFF.map(s=>s.id))+1,name,dept,branch,code});
+  toast(name+' added — employee code '+code+' (share it privately)');
+  render();
+}
+function addManager(){
+  const name=document.getElementById('m2-name').value.trim();
+  if(!name){toast('Enter the manager\u2019s name');return}
+  const dept=document.getElementById('m2-dept').value;
+  const branch=document.getElementById('m2-branch').value;
+  const code=newCode();
+  MANAGERS.push({id:Math.max(...MANAGERS.map(m=>m.id))+1,name,dept,branch,code});
+  toast(name+' added as '+dept+' manager at '+branch+' — code '+code);
+  render();
+}
+function addBranch(){
+  const code=document.getElementById('b-code').value.trim().toUpperCase();
+  const name=document.getElementById('b-name').value.trim();
+  if(!code||!name){toast('Branch needs a code and a name');return}
+  if(BRANCHES.some(x=>x.code===code)){toast('Branch code '+code+' already exists');return}
+  BRANCHES.push({code,name});
+  state.aBranch=code;
+  toast('Branch '+code+' added — "all branches" SOPs and tests apply to it automatically');
+  render();
+}
+function addDept(){
+  const name=document.getElementById('d-name').value.trim();
+  if(!name){toast('Enter a department name');return}
+  if(DEPTS.some(x=>x.toLowerCase()===name.toLowerCase())){toast('That department already exists');return}
+  DEPTS.push(name);
+  state.aDept=name;
+  toast('Department added — now add its staff, SOPs and tests');
+  render();
+}
+
+/* ================= notifications bell ================= */
+const BELL='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 9a6 6 0 1 1 12 0c0 4.6 1.8 5.6 2 6H4c.2-.4 2-1.4 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>';
+function toggleNotif(){
+  if(!state.notifOpen){
+    state.lastUnread=new Set(unreadOf(state.userId).map(n=>n.id));
+    NOTIFS.forEach(n=>{if(n.staffId===state.userId)n.read=true});
+    state.notifOpen=true;
+  }else state.notifOpen=false;
+  renderBell();
+}
+function renderBell(){
+  const slot=document.getElementById('bell-slot');
+  if(!(state.role==='staff'&&state.userId)){slot.innerHTML='';state.notifOpen=false;return}
+  const mine=NOTIFS.filter(n=>n.staffId===state.userId).sort((a,b)=>b.ts-a.ts).slice(0,12);
+  const un=unreadOf(state.userId).length;
+  let panel='';
+  if(state.notifOpen){
+    panel=`<div class="notifpanel">
+      <div class="np-head">Notifications</div>
+      ${mine.length?`<ul>${mine.map(n=>`
+        <li class="${state.lastUnread&&state.lastUnread.has(n.id)?'unread':''}">${esc(n.text)}<span class="nts">${fmt(n.ts)}</span></li>`).join('')}</ul>`
+      :`<div class="notifempty">No notifications yet.</div>`}
+    </div>`;
+  }
+  slot.innerHTML=`<button class="bell" aria-label="Notifications${un?' — '+un+' unread':''}" onclick="toggleNotif()">${BELL}${un?`<span class="badge">${un}</span>`:''}</button>${panel}`;
+}
+
+/* ================= render ================= */
+function render(){
+  const v=state.role==='staff'?renderStaffFlow():state.role==='manager'?renderManager():renderAdmin();
+  document.getElementById('view').innerHTML=v;
+  renderBell();
+}
+render();
+</script>
+</body>
+</html>

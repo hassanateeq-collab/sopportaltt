@@ -1,72 +1,63 @@
-import { useState } from 'react'
-import { api, read, notificationsFor, unreadCount } from '../data/store'
-import { formatDateTime } from '../lib/certs'
-import { Sheet, Empty } from './ui'
+import { useEffect, useRef, useState } from 'react'
+import { api, notificationsFor, unreadCount } from '../data/store'
+import { fmt } from '../lib/format'
+import { BellIcon } from './icons'
 
 /**
- * The notification bell with its unread badge. Opening it marks everything read
- * — same behaviour the brief asks for. Notifications are written by the Edge
- * Functions that approve retests, assign tests, publish SOPs and record scores;
- * this component only reads and marks them.
+ * The notification bell: a small dropdown panel in the topbar, matching the
+ * prototype. Opening it marks everything read, and the items opened while unread
+ * keep a brass rail for that one viewing.
  */
 export function NotificationBell({ staffId, token }: { staffId: string; token: string }) {
   const [open, setOpen] = useState(false)
-  const count = unreadCount(staffId)
-  const items = notificationsFor(staffId)
+  const [wasUnread, setWasUnread] = useState<Set<string>>(new Set())
+  const ref = useRef<HTMLSpanElement>(null)
 
-  async function openSheet() {
-    setOpen(true)
-    if (count > 0) await api.markNotificationsRead(token)
+  const count = unreadCount(staffId)
+  const items = notificationsFor(staffId).slice(0, 12)
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+
+  async function toggle() {
+    if (!open) {
+      setWasUnread(new Set(notificationsFor(staffId).filter((n) => !n.read).map((n) => n.id)))
+      if (count > 0) await api.markNotificationsRead(token)
+      setOpen(true)
+    } else {
+      setOpen(false)
+    }
   }
 
   return (
-    <>
-      <button className="iconbtn" onClick={openSheet} aria-label={`Notifications, ${count} unread`}>
-        🔔
-        {count > 0 && <span className="badge-dot">{count > 9 ? '9+' : count}</span>}
+    <span className="bell-slot" ref={ref}>
+      <button className="bell" aria-label={`Notifications${count ? ` — ${count} unread` : ''}`} onClick={toggle}>
+        <BellIcon />
+        {count > 0 && <span className="badge">{count}</span>}
       </button>
-
       {open && (
-        <Sheet title="Notifications" onClose={() => setOpen(false)}>
+        <div className="notifpanel">
+          <div className="np-head">Notifications</div>
           {items.length === 0 ? (
-            <Empty icon="🔔" title="No notifications yet">
-              You’ll be told here when a test is assigned, a retest is approved, a new SOP is published, or a
-              score is recorded.
-            </Empty>
+            <div className="notifempty">No notifications yet.</div>
           ) : (
-            <div>
+            <ul>
               {items.map((n) => (
-                <div className="notif" key={n.id}>
-                  <span className={`notif__dot ${n.read ? 'notif__dot--read' : ''}`} aria-hidden />
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: '0.9rem' }}>{n.text}</div>
-                    <div className="tiny" style={{ marginTop: 3 }}>
-                      {kindLabel(n.kind)} · {formatDateTime(n.created_at)}
-                    </div>
-                  </div>
-                </div>
+                <li key={n.id} className={wasUnread.has(n.id) ? 'unread' : ''}>
+                  {n.text}
+                  <span className="nts">{fmt(n.created_at)}</span>
+                </li>
               ))}
-            </div>
+            </ul>
           )}
-        </Sheet>
+        </div>
       )}
-    </>
+    </span>
   )
-}
-
-function kindLabel(kind: string): string {
-  return (
-    {
-      retest_approved: 'Retest approved',
-      test_assigned: 'Test assigned',
-      sop_published: 'SOP published',
-      score_recorded: 'Score recorded',
-    }[kind] ?? 'Update'
-  )
-}
-
-/** Named export kept small so screens can also show a bell without the sheet. */
-export function unreadBadge(staffId: string): number {
-  void read
-  return unreadCount(staffId)
 }

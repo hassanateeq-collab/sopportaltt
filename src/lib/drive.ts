@@ -22,6 +22,18 @@
  * file id on the SOP record, and serves staff only what this module builds.
  */
 
+/**
+ * The locked Google Drive folder that stores every SOP document, training video
+ * and image. In production the upload Edge Function pushes files into THIS folder
+ * through the Drive API (using a service account), sets each file to view-only,
+ * and stores the returned file id on the SOP record. Access is mediated entirely
+ * by Supabase/Edge Functions — the browser only ever receives the /preview embed.
+ *
+ * Folder shared by the owner:
+ * https://drive.google.com/drive/folders/1ERAgtoCpbhCEzFYq0gxhfbXc_rM6l9LQ
+ */
+export const DRIVE_STORAGE_FOLDER_ID = '1ERAgtoCpbhCEzFYq0gxhfbXc_rM6l9LQ'
+
 export function documentEmbedUrl(fileId: string): string {
   return `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/preview`
 }

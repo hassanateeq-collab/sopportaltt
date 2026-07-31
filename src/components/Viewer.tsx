@@ -1,100 +1,107 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { Sop } from '../types'
+import { scopeLabel } from '../lib/scope'
+import { read } from '../data/store'
 import { documentEmbedUrl, videoEmbedUrl, VIEWER_SANDBOX } from '../lib/drive'
-import { Notice } from './ui'
+import { fmtD } from '../lib/format'
 
 /**
- * The in-portal viewer. One SOP, a document/video toggle, and — for staff — the
- * read-and-understood sign-off underneath both.
+ * The in-portal viewer: one SOP, a Document/Video toggle, and — via the footer
+ * the caller supplies — the read-and-understood sign-off underneath both.
  *
- * The controls here are hidden deliberately (no download, print, or pop-out),
- * but that is only deterrence: the real view-only lock is the Drive share
- * setting on the file itself. See lib/drive.ts. When no file id is present yet
- * we show a labelled placeholder rather than a broken frame, because in this
- * first build documents have not been pushed to Drive.
+ * The VIEW ONLY chip and the hidden controls are deterrence only; the real lock
+ * is the Drive share setting on the file. When no Drive file is attached yet we
+ * show a watermarked "paper" placeholder rather than a broken frame.
  */
 export function Viewer({
   sop,
-  initialTab = 'document',
+  initialKind = 'doc',
+  showViewOnly = true,
   onClose,
   footer,
 }: {
   sop: Sop
-  initialTab?: 'document' | 'video'
+  initialKind?: 'doc' | 'video'
+  showViewOnly?: boolean
   onClose: () => void
   footer?: ReactNode
 }) {
-  const [tab, setTab] = useState<'document' | 'video'>(initialTab)
+  const [kind, setKind] = useState<'doc' | 'video'>(initialKind)
   const hasVideo = !!sop.video_file_id
-  const activeFileId = tab === 'document' ? sop.document_file_id : sop.video_file_id
+  const fileId = kind === 'doc' ? sop.document_file_id : sop.video_file_id
+  const dept = read.department(sop.department_id)?.name ?? ''
+  const scope = scopeLabel(sop.branch_scope)
 
   return (
     <div className="viewer">
-      <div className="viewer__head">
-        <button className="topbar__back" onClick={onClose} aria-label="Close viewer">
-          ‹
-        </button>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="viewer__code">{sop.code} · v{sop.version}</div>
-          <div className="viewer__title">{sop.title}</div>
+      <div className="v-head">
+        <span className="v-title">
+          <span className="mono" style={{ fontSize: 12, color: 'var(--brass-deep)' }}>{sop.code}</span> {sop.title}
+          <span className="ver">v{sop.version}</span>
+        </span>
+        <div className="vseg" role="group" aria-label="Content">
+          <button aria-pressed={kind === 'doc'} onClick={() => setKind('doc')}>Document</button>
+          <button aria-pressed={kind === 'video'} onClick={() => setKind('video')} disabled={!hasVideo}>▶ Video</button>
         </div>
+        {showViewOnly && <span className="vo">VIEW ONLY</span>}
+        <button className="v-close" onClick={onClose} aria-label="Close">✕</button>
       </div>
 
-      <div className="toggle">
-        <button
-          className={`toggle__btn ${tab === 'document' ? 'toggle__btn--on' : ''}`}
-          onClick={() => setTab('document')}
-        >
-          Document
-        </button>
-        <button
-          className={`toggle__btn ${tab === 'video' ? 'toggle__btn--on' : ''}`}
-          onClick={() => setTab('video')}
-          disabled={!hasVideo}
-          title={hasVideo ? undefined : 'No training video attached to this SOP yet'}
-        >
-          ▶ Video
-        </button>
-      </div>
-
-      <div className="viewer__stage">
-        {activeFileId ? (
-          <iframe
-            className="viewer__frame"
-            src={tab === 'document' ? documentEmbedUrl(activeFileId) : videoEmbedUrl(activeFileId)}
-            sandbox={VIEWER_SANDBOX}
-            allow="autoplay; encrypted-media"
-            title={`${sop.code} ${tab}`}
-            referrerPolicy="no-referrer"
-          />
+      <div className="v-doc">
+        {fileId ? (
+          <div className="v-frame-wrap">
+            <iframe
+              src={kind === 'doc' ? documentEmbedUrl(fileId) : videoEmbedUrl(fileId)}
+              sandbox={VIEWER_SANDBOX}
+              allow="autoplay; encrypted-media"
+              title={`${sop.code} ${kind}`}
+              referrerPolicy="no-referrer"
+            />
+            <div className="noext" title="View only" />
+          </div>
+        ) : kind === 'video' ? (
+          <div className="paper">
+            <div className="wm">VIEW ONLY</div>
+            <div className="ph-brand">Hamsun Hospitality · {dept}</div>
+            <h1>{sop.title} — Training Video</h1>
+            <div className="ph-meta">{sop.code} · v{sop.version} · {scope}</div>
+            <div className="playph">
+              <div className="pcirc">▶</div>
+              <p style={{ textAlign: 'center', maxWidth: 420 }}>
+                The training video for this SOP plays here once a Google Drive or YouTube link is attached in Manager or
+                Admin. Staff watch inside the portal only.
+              </p>
+            </div>
+            <div className="ph-foot">CONTROLLED CONTENT · HAMSUN SOP PORTAL</div>
+          </div>
         ) : (
-          <div className="placeholder">
-            <div className="placeholder__icon" aria-hidden>
-              {tab === 'document' ? '📄' : '🎬'}
+          <div className="paper">
+            <div className="wm">VIEW ONLY</div>
+            <div className="ph-brand">Hamsun Hospitality · {dept}</div>
+            <h1>{sop.title}</h1>
+            <div className="ph-meta">
+              {sop.code} · v{sop.version} · updated {fmtD(sop.updated_at)} · applies to {scope}
             </div>
-            <div style={{ fontWeight: 650 }}>
-              {tab === 'document' ? 'Document not yet linked' : 'Training video not yet linked'}
-            </div>
-            <p className="muted" style={{ maxWidth: 340 }}>
-              {tab === 'document'
-                ? 'When the SOP file is uploaded it lands in a locked Google Drive folder and its view-only preview appears here.'
-                : 'When a training video is attached to this SOP its view-only preview plays here.'}
+            <h2>1. Purpose</h2>
+            <p>{sop.summary || 'Newly published — pending its full document.'}</p>
+            <h2>2. Procedure</h2>
+            <p>
+              The full step-by-step procedure appears here, streamed live from the controlled Google Drive file once a
+              document link is attached. It always shows the current version — no copies floating on WhatsApp.
             </p>
-            <div style={{ marginTop: 6, maxWidth: 360 }}>
-              <Notice tone="info">
-                View-only is enforced by the Drive share setting on the file — “Viewer”, with download,
-                print and copy turned off — not by this screen.
-              </Notice>
-            </div>
+            <h2>3. Responsibility</h2>
+            <p>Every {dept} team member covered by the scope above must read this document and sign the register below.</p>
+            <div className="ph-foot">CONTROLLED DOCUMENT · HAMSUN SOP PORTAL · DO NOT DISTRIBUTE</div>
           </div>
         )}
-        <p className="tiny" style={{ marginTop: 10, textAlign: 'center' }}>
-          {sop.summary}
-        </p>
       </div>
 
-      {footer && <div className="viewer__foot">{footer}</div>}
+      {footer && (
+        <div className="v-foot">
+          <div className="v-foot-in">{footer}</div>
+        </div>
+      )}
     </div>
   )
 }
