@@ -145,7 +145,14 @@ Deno.serve(async (req) => {
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI },
       body: JSON.stringify({
         contents: [{ role: 'user', parts }],
-        generationConfig: { responseMimeType: 'application/json', temperature: 0.6, maxOutputTokens: 4096 },
+        generationConfig: {
+          responseMimeType: 'application/json',
+          temperature: 0.6,
+          maxOutputTokens: 8192,
+          // Newer flash models spend output tokens on internal "thinking", which
+          // was truncating the JSON. We don't need reasoning to draft questions.
+          thinkingConfig: { thinkingBudget: 0 },
+        },
       }),
     }
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`
@@ -170,7 +177,11 @@ Deno.serve(async (req) => {
     }
     const data = await res.json()
     const cand = data.candidates?.[0]
-    const text: string = (cand?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? '').join('')
+    // Exclude any internal "thought" parts; keep only the answer text.
+    const text: string = (cand?.content?.parts ?? [])
+      .filter((p: { thought?: boolean }) => !p.thought)
+      .map((p: { text?: string }) => p.text ?? '')
+      .join('')
     if (!text.trim()) {
       return json({ questions: [], warnings: [`The model returned no text (finishReason: ${cand?.finishReason ?? 'unknown'}). Try again.`] })
     }
@@ -190,7 +201,7 @@ Deno.serve(async (req) => {
       }
     }
     if (obj == null) {
-      return json({ questions: [], warnings: [`Could not read the model output. Raw start: ${cleaned.slice(0, 220)}`] })
+      return json({ questions: [], warnings: [`Could not read the model output (finishReason: ${cand?.finishReason ?? '?'}). Raw start: ${cleaned.slice(0, 200)}`] })
     }
     const container = obj as { questions?: unknown; data?: unknown }
     const parsed = Array.isArray(obj)
