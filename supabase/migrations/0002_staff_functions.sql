@@ -31,6 +31,16 @@ create index if not exists staff_sessions_staff_idx on public.staff_sessions (st
 alter table public.staff_sessions enable row level security;
 revoke all on public.staff_sessions from anon, authenticated;
 
+-- ─────────────────────────────────────────────── employee code lookup ──
+-- Store the plaintext employee code so a signed-in manager or admin can look it
+-- up and re-tell it to staff (it's a hotel PIN, not a password). Reads are
+-- governed by the existing staff RLS: an admin sees all, a manager sees only her
+-- own department+branch, a staff member sees only their own row. anon has no
+-- access to the staff table at all, and the sign-in name directory never selects
+-- this column — so the code is never exposed publicly.
+alter table public.staff add column if not exists employee_code text;
+grant select (employee_code) on public.staff to authenticated;
+
 -- ─────────────────────────────────────────── employee-code bcrypt helpers ──
 -- SECURITY DEFINER so they run with the owner's rights and can read/write the
 -- protected employee_code_hash column. EXECUTE is revoked from everyone and
@@ -44,22 +54,27 @@ create or replace function public.create_staff(
 language plpgsql security definer set search_path = public, extensions as $$
 declare r public.staff;
 begin
-  insert into public.staff (name, department_id, branch_id, job_title, employee_code_hash)
+  insert into public.staff (name, department_id, branch_id, job_title, employee_code, employee_code_hash)
   values (
     p_name,
     p_department,
     p_branch,
     coalesce(nullif(btrim(p_job), ''), 'Staff'),
+    p_code,
     crypt(p_code, gen_salt('bf'))
   )
   returning * into r;
   return r;
 end $$;
 
--- Replace a staff member's employee code with a freshly hashed one.
+-- Replace a staff member's employee code with a freshly hashed one (and keep the
+-- plaintext so managers/admins can look it up).
 create or replace function public.set_staff_code(p_staff uuid, p_code text)
 returns void language sql security definer set search_path = public, extensions as $$
-  update public.staff set employee_code_hash = crypt(p_code, gen_salt('bf')) where id = p_staff;
+  update public.staff
+     set employee_code = p_code,
+         employee_code_hash = crypt(p_code, gen_salt('bf'))
+   where id = p_staff;
 $$;
 
 -- True when the supplied code matches the stored hash of an active staff member.

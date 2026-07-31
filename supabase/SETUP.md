@@ -234,11 +234,20 @@ After they deploy:
 - **Staff** → pick branch, department, your name, enter your code → your SOPs and
   tests. Three wrong codes locks the record for fifteen minutes (counted
   server-side). Signing an SOP and taking a test are recorded live.
-- **Admin → Staff** roster: add a member (a six-digit code is generated and shown
-  once), re-issue a code, deactivate/reactivate.
+- **Admin → Staff** roster: add a member (a six-digit code is generated), see and
+  re-issue each person's code, deactivate/reactivate. Only an admin issues codes.
+- **Manager → Staff codes**: a manager can look up the codes of staff **in her own
+  department + branch** (read-only) so she can re-tell them.
 - **Admin → Managers** roster: add a manager (creates their Supabase Auth login;
   a temporary password is shown once unless you set one), reassign their
   department/branch, disable/enable, or delete (removes the login).
+
+> **On employee codes.** These are simple sign-in PINs, so the plaintext is kept
+> and shown to authorised people who need to hand them out. Row-level security
+> makes the code readable only by an admin, by the manager of that person's
+> department + branch, and by the staff member themselves — never by the public,
+> and the sign-in name dropdown never includes it. (The bcrypt hash is still what
+> verifies a sign-in.)
 
 Deactivating a staff member and reassigning a manager are plain column changes an
 admin makes directly under RLS — only the writes that touch a bcrypt hash or a

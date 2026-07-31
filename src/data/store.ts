@@ -194,7 +194,9 @@ export function getResumedActor(): Actor | null {
 
 function mapStaffRow(row: Record<string, unknown>): Staff {
   // employee_code_hash is intentionally never sent to the browser (column
-  // grant), so it is blank in the cache. The browser has no use for it.
+  // grant), so it is blank in the cache. The plaintext employee_code IS granted
+  // to authenticated, but only for rows the caller's RLS lets them see (their own
+  // patch / themselves), so a manager or admin can look up a code to re-tell it.
   return {
     id: row.id as string,
     name: row.name as string,
@@ -202,6 +204,7 @@ function mapStaffRow(row: Record<string, unknown>): Staff {
     branch_id: row.branch_id as string,
     job_title: (row.job_title as string) ?? 'Staff',
     employee_code_hash: '',
+    employee_code: (row.employee_code as string | null) ?? null,
     active: row.active as boolean,
     created_at: row.created_at as string,
   }
@@ -217,7 +220,7 @@ async function fetchAll<T>(table: string, columns = '*'): Promise<T[]> {
 // The employee-code hash column is not granted to the browser, so staff must be
 // selected by explicit columns — a plain `select *` trips the column privilege
 // and Postgres answers "permission denied for table staff".
-const STAFF_COLUMNS = 'id,name,department_id,branch_id,job_title,active,created_at'
+const STAFF_COLUMNS = 'id,name,department_id,branch_id,job_title,employee_code,active,created_at'
 
 /** Load just the anon-readable org shell (branches + departments) for the login funnels. */
 async function hydratePublic(): Promise<void> {
@@ -607,7 +610,7 @@ async function seed(): Promise<void> {
   const staff: Staff[] = []
   for (const s of DEMO_STAFF) {
     const { code, ...rest } = s
-    staff.push({ ...rest, employee_code_hash: await hashEmployeeCode(code), created_at })
+    staff.push({ ...rest, employee_code_hash: await hashEmployeeCode(code), employee_code: code, created_at })
   }
   db = {
     ...emptyDb(),
@@ -1526,6 +1529,7 @@ export const api = {
       branch_id: input.branch_id,
       job_title: input.job_title.trim() || 'Staff',
       employee_code_hash: await hashEmployeeCode(code),
+      employee_code: code,
       active: true,
       created_at: nowIso(),
     }
@@ -1562,6 +1566,7 @@ export const api = {
     assertCanTouchStaff(actor, staff)
     const code = generateEmployeeCode()
     staff.employee_code_hash = await hashEmployeeCode(code)
+    staff.employee_code = code
     delete db.lockouts[staffId]
     commit()
     return code

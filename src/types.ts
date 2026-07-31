@@ -35,11 +35,18 @@ export interface Staff {
   branch_id: Uuid
   job_title: string
   /**
-   * Hash of the numeric employee code. The plaintext code is shown to the admin
-   * exactly once at creation and never stored. Production replaces this with
-   * bcrypt inside the staff-login Edge Function; see lib/hash.ts.
+   * Hash of the numeric employee code, verified server-side at sign-in.
    */
   employee_code_hash: string
+  /**
+   * The plaintext employee code, kept so a signed-in manager or admin can look it
+   * up and re-tell it to staff (a hotel PIN, not a password). It is readable ONLY
+   * by an admin, by the manager of that person's department+branch, and by the
+   * person themselves — never by anon, and never through the staff sign-in
+   * directory. Blank on staff created before this was added; re-issue a code to
+   * fill it in.
+   */
+  employee_code?: string | null
   active: boolean
   created_at: Iso
 }

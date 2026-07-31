@@ -83,6 +83,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
       <AddSopForm dept={dept} branch={branch} actor={actor} lockBranch={!isAdmin} />
       <CreateTestForm dept={dept} branch={branch} actor={actor} lockBranch={!isAdmin} />
 
+      {!isAdmin && <StaffCodes dept={dept} branch={branch} />}
       {isAdmin && <AdminOrg actor={actor} dept={dept} branch={branch} />}
 
       {viewer && (
@@ -810,6 +811,43 @@ function AdminOrg({ actor, dept, branch }: { actor: Actor; dept: Department; bra
   )
 }
 
+/* ---- staff codes: read-only roster a manager can look codes up in ---- */
+
+function StaffCodes({ dept, branch }: { dept: Department; branch: Branch }) {
+  const people = read
+    .staff()
+    .filter((s) => s.department_id === dept.id && s.branch_id === branch.id)
+    .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name))
+
+  return (
+    <details className="board">
+      <summary>Staff codes — {dept.name} · {branch.code}<span className="hint">{people.length} on file</span></summary>
+      <div className="card-body">
+        {people.length === 0 ? (
+          <div className="empty-row">No staff here yet — an admin adds them.</div>
+        ) : (
+          people.map((s) => (
+            <div className="brow" key={s.id}>
+              <div className="brow-top">
+                <span className="brow-title">
+                  {s.name} <span className="ver">{s.job_title}</span>
+                  {!s.active && <span className="vidchip" style={{ marginLeft: 6 }}>INACTIVE</span>}
+                </span>
+                <span className="mono" style={{ fontWeight: 700 }} title="Employee code">
+                  {s.employee_code ?? '— no code yet'}
+                </span>
+              </div>
+            </div>
+          ))
+        )}
+        <p className="demo-hint" style={{ marginTop: 8 }}>
+          Codes let staff sign in to see their SOPs and tests. Only an admin can issue or re-issue a code.
+        </p>
+      </div>
+    </details>
+  )
+}
+
 /* ---- staff roster: reveal a new code, deactivate / reactivate ---- */
 
 function StaffRoster({ actor, dept, branch }: { actor: Actor; dept: Department; branch: Branch }) {
@@ -833,6 +871,9 @@ function StaffRoster({ actor, dept, branch }: { actor: Actor; dept: Department; 
                   {s.name} <span className="ver">{s.job_title}</span>
                   {!s.active && <span className="vidchip" style={{ marginLeft: 6 }}>INACTIVE</span>}
                 </span>
+                <span className="mono" style={{ fontWeight: 700 }} title="Employee code">
+                  {s.employee_code ?? '— no code yet'}
+                </span>
               </div>
               <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
                 <button
@@ -844,7 +885,7 @@ function StaffRoster({ actor, dept, branch }: { actor: Actor; dept: Department; 
                     })
                   }
                 >
-                  ↻ New code
+                  {s.employee_code ? '↻ New code' : '＋ Issue code'}
                 </button>
                 <button
                   className="btn sm"
