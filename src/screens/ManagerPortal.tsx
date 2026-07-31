@@ -8,6 +8,7 @@ import {
   attemptsFor,
   latestCertification,
   openGrant,
+  uploadSopViaFunction,
   ApiError,
 } from '../data/store'
 import type { Actor, DraftQuestion } from '../data/store'
@@ -357,6 +358,8 @@ interface Upload {
   size: number
   /** blob: URL for the in-portal preview (session only). */
   src: string
+  /** The actual file, sent to the upload function in Supabase mode. */
+  file: File
 }
 
 /**
@@ -391,14 +394,14 @@ function AddSopForm({
     const f = e.target.files?.[0]
     if (!f) return
     if (f.type !== 'application/pdf' && !f.name.toLowerCase().endsWith('.pdf')) { toast('Upload a PDF file'); e.target.value = ''; return }
-    setPdf({ name: f.name, size: f.size, src: URL.createObjectURL(f) })
+    setPdf({ name: f.name, size: f.size, src: URL.createObjectURL(f), file: f })
   }
 
   function onVideo(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
     if (!f) return
     if (!f.type.startsWith('video/')) { toast('Upload a video file'); e.target.value = ''; return }
-    setVideo({ name: f.name, size: f.size, src: URL.createObjectURL(f) })
+    setVideo({ name: f.name, size: f.size, src: URL.createObjectURL(f), file: f })
   }
 
   async function submit() {
@@ -408,18 +411,26 @@ function AddSopForm({
     const scope: BranchScope = lockBranch || !allBranches ? { kind: 'LIST', branch_codes: [branch.code] } : { kind: 'ALL' }
     const folderName = DRIVE_DEPARTMENT_FOLDERS.find((f) => f.id === folderId)?.name ?? 'the folder'
     try {
-      const s = await api.publishSop(actor, {
-        title,
-        summary: '',
-        department_id: dept.id,
-        branch_scope: scope,
-        code: code || undefined,
-        // In the demo these carry the inline preview; in production the Edge
-        // Function replaces them with the Drive file ids after upload.
-        document_file_id: pdf.src,
-        video_file_id: video?.src ?? null,
-      })
-      toast(`Published as ${s.code} into ${folderName} — matching ${dept.name} staff notified`)
+      if (isSupabaseEnabled) {
+        // Real upload: the Edge Function pushes the files to Drive and inserts the SOP.
+        await uploadSopViaFunction(
+          { title, code: code || undefined, department_id: dept.id, branch_scope: scope, folder_id: folderId },
+          pdf.file,
+          video?.file ?? null,
+        )
+        toast(`Uploaded to ${folderName} and published — matching ${dept.name} staff notified`)
+      } else {
+        const s = await api.publishSop(actor, {
+          title,
+          summary: '',
+          department_id: dept.id,
+          branch_scope: scope,
+          code: code || undefined,
+          document_file_id: pdf.src,
+          video_file_id: video?.src ?? null,
+        })
+        toast(`Published as ${s.code} into ${folderName} — matching ${dept.name} staff notified`)
+      }
       setTitle(''); setCode(''); setPdf(null); setVideo(null)
     } catch (e) {
       toast(e instanceof ApiError ? e.message : 'Could not publish.')

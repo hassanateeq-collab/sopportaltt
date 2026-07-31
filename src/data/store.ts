@@ -27,7 +27,7 @@ import { hashEmployeeCode, verifyEmployeeCode, generateEmployeeCode } from '../l
 import { addMonths } from '../lib/certs'
 import { nextDocCode, isDocCodeTaken, isValidDocCode } from '../lib/codes'
 import { appliesToStaff, scopeIncludes } from '../lib/scope'
-import { supabase, isSupabaseEnabled } from '../lib/supabase'
+import { supabase, isSupabaseEnabled, functionsBase } from '../lib/supabase'
 import type {
   Acknowledgment,
   Admin,
@@ -325,6 +325,53 @@ async function resolveSupabaseActor(): Promise<Actor | null> {
   }
 
   return null
+}
+
+/**
+ * Publish an SOP by uploading its files through the upload-sop Edge Function
+ * (which pushes them to the chosen Drive folder view-only and inserts the SOP).
+ * Used in Supabase mode instead of the gated api.publishSop.
+ */
+export async function uploadSopViaFunction(
+  input: { title: string; code?: string; department_id: string; branch_scope: BranchScope; folder_id: string },
+  pdf: File,
+  video: File | null,
+): Promise<void> {
+  if (!supabase) throw new ApiError('Not connected to the database.')
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) throw new ApiError('Please sign in again.')
+
+  const fd = new FormData()
+  fd.set('title', input.title)
+  fd.set('code', input.code ?? '')
+  fd.set('department_id', input.department_id)
+  fd.set('branch_scope', JSON.stringify(input.branch_scope))
+  fd.set('folder_id', input.folder_id)
+  fd.set('document', pdf)
+  if (video) fd.set('video', video)
+
+  let res: Response
+  try {
+    res = await fetch(`${functionsBase}/upload-sop`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+      body: fd,
+    })
+  } catch {
+    throw new ApiError('Could not reach the upload function.')
+  }
+  if (res.status === 404) throw new ApiError('The upload function isn’t deployed yet — see supabase/SETUP.md.')
+  if (!res.ok) {
+    let msg = 'Upload failed.'
+    try {
+      const j = await res.json()
+      if (j?.error) msg = j.error
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(msg)
+  }
+  await hydrateFromSupabase()
 }
 
 /** On boot, resume a still-valid manager/admin session and hydrate the cache. */

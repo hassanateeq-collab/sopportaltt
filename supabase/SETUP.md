@@ -88,12 +88,53 @@ silently changing only the local cache.
 For local development, copy `.env.example` to `.env.local` and put the same two
 values in it, then `npm run dev`.
 
-## Stage 3 — Edge Functions
+## Stage 3a — Drive upload (the `upload-sop` function)  ← turns on Add SOP
+
+The Add-SOP form uploads a PDF + optional video and picks a Drive folder. The
+files are pushed into your **Hamsun_SOP** folder (view-only) by the
+`upload-sop` Edge Function (`supabase/functions/upload-sop`), which then inserts
+the SOP and notifies staff. The browser never holds Drive credentials — the
+function uses a **Google service account**.
+
+### One-time Google setup
+
+1. **Google Cloud Console** (console.cloud.google.com) → create or pick a project.
+2. **APIs & Services → Library → enable the “Google Drive API”.**
+3. **APIs & Services → Credentials → Create credentials → Service account.**
+   Give it a name; no roles needed. Open the new service account → **Keys → Add
+   key → Create new key → JSON** and download the file.
+4. Copy the service account’s **email** (looks like
+   `name@project.iam.gserviceaccount.com`). In Google Drive, open the
+   **Hamsun_SOP** folder → **Share** → add that email as **Editor** (this
+   cascades to the department sub-folders). This is what lets the function upload.
+
+### Give the function its secrets and deploy
+
+From the repo root (after `supabase login` and `supabase link --project-ref
+ruqnjxxzeaazqohlpacx`):
+
+```bash
+# store the service-account key as a secret (never committed, never in the browser)
+supabase secrets set GOOGLE_SERVICE_ACCOUNT="$(cat /path/to/your-service-account.json)"
+
+# deploy the function
+supabase functions deploy upload-sop
+```
+
+`SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are injected
+automatically — you only set `GOOGLE_SERVICE_ACCOUNT`.
+
+After it deploys, the **Add SOP** form on the live site really uploads: choose a
+PDF + video + folder → the files land in Hamsun_SOP view-only and the SOP appears
+on the board. (Keep videos reasonably sized; very large files may exceed the
+function request limit — resumable upload is a later enhancement.)
+
+## Stage 3b — the remaining Edge Functions
 
 `staff-directory`, `staff-login` (bcrypt code + server-side lockout + a
 short-lived staff JWT), `sign-sop`, `submit-attempt` (retest gate + certificate),
-`grant-retest`. Deployed with the Supabase CLI; the `service_role` and any
-Anthropic key live only in their secrets.
+`grant-retest`. Deployed the same way; the `service_role` and any Anthropic key
+live only in their secrets.
 
 ## Stage 4 — Cut over + redeploy
 
