@@ -1,0 +1,169 @@
+/**
+ * generate-test Edge Function (Gemini).
+ *
+ * Drafts multiple-choice questions from an SOP using the Google Gemini API. It
+ * downloads the SOP's PDF from Drive and sends it to Gemini so the questions are
+ * grounded in the real document (falling back to the SOP title if there's no
+ * PDF). Generation NEVER auto-publishes — it returns a draft the manager reviews
+ * and edits. The returned JSON is validated strictly (four options, exactly one
+ * correct index); anything invalid is dropped with a warning.
+ *
+ * Secrets: GEMINI_API_KEY, plus the GOOGLE_* OAuth secrets (to read the PDF).
+ */
+
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { getUserAccessToken, downloadFromDrive } from '../_shared/google.ts'
+
+const MODEL = 'gemini-2.0-flash'
+
+const cors = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
+}
+
+const LEVELS: Record<string, string> = {
+  low: 'LOW difficulty — direct recall: ask what the SOP itself states. One clearly correct option.',
+  medium: 'MEDIUM difficulty — application: put the rule inside a simple, realistic on-shift scenario.',
+  high: 'HIGH difficulty — judgment: multi-step or exception scenarios; wrong options must be plausible near-miss mistakes staff actually make.',
+}
+
+function toBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf)
+  let binary = ''
+  const chunk = 0x8000
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  return btoa(binary)
+}
+
+interface Draft {
+  text: string
+  options: string[]
+  correct_index: number
+}
+
+/** Strict validation — four non-empty distinct options, exactly one valid correct index. */
+function validate(raw: unknown): { questions: Draft[]; warnings: string[] } {
+  const warnings: string[] = []
+  const arr = Array.isArray(raw) ? raw : []
+  const questions: Draft[] = []
+  arr.forEach((item, i) => {
+    const n = i + 1
+    const q = item as Record<string, unknown>
+    const text = typeof q?.q === 'string' ? q.q.trim() : ''
+    const opts = Array.isArray(q?.opts) ? q.opts.map((o) => (typeof o === 'string' ? o.trim() : '')) : []
+    const ans = q?.ans
+    if (!text) return warnings.push(`Question ${n} had no text and was dropped.`)
+    if (opts.length !== 4 || opts.some((o) => !o)) return warnings.push(`Question ${n} did not have four full options and was dropped.`)
+    if (new Set(opts.map((o) => o.toLowerCase())).size !== 4) return warnings.push(`Question ${n} repeated an option and was dropped.`)
+    if (typeof ans !== 'number' || !Number.isInteger(ans) || ans < 0 || ans > 3) return warnings.push(`Question ${n} had no valid correct answer and was dropped.`)
+    questions.push({ text, options: opts, correct_index: ans })
+  })
+  if (!questions.length && !warnings.length) warnings.push('The model returned nothing usable. Write the test by hand.')
+  return { questions, warnings }
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
+  if (req.method !== 'POST') return json({ error: 'POST only' }, 405)
+
+  const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+  const ANON = Deno.env.get('SUPABASE_ANON_KEY')!
+  const SERVICE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  const GEMINI = Deno.env.get('GEMINI_API_KEY')
+  const G_ID = Deno.env.get('GOOGLE_CLIENT_ID')
+  const G_SECRET = Deno.env.get('GOOGLE_CLIENT_SECRET')
+  const G_REFRESH = Deno.env.get('GOOGLE_REFRESH_TOKEN')
+
+  try {
+    if (!GEMINI) return json({ error: 'AI generation is not configured — set the GEMINI_API_KEY secret.' }, 500)
+
+    const jwt = (req.headers.get('Authorization') ?? '').replace('Bearer ', '')
+    if (!jwt) return json({ error: 'Sign in first.' }, 401)
+    const userClient = createClient(SUPABASE_URL, ANON, { global: { headers: { Authorization: `Bearer ${jwt}` } } })
+    const { data: { user } } = await userClient.auth.getUser()
+    if (!user) return json({ error: 'Your session has expired — sign in again.' }, 401)
+
+    const admin = createClient(SUPABASE_URL, SERVICE)
+    const { data: adminRow } = await admin.from('admins').select('id').eq('auth_user_id', user.id).maybeSingle()
+    const { data: mgrRow } = adminRow
+      ? { data: null }
+      : await admin.from('managers').select('department_id').eq('auth_user_id', user.id).eq('active', true).maybeSingle()
+    if (!adminRow && !mgrRow) return json({ error: 'Not an admin or department manager.' }, 403)
+
+    const body = await req.json()
+    const sopId = String(body.sopId ?? '')
+    const difficulty = ['low', 'medium', 'high'].includes(body.difficulty) ? body.difficulty : 'medium'
+    const count = Math.min(6, Math.max(3, Number(body.count) || 5))
+
+    const { data: sop } = await admin
+      .from('sops')
+      .select('id, code, title, summary, department_id, document_file_id')
+      .eq('id', sopId)
+      .maybeSingle()
+    if (!sop) return json({ error: 'That SOP no longer exists.' }, 404)
+    if (!adminRow && sop.department_id !== mgrRow!.department_id) {
+      return json({ error: 'You can only generate from your own department’s SOPs.' }, 403)
+    }
+
+    const rules =
+      `Difficulty: ${LEVELS[difficulty]}\n` +
+      `Write exactly ${count} multiple-choice questions based ONLY on this SOP. Do not invent policies not in it. ` +
+      'Each question: max 35 words. Exactly 4 options, max 12 words each, exactly one correct. Wrong options must be realistic mistakes staff actually make. Vary the position of the correct answer.\n' +
+      'Respond with ONLY this JSON, no markdown fences: {"questions":[{"q":"...","opts":["...","...","...","..."],"ans":0}]}\n' +
+      '"ans" is the 0-based index of the correct option.'
+
+    // Build the Gemini request — prefer the real PDF; fall back to the title.
+    const parts: unknown[] = []
+    let usedPdf = false
+    if (sop.document_file_id && !/^(https?:|data:|blob:)/.test(sop.document_file_id) && G_ID && G_SECRET && G_REFRESH) {
+      try {
+        const token = await getUserAccessToken(G_ID, G_SECRET, G_REFRESH)
+        const pdf = await downloadFromDrive(token, sop.document_file_id)
+        parts.push({ inlineData: { mimeType: 'application/pdf', data: toBase64(pdf) } })
+        usedPdf = true
+      } catch (_) {
+        // couldn't fetch the PDF — fall back to text below
+      }
+    }
+    const intro =
+      'You write staff certification quiz questions for a boutique hotel group in Karachi. Staff read simple English.\n' +
+      (usedPdf ? 'Read the attached SOP document.\n' : `SOP: ${sop.title} (${sop.code}). ${sop.summary || ''}\n`) +
+      rules
+    parts.push({ text: intro })
+
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts }],
+          generationConfig: { responseMimeType: 'application/json', temperature: 0.6, maxOutputTokens: 2048 },
+        }),
+      },
+    )
+    if (!res.ok) return json({ error: `Gemini error: ${await res.text()}` }, 502)
+    const data = await res.json()
+    const text: string = (data.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? '').join('')
+
+    let parsed: unknown = []
+    try {
+      const cleaned = text.replace(/```json|```/g, '').trim()
+      const m = cleaned.match(/\{[\s\S]*\}/)
+      const obj = JSON.parse(m ? m[0] : cleaned)
+      parsed = Array.isArray(obj.questions) ? obj.questions : []
+    } catch (_) {
+      return json({ questions: [], warnings: ['The model returned unreadable output — try again or write questions by hand.'] })
+    }
+
+    return json(validate(parsed))
+  } catch (e) {
+    return json({ error: e instanceof Error ? e.message : 'Generation failed.' }, 500)
+  }
+})

@@ -1429,9 +1429,28 @@ export const api = {
   ): Promise<{ questions: DraftQuestion[]; warnings: string[] }> {
     const sop = read.sop(input.sopId)
     if (!sop) throw new ApiError('That SOP no longer exists.')
-    // Reading a department SOP to draft questions, not publishing to its scope.
-    assertCanReadDepartment(actor, sop.department_id)
 
+    // Supabase mode: the generate-test Edge Function reads the SOP's PDF from
+    // Drive and calls the Gemini API (the key lives only in the function).
+    if (isSupabaseEnabled) {
+      const { data: { session } } = await supabase!.auth.getSession()
+      if (!session) throw new ApiError('Please sign in again.')
+      const res = await fetch(`${functionsBase}/generate-test`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sopId: input.sopId, difficulty: input.difficulty, count: input.count }),
+      }).catch(() => null)
+      if (res && res.status === 404) throw new ApiError('The generate-test function isn’t deployed yet (see supabase/SETUP.md).')
+      if (!res || !res.ok) {
+        const j = res ? await res.json().catch(() => ({})) : {}
+        throw new ApiError((j as { error?: string }).error ?? 'Generation failed. Write the questions by hand.')
+      }
+      const j = await res.json()
+      return { questions: j.questions ?? [], warnings: j.warnings ?? [] }
+    }
+
+    // Demo mode: reading a department SOP to draft questions (no publish).
+    assertCanReadDepartment(actor, sop.department_id)
     await delay(900)
     const raw = mockClaudeGeneration(sop, input.difficulty, input.count)
     return validateGeneratedQuestions(raw)

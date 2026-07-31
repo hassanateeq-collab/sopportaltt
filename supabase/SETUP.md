@@ -171,6 +171,24 @@ supabase functions deploy delete-sop
 
 Until it's deployed, delete still works — it just leaves the file in the folder.
 
+## Stage 5 — AI test generation (Gemini)
+
+`generate-test` reads an SOP's PDF from Drive and drafts questions with the
+Google Gemini API (free tier). Generation never auto-publishes — the manager
+reviews and edits the draft.
+
+1. Get a **free** Gemini key at **aistudio.google.com → Get API key** (no billing
+   needed for the free tier).
+2. Set the secret and deploy (the GOOGLE_* secrets are reused to read the PDF):
+   ```bash
+   supabase secrets set GEMINI_API_KEY=AIza-your-key
+   supabase functions deploy generate-test
+   ```
+
+Then, in **Create a test → Generate the test from an SOP**, pick a source SOP,
+difficulty and count → **Generate questions** drafts them from the real document.
+Until it's deployed, the button explains it's needed.
+
 ## Stage 3b — the remaining Edge Functions
 
 `staff-directory`, `staff-login` (bcrypt code + server-side lockout + a

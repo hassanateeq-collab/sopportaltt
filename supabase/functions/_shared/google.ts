@@ -88,6 +88,15 @@ export async function createFolder(
   return { id: json.id, name: json.name }
 }
 
+/** Download a file's bytes from Drive. */
+export async function downloadFromDrive(token: string, fileId: string): Promise<ArrayBuffer> {
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Drive download failed: ${await res.text()}`)
+  return await res.arrayBuffer()
+}
+
 /** Delete a file from Drive. A missing file (404) is treated as already gone. */
 export async function deleteFromDrive(token: string, fileId: string): Promise<void> {
   const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`, {
