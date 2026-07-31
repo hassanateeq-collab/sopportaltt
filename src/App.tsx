@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { initStore, api, read } from './data/store'
+import { initStore, api, read, getResumedActor } from './data/store'
 import type { Actor } from './data/store'
 import type { Staff } from './types'
 import { useStore } from './lib/useStore'
@@ -28,6 +28,14 @@ export function App() {
     let active = true
     initStore().then(() => {
       if (!active) return
+      // In Supabase mode, resume a still-valid manager/admin session (initStore
+      // hydrated the cache already) so a reload doesn't force a re-login.
+      const resumed = getResumedActor()
+      if (resumed) {
+        setRoute({ name: 'manager', actor: resumed })
+        setReady(true)
+        return
+      }
       // Resume a staff shift session across a reload without a second code entry.
       const token = localStorage.getItem(STAFF_TOKEN_KEY)
       if (token) {
@@ -96,6 +104,14 @@ export function App() {
       )
 
     case 'manager':
-      return <ManagerPortal actor={route.actor} onLogout={() => setRoute({ name: 'landing' })} />
+      return (
+        <ManagerPortal
+          actor={route.actor}
+          onLogout={() => {
+            void api.managerLogout()
+            setRoute({ name: 'landing' })
+          }}
+        />
+      )
   }
 }

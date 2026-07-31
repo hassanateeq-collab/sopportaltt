@@ -27,6 +27,7 @@ import { hashEmployeeCode, verifyEmployeeCode, generateEmployeeCode } from '../l
 import { addMonths } from '../lib/certs'
 import { nextDocCode, isDocCodeTaken, isValidDocCode } from '../lib/codes'
 import { appliesToStaff, scopeIncludes } from '../lib/scope'
+import { supabase, isSupabaseEnabled } from '../lib/supabase'
 import type {
   Acknowledgment,
   Admin,
@@ -140,6 +141,19 @@ function nowIso(): string {
 }
 
 export async function initStore(): Promise<void> {
+  // Supabase mode: no seed and no localStorage cache. The database is the source
+  // of truth; the in-memory db is filled by hydrateFromSupabase() after a
+  // manager/admin (or, later, a staff member) signs in. If a manager session is
+  // still valid from a previous visit, resume it and hydrate straight away.
+  if (isSupabaseEnabled) {
+    db = emptyDb()
+    // Branches and departments are anon-readable, so the login funnels work
+    // before anyone signs in. A manager/admin session then hydrates the rest.
+    await hydratePublic()
+    await resumeSupabaseSession()
+    return
+  }
+
   const raw = localStorage.getItem(STORAGE_KEY)
   if (raw) {
     try {
@@ -157,6 +171,170 @@ export async function resetDemoData(): Promise<void> {
   db = emptyDb()
   await seed()
   commit()
+}
+
+/* ------------------------------------------------------ supabase backing ---- */
+
+/**
+ * When Supabase is enabled the in-memory `db` is a cache hydrated from the
+ * database. RLS decides what each signed-in actor may load, so an admin's
+ * hydrate returns everything and a manager's returns only her department and
+ * branch. Reads and the screens are unchanged — they still read `db`
+ * synchronously; only the source of the data moved.
+ */
+
+/** The manager/admin resumed from a persisted Supabase session, if any. */
+let resumedActor: Actor | null = null
+export function getResumedActor(): Actor | null {
+  return resumedActor
+}
+
+function mapStaffRow(row: Record<string, unknown>): Staff {
+  // employee_code_hash is intentionally never sent to the browser (column
+  // grant), so it is blank in the cache. The browser has no use for it.
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    department_id: row.department_id as string,
+    branch_id: row.branch_id as string,
+    job_title: (row.job_title as string) ?? 'Staff',
+    employee_code_hash: '',
+    active: row.active as boolean,
+    created_at: row.created_at as string,
+  }
+}
+
+async function fetchAll<T>(table: string): Promise<T[]> {
+  const client = supabase!
+  const { data, error } = await client.from(table).select('*')
+  if (error) throw new ApiError(`Could not load ${table}: ${error.message}`)
+  return (data ?? []) as T[]
+}
+
+/** Load just the anon-readable org shell (branches + departments) for the login funnels. */
+async function hydratePublic(): Promise<void> {
+  try {
+    const [branches, departments] = await Promise.all([
+      fetchAll<Branch>('branches'),
+      fetchAll<Department>('departments'),
+    ])
+    db.branches = branches
+    db.departments = departments
+    snapshotVersion++
+    listeners.forEach((fn) => fn())
+  } catch {
+    // Misconfigured keys or offline — the shell just shows nothing to pick.
+  }
+}
+
+/** Pull everything the current actor is allowed to see into the cache. */
+async function hydrateFromSupabase(): Promise<void> {
+  const [
+    branches,
+    departments,
+    staff,
+    managers,
+    admins,
+    sops,
+    acknowledgments,
+    tests,
+    questions,
+    assignments,
+    attempts,
+    certifications,
+    grants,
+    notifications,
+  ] = await Promise.all([
+    fetchAll<Branch>('branches'),
+    fetchAll<Department>('departments'),
+    fetchAll<Record<string, unknown>>('staff'),
+    fetchAll<Manager>('managers'),
+    fetchAll<Admin>('admins'),
+    fetchAll<Sop>('sops'),
+    fetchAll<Acknowledgment>('acknowledgments'),
+    fetchAll<Test>('tests'),
+    fetchAll<Question>('questions'),
+    fetchAll<TestAssignment>('test_assignments'),
+    fetchAll<Attempt>('attempts'),
+    fetchAll<Certification>('certifications'),
+    fetchAll<RetestGrant>('retest_grants'),
+    fetchAll<Notification>('notifications'),
+  ])
+  db = {
+    ...emptyDb(),
+    branches,
+    departments,
+    staff: staff.map(mapStaffRow),
+    managers,
+    admins,
+    sops,
+    acknowledgments,
+    tests,
+    questions,
+    assignments,
+    attempts,
+    certifications,
+    grants,
+    notifications,
+  }
+  snapshotVersion++
+  listeners.forEach((fn) => fn())
+}
+
+/** Resolve the signed-in Supabase Auth user to an admin or manager actor. */
+async function resolveSupabaseActor(): Promise<Actor | null> {
+  const client = supabase!
+  const { data: userData } = await client.auth.getUser()
+  const user = userData.user
+  if (!user) return null
+
+  const { data: adminRows } = await client
+    .from('admins')
+    .select('*')
+    .eq('auth_user_id', user.id)
+    .limit(1)
+  if (adminRows && adminRows.length > 0) {
+    const a = adminRows[0]
+    return { kind: 'admin', admin: { id: a.id, name: a.name, email: a.email } }
+  }
+
+  const { data: managerRows } = await client
+    .from('managers')
+    .select('*')
+    .eq('auth_user_id', user.id)
+    .eq('active', true)
+    .limit(1)
+  if (managerRows && managerRows.length > 0) {
+    const m = managerRows[0]
+    return {
+      kind: 'manager',
+      manager: {
+        id: m.id,
+        name: m.name,
+        email: m.email,
+        department_id: m.department_id,
+        branch_id: m.branch_id,
+        active: m.active,
+      },
+    }
+  }
+
+  return null
+}
+
+/** On boot, resume a still-valid manager/admin session and hydrate the cache. */
+async function resumeSupabaseSession(): Promise<void> {
+  try {
+    const { data } = await supabase!.auth.getSession()
+    if (!data.session) return
+    const actor = await resolveSupabaseActor()
+    if (!actor) return
+    await hydrateFromSupabase()
+    resumedActor = actor
+  } catch {
+    // A failed resume just lands the user back on the sign-in screen.
+    resumedActor = null
+  }
 }
 
 async function seed(): Promise<void> {
@@ -453,7 +631,24 @@ export function actorName(actor: Actor): string {
  * stand-in for the row-level security policy that will enforce it in Postgres,
  * where her queries will be physically unable to return another patch's rows.
  */
+/**
+ * In Supabase mode the manager/admin boards read live data, but the write paths
+ * are not wired up until the Edge Functions ship (they need server-side hashing,
+ * auth-user creation, and notification writes that RLS reserves for the
+ * service_role). Until then, editing actions surface this rather than silently
+ * changing only the local cache. Every consequential write funnels through one
+ * of the four authorisation helpers below, so guarding them here covers them
+ * all in one place.
+ */
+const SUPA_WRITE_MSG =
+  'You’re viewing live data from your database. Saving changes switches on in the next update, once the Edge Functions are deployed.'
+
+function assertLocalWrite(): void {
+  if (isSupabaseEnabled) throw new ApiError(SUPA_WRITE_MSG)
+}
+
 function assertCanTouchStaff(actor: Actor, staff: Staff): void {
+  assertLocalWrite()
   if (actor.kind === 'admin') return
   if (staff.department_id !== actor.manager.department_id || staff.branch_id !== actor.manager.branch_id) {
     throw new ApiError('You can only act on staff in your own department at your own branch.')
@@ -461,6 +656,7 @@ function assertCanTouchStaff(actor: Actor, staff: Staff): void {
 }
 
 function assertCanTouchScope(actor: Actor, departmentId: string, scope: BranchScope): void {
+  assertLocalWrite()
   if (actor.kind === 'admin') return
   const branch = read.branch(actor.manager.branch_id)
   if (!branch) throw new ApiError('Your branch record is missing.')
@@ -484,6 +680,7 @@ function assertCanTouchScope(actor: Actor, departmentId: string, scope: BranchSc
  * the department has to match here; the SOP's branch scope is irrelevant.
  */
 function assertCanReadDepartment(actor: Actor, departmentId: string): void {
+  assertLocalWrite()
   if (actor.kind === 'admin') return
   if (departmentId !== actor.manager.department_id) {
     throw new ApiError('You can only work with your own department’s content.')
@@ -502,6 +699,12 @@ export const api = {
    * browser keeps is a counter an attacker deletes.
    */
   async staffLogin(staffId: string, code: string): Promise<StaffSession> {
+    if (isSupabaseEnabled) {
+      // Staff sign-in must be verified server-side (bcrypt + lockout + a minted
+      // JWT). That is the staff-login Edge Function, deployed in the next stage.
+      void code
+      throw new ApiError('Staff sign-in switches on in the next update, once the login function is deployed.')
+    }
     const staff = db.staff.find((s) => s.id === staffId)
     if (!staff || !staff.active) {
       throw new ApiError('That staff record is not active. Speak to your manager.')
@@ -554,10 +757,30 @@ export const api = {
     }
   },
 
-  /* ---- manager / admin sign-in (Supabase Auth replaces this wholesale) ---- */
+  /* ---- manager / admin sign-in ---- */
 
   async managerLogin(email: string, password: string): Promise<Actor> {
     const normalised = email.trim().toLowerCase()
+
+    if (isSupabaseEnabled) {
+      // Real Supabase Auth. On success we resolve the user to an admin or
+      // manager row and hydrate the cache with exactly what RLS lets them see.
+      const client = supabase!
+      const { error } = await client.auth.signInWithPassword({ email: normalised, password })
+      if (error) throw new ApiError('Email or password is incorrect.')
+
+      const actor = await resolveSupabaseActor()
+      if (!actor) {
+        await client.auth.signOut()
+        throw new ApiError(
+          'That login is valid but is not registered as an admin or department manager. Ask an admin to add you.',
+        )
+      }
+      await hydrateFromSupabase()
+      resumedActor = actor
+      return actor
+    }
+
     if (DEMO_PASSWORDS[normalised] !== password) {
       throw new ApiError('Email or password is incorrect.')
     }
@@ -566,6 +789,11 @@ export const api = {
     const manager = db.managers.find((m) => m.email === normalised && m.active)
     if (manager) return { kind: 'manager', manager }
     throw new ApiError('Email or password is incorrect.')
+  },
+
+  async managerLogout(): Promise<void> {
+    resumedActor = null
+    if (isSupabaseEnabled && supabase) await supabase.auth.signOut()
   },
 
   /* ---- sign-sop Edge Function ---- */
@@ -1082,6 +1310,7 @@ export const api = {
 }
 
 function requireAdmin(actor: Actor): void {
+  assertLocalWrite()
   if (actor.kind !== 'admin') {
     throw new ApiError('Only an admin can do that.')
   }

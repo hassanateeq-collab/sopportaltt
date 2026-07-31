@@ -49,11 +49,44 @@ Stage 2.
 
 ---
 
-## Stage 2 — Frontend client + real manager/admin auth  (next)
+## Stage 2 — Frontend client + real manager/admin auth  ✅ built
 
-Add `@supabase/supabase-js`, wire the manager/admin login to your real Supabase
-Auth, and read the boards from Supabase — all behind an env flag so the demo
-stays up until we flip it. You'll set two env vars (URL + anon key) in Vercel.
+The app now has a Supabase client and switches on automatically when two public
+env vars are present. With them set, the manager/admin login authenticates
+against **your real Supabase Auth**, and the boards show **live data** from your
+database (scoped by RLS). Without them, the app stays the localStorage demo — so
+the current live site is unaffected until you set the vars and redeploy.
+
+What works after this stage: real admin/manager sign-in, and viewing your live
+branches, departments, staff, SOPs, tests and certification data. What's
+deliberately deferred to Stage 3 (needs Edge Functions): **staff sign-in** and
+**saving edits** (publishing SOPs/tests, adding staff, approvals) — those need
+server-side hashing, auth-user creation and notification writes. Until then those
+actions show a friendly "switches on in the next update" message instead of
+silently changing only the local cache.
+
+### Turn it on
+
+1. **Vercel → your project `hamsun-sop-portal` → Settings → Environment
+   Variables.** Add both (safe to expose — the anon key is public and RLS
+   protects the data):
+
+   | Name | Value |
+   | --- | --- |
+   | `VITE_SUPABASE_URL` | `https://ruqnjxxzeaazqohlpacx.supabase.co` |
+   | `VITE_SUPABASE_ANON_KEY` | your anon **public** key (Supabase → Settings → API) |
+
+   Apply them to **Production** (and Preview/Development if you use those).
+2. These are read at **build time**, so you must redeploy after adding them:
+   ```bash
+   git pull
+   vercel --prod
+   ```
+3. Open the live URL → **Manager or admin sign in** → use your real Supabase
+   email + password. You should land on the boards showing your real data.
+
+For local development, copy `.env.example` to `.env.local` and put the same two
+values in it, then `npm run dev`.
 
 ## Stage 3 — Edge Functions
 

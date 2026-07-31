@@ -1,4 +1,5 @@
 import { resetDemoData } from '../data/store'
+import { isSupabaseEnabled } from '../lib/supabase'
 import { useState } from 'react'
 
 /**
@@ -34,19 +35,21 @@ export function Landing({ onStaff, onManager }: { onStaff: () => void; onManager
           Four branches · Front Desk, Housekeeping, Kitchen, Maintenance, Quality &amp; Compliance
         </p>
 
-        <div style={{ marginTop: 20, textAlign: 'center' }}>
-          <button
-            className="linkbtn"
-            onClick={async () => {
-              if (!confirm('Reset all demo data back to its starting state?')) return
-              setResetting(true)
-              await resetDemoData()
-              setResetting(false)
-            }}
-          >
-            {resetting ? 'Resetting…' : 'Reset demo data'}
-          </button>
-        </div>
+        {!isSupabaseEnabled && (
+          <div style={{ marginTop: 20, textAlign: 'center' }}>
+            <button
+              className="linkbtn"
+              onClick={async () => {
+                if (!confirm('Reset all demo data back to its starting state?')) return
+                setResetting(true)
+                await resetDemoData()
+                setResetting(false)
+              }}
+            >
+              {resetting ? 'Resetting…' : 'Reset demo data'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

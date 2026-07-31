@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api, ApiError } from '../data/store'
 import type { Actor } from '../data/store'
+import { isSupabaseEnabled } from '../lib/supabase'
 import { TopBar, Spinner, Notice } from '../components/ui'
 
 /**
@@ -66,40 +67,48 @@ export function ManagerLogin({ onBack, onLoggedIn }: { onBack: () => void; onLog
           </button>
         </div>
 
-        <div className="card" style={{ marginTop: 14 }}>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            Demo accounts
+        {isSupabaseEnabled ? (
+          <div style={{ marginTop: 14 }}>
+            <Notice tone="info">
+              Sign in with your real Supabase account. This portal is connected to your live database.
+            </Notice>
           </div>
-          <div className="stack" style={{ gap: 8 }}>
-            <DemoLogin
-              label="Admin — all branches"
-              email="admin@hamsun.example"
-              password="admin123"
-              onPick={(e, p) => {
-                setEmail(e)
-                setPassword(p)
-              }}
-            />
-            <DemoLogin
-              label="Kitchen manager — FSL only"
-              email="mehreen.kitchen.fsl@hamsun.example"
-              password="kitchen123"
-              onPick={(e, p) => {
-                setEmail(e)
-                setPassword(p)
-              }}
-            />
-            <DemoLogin
-              label="Housekeeping manager — Clifton only"
-              email="owais.housekeeping.clf@hamsun.example"
-              password="housekeeping123"
-              onPick={(e, p) => {
-                setEmail(e)
-                setPassword(p)
-              }}
-            />
+        ) : (
+          <div className="card" style={{ marginTop: 14 }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>
+              Demo accounts
+            </div>
+            <div className="stack" style={{ gap: 8 }}>
+              <DemoLogin
+                label="Admin — all branches"
+                email="admin@hamsun.example"
+                password="admin123"
+                onPick={(e, p) => {
+                  setEmail(e)
+                  setPassword(p)
+                }}
+              />
+              <DemoLogin
+                label="Kitchen manager — FSL only"
+                email="mehreen.kitchen.fsl@hamsun.example"
+                password="kitchen123"
+                onPick={(e, p) => {
+                  setEmail(e)
+                  setPassword(p)
+                }}
+              />
+              <DemoLogin
+                label="Housekeeping manager — Clifton only"
+                email="owais.housekeeping.clf@hamsun.example"
+                password="housekeeping123"
+                onPick={(e, p) => {
+                  setEmail(e)
+                  setPassword(p)
+                }}
+              />
+            </div>
           </div>
-        </div>
+        )}
       </main>
     </div>
   )

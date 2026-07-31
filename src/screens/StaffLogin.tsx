@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { api, read, ApiError } from '../data/store'
 import type { Staff } from '../types'
+import { isSupabaseEnabled } from '../lib/supabase'
 import { TopBar, Spinner, Notice } from '../components/ui'
 
 /**
@@ -77,6 +78,14 @@ export function StaffLogin({
       <main className="main">
         {step === 'branch' && (
           <section className="section">
+            {isSupabaseEnabled && (
+              <div style={{ marginBottom: 12 }}>
+                <Notice tone="info">
+                  Staff sign-in switches on in the next update, once the secure login function is deployed. You can
+                  pick your branch and department now to see the flow.
+                </Notice>
+              </div>
+            )}
             <div className="eyebrow" style={{ marginBottom: 10 }}>
               Step 1 · Choose your branch
             </div>
