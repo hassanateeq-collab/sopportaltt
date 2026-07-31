@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   api,
   read,
@@ -9,6 +9,8 @@ import {
   latestCertification,
   openGrant,
   uploadSopViaFunction,
+  listDriveFolders,
+  createDriveFolder,
   ApiError,
 } from '../data/store'
 import type { Actor, DraftQuestion } from '../data/store'
@@ -395,6 +397,7 @@ function AddSopForm({
   actor: Actor
   lockBranch: boolean
 }) {
+  const [folders, setFolders] = useState<Array<{ id: string; name: string }>>(DRIVE_DEPARTMENT_FOLDERS)
   const defaultFolder =
     DRIVE_DEPARTMENT_FOLDERS.find((f) => f.name === dept.name)?.id ?? DRIVE_DEPARTMENT_FOLDERS[0]?.id ?? ''
   const [title, setTitle] = useState('')
@@ -404,6 +407,39 @@ function AddSopForm({
   const [video, setVideo] = useState<Upload | null>(null)
   const [allBranches, setAllBranches] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [newFolder, setNewFolder] = useState('')
+  const [showNewFolder, setShowNewFolder] = useState(false)
+  const [creatingFolder, setCreatingFolder] = useState(false)
+
+  // Load the live Drive folders (falls back to the known department folders).
+  useEffect(() => {
+    let active = true
+    listDriveFolders().then((list) => {
+      if (!active || !list.length) return
+      setFolders(list)
+      setFolderId((cur) => (list.some((f) => f.id === cur) ? cur : list.find((f) => f.name === dept.name)?.id ?? list[0].id))
+    })
+    return () => {
+      active = false
+    }
+  }, [dept.name])
+
+  async function addFolder() {
+    if (!newFolder.trim()) return
+    setCreatingFolder(true)
+    try {
+      const folder = await createDriveFolder(newFolder)
+      setFolders((prev) => (prev.some((f) => f.id === folder.id) ? prev : [...prev, folder].sort((a, b) => a.name.localeCompare(b.name))))
+      setFolderId(folder.id)
+      setNewFolder('')
+      setShowNewFolder(false)
+      toast(`Folder "${folder.name}" ready`)
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Could not create the folder.')
+    } finally {
+      setCreatingFolder(false)
+    }
+  }
 
   function onPdf(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
@@ -498,11 +534,30 @@ function AddSopForm({
 
         <div className="field">
           <label htmlFor="f-folder">Destination folder in Drive</label>
-          <select id="f-folder" value={folderId} onChange={(e) => setFolderId(e.target.value)}>
-            {DRIVE_DEPARTMENT_FOLDERS.map((f) => (
-              <option key={f.id} value={f.id}>Hamsun_SOP / {f.name}</option>
-            ))}
-          </select>
+          <div className="row" style={{ gap: 8, alignItems: 'stretch' }}>
+            <select id="f-folder" style={{ flex: 1 }} value={folderId} onChange={(e) => setFolderId(e.target.value)}>
+              {folders.map((f) => (
+                <option key={f.id} value={f.id}>Hamsun_SOP / {f.name}</option>
+              ))}
+            </select>
+            <button type="button" className="btn sm" onClick={() => setShowNewFolder((v) => !v)}>
+              ＋ New folder
+            </button>
+          </div>
+          {showNewFolder && (
+            <div className="linkedit" style={{ marginTop: 8 }}>
+              <input
+                type="text"
+                value={newFolder}
+                onChange={(e) => setNewFolder(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void addFolder() } }}
+                placeholder="New folder name, e.g. Kitchen · Food Safety"
+              />
+              <button type="button" className="btn sm primary" disabled={creatingFolder || !newFolder.trim()} onClick={() => void addFolder()}>
+                {creatingFolder ? <span className="spinner" /> : 'Create'}
+              </button>
+            </div>
+          )}
           <div className="demo-hint">Files land here view-only inside the Hamsun_SOP folder. The viewer streams them; no downloads.</div>
         </div>
 

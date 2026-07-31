@@ -58,6 +58,36 @@ export async function uploadToDrive(
   return json.id as string
 }
 
+/** List the sub-folders of a Drive folder. */
+export async function listFolders(token: string, parentId: string): Promise<Array<{ id: string; name: string }>> {
+  const q = encodeURIComponent(
+    `'${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+  )
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&orderBy=name&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!res.ok) throw new Error(`Drive folder list failed: ${await res.text()}`)
+  const json = await res.json()
+  return (json.files ?? []).map((f: { id: string; name: string }) => ({ id: f.id, name: f.name }))
+}
+
+/** Create a sub-folder inside a Drive folder; returns its id + name. */
+export async function createFolder(
+  token: string,
+  parentId: string,
+  name: string,
+): Promise<{ id: string; name: string }> {
+  const res = await fetch('https://www.googleapis.com/drive/v3/files?fields=id,name&supportsAllDrives=true', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] }),
+  })
+  if (!res.ok) throw new Error(`Drive folder create failed: ${await res.text()}`)
+  const json = await res.json()
+  return { id: json.id, name: json.name }
+}
+
 /** Delete a file from Drive. A missing file (404) is treated as already gone. */
 export async function deleteFromDrive(token: string, fileId: string): Promise<void> {
   const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`, {

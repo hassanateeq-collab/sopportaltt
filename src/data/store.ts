@@ -28,6 +28,7 @@ import { addMonths } from '../lib/certs'
 import { nextDocCode, isDocCodeTaken, isValidDocCode } from '../lib/codes'
 import { appliesToStaff, scopeIncludes } from '../lib/scope'
 import { supabase, isSupabaseEnabled, functionsBase } from '../lib/supabase'
+import { DRIVE_DEPARTMENT_FOLDERS } from '../lib/drive'
 import type {
   Acknowledgment,
   Admin,
@@ -372,6 +373,48 @@ export async function uploadSopViaFunction(
     throw new ApiError(msg)
   }
   await hydrateFromSupabase()
+}
+
+/**
+ * Drive folder picker for the Add-SOP form. In Supabase mode these call the
+ * drive-folders Edge Function (live Drive folders + create). If it isn't
+ * deployed yet, listing falls back to the known department folders and creating
+ * explains what to do. In demo mode there is no Drive, so folders are local.
+ */
+export async function listDriveFolders(): Promise<Array<{ id: string; name: string }>> {
+  if (!isSupabaseEnabled || !supabase) return DRIVE_DEPARTMENT_FOLDERS
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) return DRIVE_DEPARTMENT_FOLDERS
+  try {
+    const res = await fetch(`${functionsBase}/drive-folders`, {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+    if (!res.ok) return DRIVE_DEPARTMENT_FOLDERS // not deployed / error → safe fallback
+    const j = await res.json()
+    return Array.isArray(j.folders) && j.folders.length ? j.folders : DRIVE_DEPARTMENT_FOLDERS
+  } catch {
+    return DRIVE_DEPARTMENT_FOLDERS
+  }
+}
+
+export async function createDriveFolder(name: string): Promise<{ id: string; name: string }> {
+  const clean = name.trim()
+  if (!clean) throw new ApiError('Give the folder a name.')
+  if (!isSupabaseEnabled || !supabase) return { id: `demo-${clean}`, name: clean }
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) throw new ApiError('Please sign in again.')
+  const res = await fetch(`${functionsBase}/drive-folders`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: clean }),
+  }).catch(() => null)
+  if (res && res.status === 404) throw new ApiError('Deploy the drive-folders function first (see supabase/SETUP.md).')
+  if (!res || !res.ok) {
+    const j = res ? await res.json().catch(() => ({})) : {}
+    throw new ApiError((j as { error?: string }).error ?? 'Could not create the folder.')
+  }
+  const j = await res.json()
+  return j.folder as { id: string; name: string }
 }
 
 /** On boot, resume a still-valid manager/admin session and hydrate the cache. */

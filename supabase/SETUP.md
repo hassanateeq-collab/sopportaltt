@@ -146,6 +146,19 @@ Hamsun account, and the SOP appears on the board. (Keep videos reasonably sized;
 very large files may exceed the function request limit — resumable upload is a
 later enhancement.)
 
+### Optional: live folder list + create folders from the form
+
+The Add-SOP folder picker can list your real Drive sub-folders and create new
+ones (the **＋ New folder** button). Deploy the `drive-folders` function (same
+secrets) to turn that on:
+
+```bash
+supabase functions deploy drive-folders
+```
+
+Until it's deployed, the picker falls back to the five department folders and
+creating a folder explains that this function is needed.
+
 ### Optional: delete SOPs from Drive too
 
 By default, deleting an SOP in the portal removes only the database record; the
