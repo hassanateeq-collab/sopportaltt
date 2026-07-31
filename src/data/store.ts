@@ -1,0 +1,1315 @@
+/**
+ * The data layer.
+ *
+ * Every function on `api` below is shaped like the Edge Function that will
+ * replace it — async, taking a session token where a real one would, and
+ * enforcing its rule *here* rather than in the UI. That is deliberate. The
+ * retest gate, the login lockout counter and certificate issuance are the three
+ * things that are worthless if they live in the browser's render logic, so they
+ * live in this module and the screens simply call in and are told no.
+ *
+ * When Supabase is wired up, each method becomes a fetch to the matching Edge
+ * Function and the call sites do not change.
+ */
+
+import {
+  BRANCHES,
+  DEPARTMENTS,
+  DEMO_STAFF,
+  DEMO_PASSWORDS,
+  MANAGERS,
+  ADMINS,
+  SOPS,
+  TESTS,
+  QUESTIONS,
+} from './seed'
+import { hashEmployeeCode, verifyEmployeeCode, generateEmployeeCode } from '../lib/hash'
+import { addMonths } from '../lib/certs'
+import { nextDocCode, isDocCodeTaken, isValidDocCode } from '../lib/codes'
+import { appliesToStaff, scopeIncludes } from '../lib/scope'
+import type {
+  Acknowledgment,
+  Admin,
+  Attempt,
+  Branch,
+  BranchScope,
+  Certification,
+  Department,
+  Difficulty,
+  Language,
+  Manager,
+  Notification,
+  NotificationKind,
+  Question,
+  RetestGrant,
+  Sop,
+  Staff,
+  StaffSession,
+  Test,
+  TestAssignment,
+} from '../types'
+
+/* ----------------------------------------------------------------- state ---- */
+
+interface Db {
+  branches: Branch[]
+  departments: Department[]
+  staff: Staff[]
+  managers: Manager[]
+  admins: Admin[]
+  sops: Sop[]
+  acknowledgments: Acknowledgment[]
+  tests: Test[]
+  questions: Question[]
+  assignments: TestAssignment[]
+  attempts: Attempt[]
+  certifications: Certification[]
+  grants: RetestGrant[]
+  notifications: Notification[]
+  sessions: StaffSession[]
+  /** Server-side failed-login counter. Counted here, never in the browser's head. */
+  lockouts: Record<string, { failures: number; locked_until: string | null }>
+}
+
+const STORAGE_KEY = 'hamsun-sop-portal/db/v1'
+
+let db: Db = emptyDb()
+
+function emptyDb(): Db {
+  return {
+    branches: [],
+    departments: [],
+    staff: [],
+    managers: [],
+    admins: [],
+    sops: [],
+    acknowledgments: [],
+    tests: [],
+    questions: [],
+    assignments: [],
+    attempts: [],
+    certifications: [],
+    grants: [],
+    notifications: [],
+    sessions: [],
+    lockouts: {},
+  }
+}
+
+/* ------------------------------------------------------------ pub / sub ---- */
+
+const listeners = new Set<() => void>()
+
+export function subscribe(fn: () => void): () => void {
+  listeners.add(fn)
+  return () => listeners.delete(fn)
+}
+
+let snapshotVersion = 0
+export function getSnapshotVersion(): number {
+  return snapshotVersion
+}
+
+function commit(): void {
+  snapshotVersion++
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(db))
+  } catch {
+    // Private-browsing quota failures must not take the portal down.
+  }
+  listeners.forEach((fn) => fn())
+}
+
+/* ------------------------------------------------------------------ init ---- */
+
+const LOCKOUT_THRESHOLD = 3
+const LOCKOUT_MINUTES = 15
+/** Roughly one shift. */
+const SESSION_HOURS = 9
+
+function id(prefix: string): string {
+  const uuid =
+    typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2) + Date.now().toString(36)
+  return `${prefix}-${uuid}`
+}
+
+function nowIso(): string {
+  return new Date().toISOString()
+}
+
+export async function initStore(): Promise<void> {
+  const raw = localStorage.getItem(STORAGE_KEY)
+  if (raw) {
+    try {
+      db = { ...emptyDb(), ...(JSON.parse(raw) as Db) }
+      return
+    } catch {
+      // Corrupt payload — fall through and reseed.
+    }
+  }
+  await seed()
+}
+
+export async function resetDemoData(): Promise<void> {
+  localStorage.removeItem(STORAGE_KEY)
+  db = emptyDb()
+  await seed()
+  commit()
+}
+
+async function seed(): Promise<void> {
+  const created_at = nowIso()
+  const staff: Staff[] = []
+  for (const s of DEMO_STAFF) {
+    const { code, ...rest } = s
+    staff.push({ ...rest, employee_code_hash: await hashEmployeeCode(code), created_at })
+  }
+  db = {
+    ...emptyDb(),
+    branches: [...BRANCHES],
+    departments: [...DEPARTMENTS],
+    staff,
+    managers: [...MANAGERS],
+    admins: [...ADMINS],
+    sops: [...SOPS],
+    tests: [...TESTS],
+    questions: [...QUESTIONS],
+  }
+  seedHistory()
+  commit()
+}
+
+/**
+ * A little history so the boards are not empty on first look: some sign-offs,
+ * one lapsed certificate, and one failure sitting in the retest queue.
+ */
+function seedHistory(): void {
+  const ack = (staff_id: string, sop_id: string, daysAgo: number) => {
+    const sop = db.sops.find((s) => s.id === sop_id)
+    if (!sop) return
+    db.acknowledgments.push({
+      id: id('ack'),
+      staff_id,
+      sop_id,
+      version: sop.version,
+      signed_at: new Date(Date.now() - daysAgo * 86_400_000).toISOString(),
+    })
+  }
+  ack('st-01', 'sop-fd-001', 12)
+  ack('st-01', 'sop-fd-002', 12)
+  ack('st-02', 'sop-fd-001', 9)
+  ack('st-03', 'sop-hk-001', 5)
+  ack('st-04', 'sop-kt-001', 3)
+  ack('st-10', 'sop-hk-001', 20)
+  ack('st-10', 'sop-hk-002', 20)
+  ack('st-11', 'sop-hk-001', 2)
+
+  const assign = (test_id: string, staff_id: string) => {
+    db.assignments.push({
+      id: id('asg'),
+      test_id,
+      staff_id,
+      assigned_by: 'Hamsun Group Admin',
+      assigned_at: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+    })
+  }
+  assign('ts-kt-food', 'st-04')
+  assign('ts-kt-food', 'st-08')
+  assign('ts-kt-food', 'st-13')
+  assign('ts-hk-room', 'st-03')
+  assign('ts-hk-room', 'st-10')
+  assign('ts-hk-room', 'st-11')
+  assign('ts-hk-room', 'st-12')
+  assign('ts-fd-complaint', 'st-01')
+  assign('ts-fd-complaint', 'st-06')
+
+  // Waqas passed food safety eleven months ago — certificate is inside the
+  // thirty-day window, so his page should be showing the expiry alert.
+  const passedAt = new Date(Date.now() - 335 * 86_400_000).toISOString()
+  const attemptId = id('att')
+  db.attempts.push({
+    id: attemptId,
+    staff_id: 'st-13',
+    test_id: 'ts-kt-food',
+    score: 4,
+    total: 4,
+    percentage: 100,
+    passed: true,
+    language: 'en',
+    attempted_at: passedAt,
+  })
+  db.certifications.push({
+    id: id('cert'),
+    staff_id: 'st-13',
+    test_id: 'ts-kt-food',
+    issued_at: passedAt,
+    expires_at: addMonths(new Date(passedAt), 12).toISOString(),
+    source_attempt_id: attemptId,
+  })
+
+  // Salma failed the room standard assessment, so she is locked and appears in
+  // the manager's retest-approval row until someone approves an attempt.
+  db.attempts.push({
+    id: id('att'),
+    staff_id: 'st-10',
+    test_id: 'ts-hk-room',
+    score: 1,
+    total: 3,
+    percentage: 33,
+    passed: false,
+    language: 'ur',
+    attempted_at: new Date(Date.now() - 6 * 86_400_000).toISOString(),
+  })
+
+  // Kiran holds a healthy certificate.
+  const kiranAt = new Date(Date.now() - 40 * 86_400_000).toISOString()
+  const kiranAttempt = id('att')
+  db.attempts.push({
+    id: kiranAttempt,
+    staff_id: 'st-11',
+    test_id: 'ts-hk-room',
+    score: 3,
+    total: 3,
+    percentage: 100,
+    passed: true,
+    language: 'en',
+    attempted_at: kiranAt,
+  })
+  db.certifications.push({
+    id: id('cert'),
+    staff_id: 'st-11',
+    test_id: 'ts-hk-room',
+    issued_at: kiranAt,
+    expires_at: addMonths(new Date(kiranAt), 6).toISOString(),
+    source_attempt_id: kiranAttempt,
+  })
+}
+
+/* --------------------------------------------------------------- reading ---- */
+
+/** Read-only view of the tables. Screens read through this; they never mutate. */
+export const read = {
+  branches: () => db.branches,
+  departments: () => db.departments,
+  staff: () => db.staff,
+  managers: () => db.managers,
+  admins: () => db.admins,
+  sops: () => db.sops,
+  acknowledgments: () => db.acknowledgments,
+  tests: () => db.tests,
+  questions: () => db.questions,
+  assignments: () => db.assignments,
+  attempts: () => db.attempts,
+  certifications: () => db.certifications,
+  grants: () => db.grants,
+  notifications: () => db.notifications,
+
+  branch: (id: string) => db.branches.find((b) => b.id === id) ?? null,
+  branchByCode: (code: string) => db.branches.find((b) => b.code === code) ?? null,
+  department: (id: string) => db.departments.find((d) => d.id === id) ?? null,
+  staffMember: (id: string) => db.staff.find((s) => s.id === id) ?? null,
+  sop: (id: string) => db.sops.find((s) => s.id === id) ?? null,
+  test: (id: string) => db.tests.find((t) => t.id === id) ?? null,
+  questionsFor: (testId: string) =>
+    db.questions.filter((q) => q.test_id === testId).sort((a, b) => a.position - b.position),
+}
+
+/** Has this person signed the *current* version of this SOP? */
+export function hasSigned(staffId: string, sop: Sop): boolean {
+  return db.acknowledgments.some(
+    (a) => a.staff_id === staffId && a.sop_id === sop.id && a.version === sop.version,
+  )
+}
+
+export function acknowledgmentFor(staffId: string, sop: Sop): Acknowledgment | null {
+  return (
+    db.acknowledgments.find(
+      (a) => a.staff_id === staffId && a.sop_id === sop.id && a.version === sop.version,
+    ) ?? null
+  )
+}
+
+export function attemptsFor(staffId: string, testId: string): Attempt[] {
+  return db.attempts
+    .filter((a) => a.staff_id === staffId && a.test_id === testId)
+    .sort((a, b) => b.attempted_at.localeCompare(a.attempted_at))
+}
+
+export function latestCertification(staffId: string, testId: string): Certification | null {
+  return (
+    db.certifications
+      .filter((c) => c.staff_id === staffId && c.test_id === testId)
+      .sort((a, b) => b.issued_at.localeCompare(a.issued_at))[0] ?? null
+  )
+}
+
+export function openGrant(staffId: string, testId: string): RetestGrant | null {
+  return db.grants.find((g) => g.staff_id === staffId && g.test_id === testId && !g.used) ?? null
+}
+
+/** Tests this person can actually see: eligible by scope AND assigned by name. */
+export function assignedTestsFor(staff: Staff): Test[] {
+  const branch = read.branch(staff.branch_id)
+  if (!branch) return []
+  const assignedIds = new Set(
+    db.assignments.filter((a) => a.staff_id === staff.id).map((a) => a.test_id),
+  )
+  return db.tests.filter(
+    (t) =>
+      t.status === 'published' &&
+      assignedIds.has(t.id) &&
+      appliesToStaff(t, staff, branch.code),
+  )
+}
+
+export function unreadCount(staffId: string): number {
+  return db.notifications.filter((n) => n.staff_id === staffId && !n.read).length
+}
+
+export function notificationsFor(staffId: string): Notification[] {
+  return db.notifications
+    .filter((n) => n.staff_id === staffId)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+}
+
+/* ------------------------------------------------------- the retest gate ---- */
+
+export type AttemptPermission =
+  | { allowed: true; reason: 'first_attempt' | 'renewal' | 'granted'; grant?: RetestGrant }
+  | { allowed: false; reason: 'locked_after_failure' | 'not_assigned' }
+
+/**
+ * The gate, stated once, in one place.
+ *
+ * One free first attempt. A free renewal attempt once a pass is already held.
+ * After a failure the test locks and only a manager or admin can open exactly
+ * one attempt, consumed when it is taken — so failing again means asking again.
+ *
+ * This is called by the UI to render state, and independently re-checked inside
+ * submitAttempt, which is the check that actually matters.
+ */
+export function attemptPermission(staffId: string, testId: string): AttemptPermission {
+  const assigned = db.assignments.some((a) => a.staff_id === staffId && a.test_id === testId)
+  if (!assigned) return { allowed: false, reason: 'not_assigned' }
+
+  const history = attemptsFor(staffId, testId)
+  if (history.length === 0) return { allowed: true, reason: 'first_attempt' }
+
+  const last = history[0]
+  if (last.passed) return { allowed: true, reason: 'renewal' }
+
+  const grant = openGrant(staffId, testId)
+  if (grant) return { allowed: true, reason: 'granted', grant }
+
+  return { allowed: false, reason: 'locked_after_failure' }
+}
+
+/* -------------------------------------------------------------- sessions ---- */
+
+function validateStaffToken(token: string): Staff {
+  const session = db.sessions.find((s) => s.token === token)
+  if (!session) throw new ApiError('Your session has ended. Please sign in again.')
+  if (new Date(session.expires_at).getTime() < Date.now()) {
+    db.sessions = db.sessions.filter((s) => s.token !== token)
+    throw new ApiError('Your shift session has expired. Please sign in again.')
+  }
+  const staff = db.staff.find((s) => s.id === session.staff_id)
+  if (!staff || !staff.active) throw new ApiError('This staff record is no longer active.')
+  return staff
+}
+
+export class ApiError extends Error {}
+
+/* --------------------------------------------------------- notifications ---- */
+
+function notify(staff_id: string, kind: NotificationKind, text: string): void {
+  db.notifications.push({
+    id: id('ntf'),
+    staff_id,
+    kind,
+    text,
+    read: false,
+    created_at: nowIso(),
+    // Flagged for the WhatsApp mirror that Hamsun already runs elsewhere. No
+    // consumer yet — the flag is what makes that a worker, not a migration.
+    whatsapp_pending: true,
+  })
+}
+
+/* -------------------------------------------------- manager authorisation ---- */
+
+export type Actor =
+  | { kind: 'manager'; manager: Manager }
+  | { kind: 'admin'; admin: Admin }
+
+export function actorName(actor: Actor): string {
+  return actor.kind === 'admin' ? actor.admin.name : actor.manager.name
+}
+
+/**
+ * A manager is confined to her own department at her own branch. This is the
+ * stand-in for the row-level security policy that will enforce it in Postgres,
+ * where her queries will be physically unable to return another patch's rows.
+ */
+function assertCanTouchStaff(actor: Actor, staff: Staff): void {
+  if (actor.kind === 'admin') return
+  if (staff.department_id !== actor.manager.department_id || staff.branch_id !== actor.manager.branch_id) {
+    throw new ApiError('You can only act on staff in your own department at your own branch.')
+  }
+}
+
+function assertCanTouchScope(actor: Actor, departmentId: string, scope: BranchScope): void {
+  if (actor.kind === 'admin') return
+  const branch = read.branch(actor.manager.branch_id)
+  if (!branch) throw new ApiError('Your branch record is missing.')
+  if (departmentId !== actor.manager.department_id) {
+    throw new ApiError('You can only publish for your own department.')
+  }
+  // Only an admin publishes group-wide. A manager is confined to her own branch.
+  if (scope.kind === 'ALL') {
+    throw new ApiError('Only an admin can publish to all branches.')
+  }
+  if (scope.branch_codes.length !== 1 || scope.branch_codes[0] !== branch.code) {
+    throw new ApiError('You can only publish to your own branch.')
+  }
+}
+
+/**
+ * Authorises *reading* a department's content — distinct from publishing to a
+ * scope. A manager may generate a test from any SOP in her own department even
+ * when that SOP is scoped to all branches, because reading a group-wide
+ * Housekeeping SOP is not the same act as publishing a group-wide record. Only
+ * the department has to match here; the SOP's branch scope is irrelevant.
+ */
+function assertCanReadDepartment(actor: Actor, departmentId: string): void {
+  if (actor.kind === 'admin') return
+  if (departmentId !== actor.manager.department_id) {
+    throw new ApiError('You can only work with your own department’s content.')
+  }
+}
+
+/* ------------------------------------------------------------------- api ---- */
+
+export const api = {
+  /* ---- staff-login Edge Function ---- */
+
+  /**
+   * Verifies the employee code against the stored hash and counts failures
+   * server-side. Three wrong codes locks the record for fifteen minutes —
+   * counted here, in the same place that issues the token, because a counter the
+   * browser keeps is a counter an attacker deletes.
+   */
+  async staffLogin(staffId: string, code: string): Promise<StaffSession> {
+    const staff = db.staff.find((s) => s.id === staffId)
+    if (!staff || !staff.active) {
+      throw new ApiError('That staff record is not active. Speak to your manager.')
+    }
+
+    const lock = db.lockouts[staffId]
+    if (lock?.locked_until && new Date(lock.locked_until).getTime() > Date.now()) {
+      const mins = Math.ceil((new Date(lock.locked_until).getTime() - Date.now()) / 60_000)
+      throw new ApiError(`Too many wrong codes. Try again in ${mins} minute${mins === 1 ? '' : 's'}.`)
+    }
+
+    const ok = await verifyEmployeeCode(code, staff.employee_code_hash)
+    if (!ok) {
+      const failures = (lock?.failures ?? 0) + 1
+      const locked_until =
+        failures >= LOCKOUT_THRESHOLD
+          ? new Date(Date.now() + LOCKOUT_MINUTES * 60_000).toISOString()
+          : null
+      db.lockouts[staffId] = { failures, locked_until }
+      commit()
+      if (locked_until) {
+        throw new ApiError(`Too many wrong codes. This record is locked for ${LOCKOUT_MINUTES} minutes.`)
+      }
+      const left = LOCKOUT_THRESHOLD - failures
+      throw new ApiError(`Wrong code. ${left} attempt${left === 1 ? '' : 's'} left before this record locks.`)
+    }
+
+    delete db.lockouts[staffId]
+    const session: StaffSession = {
+      staff_id: staff.id,
+      token: id('tok'),
+      expires_at: new Date(Date.now() + SESSION_HOURS * 3_600_000).toISOString(),
+    }
+    db.sessions.push(session)
+    commit()
+    return session
+  },
+
+  staffLogout(token: string): void {
+    db.sessions = db.sessions.filter((s) => s.token !== token)
+    commit()
+  },
+
+  /** Restores a session on page reload without a second code entry. */
+  resumeStaffSession(token: string): Staff | null {
+    try {
+      return validateStaffToken(token)
+    } catch {
+      return null
+    }
+  },
+
+  /* ---- manager / admin sign-in (Supabase Auth replaces this wholesale) ---- */
+
+  async managerLogin(email: string, password: string): Promise<Actor> {
+    const normalised = email.trim().toLowerCase()
+    if (DEMO_PASSWORDS[normalised] !== password) {
+      throw new ApiError('Email or password is incorrect.')
+    }
+    const admin = db.admins.find((a) => a.email === normalised)
+    if (admin) return { kind: 'admin', admin }
+    const manager = db.managers.find((m) => m.email === normalised && m.active)
+    if (manager) return { kind: 'manager', manager }
+    throw new ApiError('Email or password is incorrect.')
+  },
+
+  /* ---- sign-sop Edge Function ---- */
+
+  async signSop(token: string, sopId: string): Promise<Acknowledgment> {
+    const staff = validateStaffToken(token)
+    const sop = read.sop(sopId)
+    if (!sop) throw new ApiError('That SOP no longer exists.')
+
+    const branch = read.branch(staff.branch_id)
+    if (!branch || !appliesToStaff(sop, staff, branch.code)) {
+      throw new ApiError('This SOP does not apply to your department or branch.')
+    }
+
+    const existing = acknowledgmentFor(staff.id, sop)
+    if (existing) return existing
+
+    const ack: Acknowledgment = {
+      id: id('ack'),
+      staff_id: staff.id,
+      sop_id: sop.id,
+      version: sop.version,
+      signed_at: nowIso(),
+    }
+    db.acknowledgments.push(ack)
+    commit()
+    return ack
+  },
+
+  /* ---- submit-attempt Edge Function ---- */
+
+  /**
+   * Records a score, enforces the retest gate, issues a certification on a pass
+   * and writes the notification. The gate is re-checked here rather than trusted
+   * from the UI — a locked test that only *looks* locked is decorative.
+   */
+  async submitAttempt(
+    token: string,
+    testId: string,
+    answers: Array<number | null>,
+    language: Language,
+  ): Promise<{ attempt: Attempt; certification: Certification | null }> {
+    const staff = validateStaffToken(token)
+    const test = read.test(testId)
+    if (!test) throw new ApiError('That test no longer exists.')
+
+    const permission = attemptPermission(staff.id, testId)
+    if (!permission.allowed) {
+      throw new ApiError(
+        permission.reason === 'not_assigned'
+          ? 'This test has not been assigned to you.'
+          : 'This test is locked after your last attempt. Your manager must approve a retest.',
+      )
+    }
+
+    const questions = read.questionsFor(testId)
+    // Scoring is by option position, so the result is identical in every
+    // language the test is offered in.
+    let score = 0
+    questions.forEach((q, i) => {
+      if (answers[i] === q.correct_index) score++
+    })
+    const total = questions.length
+    const percentage = total === 0 ? 0 : Math.round((score / total) * 100)
+    const passed = percentage >= test.pass_mark
+
+    const attempt: Attempt = {
+      id: id('att'),
+      staff_id: staff.id,
+      test_id: testId,
+      score,
+      total,
+      percentage,
+      passed,
+      language,
+      attempted_at: nowIso(),
+    }
+    db.attempts.push(attempt)
+
+    // A granted retest is consumed by the attempt whether it is passed or
+    // failed. Failing again means asking again.
+    if (permission.reason === 'granted' && permission.grant) {
+      permission.grant.used = true
+    }
+
+    let certification: Certification | null = null
+    if (passed) {
+      const issued = new Date()
+      certification = {
+        id: id('cert'),
+        staff_id: staff.id,
+        test_id: testId,
+        issued_at: issued.toISOString(),
+        expires_at: addMonths(issued, test.validity_months).toISOString(),
+        source_attempt_id: attempt.id,
+      }
+      db.certifications.push(certification)
+    }
+
+    notify(
+      staff.id,
+      'score_recorded',
+      passed
+        ? `You passed ${test.title} with ${percentage}%. Your certificate is valid for ${test.validity_months} months.`
+        : `You scored ${percentage}% on ${test.title}, below the ${test.pass_mark}% pass mark. Your manager must approve a retest.`,
+    )
+
+    commit()
+    return { attempt, certification }
+  },
+
+  /* ---- grant-retest Edge Function ---- */
+
+  async grantRetest(actor: Actor, testId: string, staffId: string): Promise<RetestGrant> {
+    const staff = db.staff.find((s) => s.id === staffId)
+    if (!staff) throw new ApiError('That staff record no longer exists.')
+    assertCanTouchStaff(actor, staff)
+
+    const test = read.test(testId)
+    if (!test) throw new ApiError('That test no longer exists.')
+
+    const already = openGrant(staffId, testId)
+    if (already) return already
+
+    const grant: RetestGrant = {
+      id: id('grn'),
+      test_id: testId,
+      staff_id: staffId,
+      granted_by: actor.kind === 'admin' ? actor.admin.id : actor.manager.id,
+      granted_by_name: actorName(actor),
+      granted_at: nowIso(),
+      used: false,
+    }
+    db.grants.push(grant)
+    notify(
+      staffId,
+      'retest_approved',
+      `${actorName(actor)} approved one retest of ${test.title}. Review the SOP before you start — this unlocks a single attempt.`,
+    )
+    commit()
+    return grant
+  },
+
+  /* ---- assignment ---- */
+
+  async assignTest(actor: Actor, testId: string, staffId: string): Promise<void> {
+    const staff = db.staff.find((s) => s.id === staffId)
+    if (!staff) throw new ApiError('That staff record no longer exists.')
+    assertCanTouchStaff(actor, staff)
+
+    const test = read.test(testId)
+    if (!test) throw new ApiError('That test no longer exists.')
+
+    const branch = read.branch(staff.branch_id)
+    if (!branch || !appliesToStaff(test, staff, branch.code)) {
+      throw new ApiError('That test does not apply to this person’s department or branch.')
+    }
+
+    if (db.assignments.some((a) => a.test_id === testId && a.staff_id === staffId)) return
+
+    db.assignments.push({
+      id: id('asg'),
+      test_id: testId,
+      staff_id: staffId,
+      assigned_by: actorName(actor),
+      assigned_at: nowIso(),
+    })
+    notify(staffId, 'test_assigned', `${test.title} has been assigned to you by ${actorName(actor)}.`)
+    commit()
+  },
+
+  async unassignTest(actor: Actor, testId: string, staffId: string): Promise<void> {
+    const staff = db.staff.find((s) => s.id === staffId)
+    if (!staff) throw new ApiError('That staff record no longer exists.')
+    assertCanTouchStaff(actor, staff)
+    db.assignments = db.assignments.filter((a) => !(a.test_id === testId && a.staff_id === staffId))
+    commit()
+  },
+
+  /* ---- SOP publishing ---- */
+
+  async publishSop(
+    actor: Actor,
+    input: {
+      title: string
+      summary: string
+      department_id: string
+      branch_scope: BranchScope
+      code?: string
+      document_file_id?: string | null
+      video_file_id?: string | null
+    },
+  ): Promise<Sop> {
+    assertCanTouchScope(actor, input.department_id, input.branch_scope)
+
+    const dept = read.department(input.department_id)
+    if (!dept) throw new ApiError('That department does not exist.')
+    if (!input.title.trim()) throw new ApiError('An SOP needs a title.')
+
+    const existingCodes = db.sops.map((s) => s.code)
+    let code = input.code?.trim().toUpperCase() || nextDocCode(dept.code, existingCodes)
+    if (!isValidDocCode(code)) {
+      throw new ApiError('Document-control code must look like FD-001.')
+    }
+    if (isDocCodeTaken(code, existingCodes)) {
+      throw new ApiError(`${code} is already in use. Codes must identify one procedure.`)
+    }
+
+    const sop: Sop = {
+      id: id('sop'),
+      code,
+      title: input.title.trim(),
+      summary: input.summary.trim(),
+      department_id: input.department_id,
+      branch_scope: input.branch_scope,
+      version: 1,
+      document_file_id: input.document_file_id ?? null,
+      video_file_id: input.video_file_id ?? null,
+      updated_at: nowIso(),
+      published_by: actorName(actor),
+    }
+    db.sops.push(sop)
+
+    for (const staff of eligibleStaffFor(sop)) {
+      notify(staff.id, 'sop_published', `New SOP ${sop.code} — ${sop.title} — has been published for your department.`)
+    }
+    commit()
+    return sop
+  },
+
+  /**
+   * A version bump reopens the obligation: every eligible person's existing
+   * acknowledgment was pinned to the old version, so they all owe a fresh one.
+   * Nothing is deleted — the old signatures stay as the trail of what was agreed
+   * when.
+   */
+  async reviseSop(
+    actor: Actor,
+    sopId: string,
+    changes: { title?: string; summary?: string; document_file_id?: string | null; video_file_id?: string | null },
+  ): Promise<Sop> {
+    const sop = read.sop(sopId)
+    if (!sop) throw new ApiError('That SOP no longer exists.')
+    assertCanTouchScope(actor, sop.department_id, sop.branch_scope)
+
+    if (changes.title !== undefined) sop.title = changes.title.trim()
+    if (changes.summary !== undefined) sop.summary = changes.summary.trim()
+    if (changes.document_file_id !== undefined) sop.document_file_id = changes.document_file_id
+    if (changes.video_file_id !== undefined) sop.video_file_id = changes.video_file_id
+    sop.version += 1
+    sop.updated_at = nowIso()
+    sop.published_by = actorName(actor)
+
+    for (const staff of eligibleStaffFor(sop)) {
+      notify(
+        staff.id,
+        'sop_published',
+        `${sop.code} — ${sop.title} — has been updated to version ${sop.version}. Please read and sign it again.`,
+      )
+    }
+    commit()
+    return sop
+  },
+
+  /* ---- notifications ---- */
+
+  async markNotificationsRead(token: string): Promise<void> {
+    const staff = validateStaffToken(token)
+    let changed = false
+    for (const n of db.notifications) {
+      if (n.staff_id === staff.id && !n.read) {
+        n.read = true
+        changed = true
+      }
+    }
+    if (changed) commit()
+  },
+
+  /* ---- admin: org management ---- */
+
+  async addBranch(actor: Actor, code: string, name: string, status: Branch['status']): Promise<Branch> {
+    requireAdmin(actor)
+    const normalised = code.trim().toUpperCase()
+    if (!/^[A-Z]{2,4}$/.test(normalised)) throw new ApiError('Branch code must be 2–4 letters, e.g. DHA.')
+    if (db.branches.some((b) => b.code === normalised)) throw new ApiError(`Branch ${normalised} already exists.`)
+    if (!name.trim()) throw new ApiError('A branch needs a name.')
+
+    const branch: Branch = { id: id('br'), code: normalised, name: name.trim(), status }
+    db.branches.push(branch)
+    commit()
+    // Note: nothing else happens here, and that is the design working. Every
+    // ALL-scope SOP and test now applies to this branch by derivation alone.
+    return branch
+  },
+
+  async addDepartment(actor: Actor, code: string, name: string): Promise<Department> {
+    requireAdmin(actor)
+    const normalised = code.trim().toUpperCase()
+    if (!/^[A-Z]{2,4}$/.test(normalised)) throw new ApiError('Department code must be 2–4 letters, e.g. FD.')
+    if (db.departments.some((d) => d.code === normalised)) throw new ApiError(`Department ${normalised} already exists.`)
+    if (!name.trim()) throw new ApiError('A department needs a name.')
+
+    const dept: Department = { id: id('dp'), code: normalised, name: name.trim() }
+    db.departments.push(dept)
+    commit()
+    return dept
+  },
+
+  /**
+   * Adds a staff member and returns the generated employee code ONCE. The
+   * plaintext is never stored — only the hash goes into the table — so if the
+   * admin loses it the only remedy is to regenerate.
+   */
+  async addStaff(
+    actor: Actor,
+    input: { name: string; department_id: string; branch_id: string; job_title: string },
+  ): Promise<{ staff: Staff; code: string }> {
+    requireAdmin(actor)
+    if (!input.name.trim()) throw new ApiError('A staff member needs a name.')
+
+    const code = generateEmployeeCode()
+    const staff: Staff = {
+      id: id('st'),
+      name: input.name.trim(),
+      department_id: input.department_id,
+      branch_id: input.branch_id,
+      job_title: input.job_title.trim() || 'Staff',
+      employee_code_hash: await hashEmployeeCode(code),
+      active: true,
+      created_at: nowIso(),
+    }
+    db.staff.push(staff)
+    commit()
+    return { staff, code }
+  },
+
+  /** Offboarding is deactivating the row, which is what makes turnover cheap. */
+  async setStaffActive(actor: Actor, staffId: string, active: boolean): Promise<void> {
+    const staff = db.staff.find((s) => s.id === staffId)
+    if (!staff) throw new ApiError('That staff record no longer exists.')
+    assertCanTouchStaff(actor, staff)
+    staff.active = active
+    if (!active) db.sessions = db.sessions.filter((s) => s.staff_id !== staffId)
+    commit()
+  },
+
+  async regenerateStaffCode(actor: Actor, staffId: string): Promise<string> {
+    const staff = db.staff.find((s) => s.id === staffId)
+    if (!staff) throw new ApiError('That staff record no longer exists.')
+    assertCanTouchStaff(actor, staff)
+    const code = generateEmployeeCode()
+    staff.employee_code_hash = await hashEmployeeCode(code)
+    delete db.lockouts[staffId]
+    commit()
+    return code
+  },
+
+  async addManager(
+    actor: Actor,
+    input: { name: string; email: string; department_id: string; branch_id: string },
+  ): Promise<Manager> {
+    requireAdmin(actor)
+    const email = input.email.trim().toLowerCase()
+    if (!input.name.trim()) throw new ApiError('A manager needs a name.')
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new ApiError('That email does not look right.')
+    if (db.managers.some((m) => m.email === email)) throw new ApiError('That manager already exists.')
+
+    const manager: Manager = {
+      id: id('mg'),
+      name: input.name.trim(),
+      email,
+      department_id: input.department_id,
+      branch_id: input.branch_id,
+      active: true,
+    }
+    db.managers.push(manager)
+    commit()
+    return manager
+  },
+
+  /* ---- tests ---- */
+
+  async createTest(
+    actor: Actor,
+    input: {
+      title: string
+      department_id: string
+      branch_scope: BranchScope
+      related_sop_id: string | null
+      pass_mark: number
+      validity_months: number
+      languages: Language[]
+    },
+  ): Promise<Test> {
+    assertCanTouchScope(actor, input.department_id, input.branch_scope)
+    if (!input.title.trim()) throw new ApiError('A test needs a title.')
+
+    const test: Test = {
+      id: id('ts'),
+      title: input.title.trim(),
+      department_id: input.department_id,
+      branch_scope: input.branch_scope,
+      related_sop_id: input.related_sop_id,
+      pass_mark: input.pass_mark,
+      validity_months: input.validity_months,
+      languages: input.languages.includes('en') ? input.languages : ['en', ...input.languages],
+      status: 'draft',
+      created_at: nowIso(),
+    }
+    db.tests.push(test)
+    commit()
+    return test
+  },
+
+  async replaceQuestions(
+    actor: Actor,
+    testId: string,
+    questions: Array<{ text: string; options: string[]; correct_index: number }>,
+  ): Promise<void> {
+    const test = read.test(testId)
+    if (!test) throw new ApiError('That test no longer exists.')
+    assertCanTouchScope(actor, test.department_id, test.branch_scope)
+
+    db.questions = db.questions.filter((q) => q.test_id !== testId)
+    questions.forEach((q, i) => {
+      db.questions.push({
+        id: id('q'),
+        test_id: testId,
+        position: i + 1,
+        text: q.text,
+        options: q.options,
+        correct_index: q.correct_index,
+        // Translations are regenerated from the English at publish time; a
+        // question whose English has just been rewritten has none until then.
+        translations: {},
+        audio: {},
+      })
+    })
+    commit()
+  },
+
+  async publishTest(actor: Actor, testId: string): Promise<Test> {
+    const test = read.test(testId)
+    if (!test) throw new ApiError('That test no longer exists.')
+    assertCanTouchScope(actor, test.department_id, test.branch_scope)
+    if (read.questionsFor(testId).length === 0) {
+      throw new ApiError('A test needs at least one question before it can be published.')
+    }
+    test.status = 'published'
+    commit()
+    return test
+  },
+
+  /* ---- generate-test Edge Function (Claude API) ---- */
+
+  /**
+   * Drafts questions from an SOP document.
+   *
+   * In production this is an Edge Function that fetches the document straight
+   * from Drive, sends it to the Claude API with a difficulty-tuned instruction,
+   * and strictly validates the JSON that comes back. The API key lives in the
+   * function's environment and never reaches the browser.
+   *
+   * Two rules survive into this stand-in because they are the point of the
+   * feature, not implementation detail:
+   *   - generation NEVER auto-publishes. It returns a draft the manager reviews,
+   *     edits and publishes, because a language model will occasionally write an
+   *     ambiguous question or mark a defensible-but-wrong option, and the
+   *     manager must remain the examiner.
+   *   - anything that fails validation is dropped and the manager is told, so a
+   *     bad response degrades to manual authoring rather than to a broken test.
+   */
+  async generateTestDraft(
+    actor: Actor,
+    input: { sopId: string; difficulty: Difficulty; count: number },
+  ): Promise<{ questions: DraftQuestion[]; warnings: string[] }> {
+    const sop = read.sop(input.sopId)
+    if (!sop) throw new ApiError('That SOP no longer exists.')
+    // Reading a department SOP to draft questions, not publishing to its scope.
+    assertCanReadDepartment(actor, sop.department_id)
+
+    await delay(900)
+    const raw = mockClaudeGeneration(sop, input.difficulty, input.count)
+    return validateGeneratedQuestions(raw)
+  },
+
+  /* ---- translate-test Edge Function (Claude API) ---- */
+
+  /**
+   * Renders the whole English question set into the chosen languages and stores
+   * the result alongside the English on each question.
+   *
+   * Translations are renderings of the English original. They are regenerated
+   * when a question changes and are never edited independently — otherwise you
+   * are certifying people against three subtly different tests.
+   */
+  async translateTest(actor: Actor, testId: string, languages: Language[]): Promise<number> {
+    const test = read.test(testId)
+    if (!test) throw new ApiError('That test no longer exists.')
+    assertCanTouchScope(actor, test.department_id, test.branch_scope)
+
+    await delay(700)
+    const questions = read.questionsFor(testId)
+    for (const q of questions) {
+      for (const lang of languages) {
+        if (lang === 'en') continue
+        q.translations[lang] = mockTranslate(q, lang)
+      }
+    }
+    test.languages = ['en', ...languages.filter((l) => l !== 'en')]
+    commit()
+    return questions.length
+  },
+}
+
+function requireAdmin(actor: Actor): void {
+  if (actor.kind !== 'admin') {
+    throw new ApiError('Only an admin can do that.')
+  }
+}
+
+/** Everyone the derivation says this SOP or test applies to. */
+export function eligibleStaffFor(record: { department_id: string; branch_scope: BranchScope }): Staff[] {
+  return db.staff.filter((s) => {
+    if (!s.active) return false
+    if (s.department_id !== record.department_id) return false
+    const branch = read.branch(s.branch_id)
+    return !!branch && scopeIncludes(record.branch_scope, branch.code)
+  })
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/* ------------------------------------------------- generation validation ---- */
+
+export interface DraftQuestion {
+  text: string
+  options: string[]
+  correct_index: number
+}
+
+/**
+ * Strict validation of what the model returns: four options each, exactly one
+ * correct answer index that actually points at an option, no blanks, no
+ * duplicate options. A question that fails any of these is dropped with a
+ * warning rather than quietly repaired.
+ */
+export function validateGeneratedQuestions(raw: unknown): {
+  questions: DraftQuestion[]
+  warnings: string[]
+} {
+  const warnings: string[] = []
+  if (!Array.isArray(raw)) {
+    return { questions: [], warnings: ['The model did not return a list of questions. Write the test by hand.'] }
+  }
+
+  const questions: DraftQuestion[] = []
+  raw.forEach((item, i) => {
+    const n = i + 1
+    if (typeof item !== 'object' || item === null) {
+      warnings.push(`Question ${n} was not an object and was dropped.`)
+      return
+    }
+    const q = item as Record<string, unknown>
+    if (typeof q.text !== 'string' || !q.text.trim()) {
+      warnings.push(`Question ${n} had no question text and was dropped.`)
+      return
+    }
+    if (!Array.isArray(q.options) || q.options.length !== 4) {
+      warnings.push(`Question ${n} did not have exactly four options and was dropped.`)
+      return
+    }
+    const options = q.options.map((o) => (typeof o === 'string' ? o.trim() : ''))
+    if (options.some((o) => !o)) {
+      warnings.push(`Question ${n} had a blank option and was dropped.`)
+      return
+    }
+    if (new Set(options.map((o) => o.toLowerCase())).size !== 4) {
+      warnings.push(`Question ${n} repeated an option and was dropped.`)
+      return
+    }
+    const idx = q.correct_index
+    if (typeof idx !== 'number' || !Number.isInteger(idx) || idx < 0 || idx > 3) {
+      warnings.push(`Question ${n} had no valid correct answer and was dropped.`)
+      return
+    }
+    questions.push({ text: q.text.trim(), options, correct_index: idx })
+  })
+
+  if (questions.length === 0 && warnings.length === 0) {
+    warnings.push('The model returned nothing usable. Write the test by hand.')
+  }
+  return { questions, warnings }
+}
+
+/* ------------------------------------------------------------ mock Claude ---- */
+
+/**
+ * Stand-in for the Claude call. It produces questions at the requested
+ * difficulty from the SOP's own title and summary, and — like the real prompt
+ * will instruct — invents no policy that is not in the document. A thin SOP
+ * yields thin questions, which is a feature: it pressures managers into writing
+ * real SOPs.
+ */
+function mockClaudeGeneration(sop: Sop, difficulty: Difficulty, count: number): unknown {
+  const dept = read.department(sop.department_id)?.name ?? 'the department'
+  const templates: Record<Difficulty, Array<() => DraftQuestion>> = {
+    // Low: direct recall of what the SOP states.
+    low: [
+      () => ({
+        text: `Which document-control code identifies the ${sop.title.toLowerCase()} procedure?`,
+        options: [sop.code, shiftCode(sop.code, 1), shiftCode(sop.code, 2), shiftCode(sop.code, 3)],
+        correct_index: 0,
+      }),
+      () => ({
+        text: `${sop.code} applies to which department?`,
+        options: [dept, 'Front Desk', 'Maintenance', 'Any department'].filter(
+          (v, i, arr) => arr.indexOf(v) === i,
+        ).concat(['Quality & Compliance', 'Kitchen']).slice(0, 4),
+        correct_index: 0,
+      }),
+      () => ({
+        text: `According to ${sop.code}, which of the following is part of the stated procedure?`,
+        options: [
+          firstClause(sop.summary),
+          'Whatever the shift supervisor prefers on the day',
+          'Nothing is specified; use your judgement',
+          'It is decided branch by branch',
+        ],
+        correct_index: 0,
+      }),
+    ],
+    // Medium: applying the rule inside a simple realistic on-shift scenario.
+    medium: [
+      () => ({
+        text: `Mid-shift you hit the situation ${sop.code} covers and a colleague suggests skipping a step to save time. What does the SOP require?`,
+        options: [
+          'Follow the procedure as written and record it',
+          'Skip the step if the guest has not noticed',
+          'Ask the guest which they would prefer',
+          'Do it your own way and mention it at handover',
+        ],
+        correct_index: 0,
+      }),
+      () => ({
+        text: `A new colleague on your shift has not read ${sop.code}. Under the SOP, what should happen before they carry out the task alone?`,
+        options: [
+          'They read and sign the current version first',
+          'They watch once and start immediately',
+          'They can start; the SOP is guidance only',
+          'They wait for the next quarterly briefing',
+        ],
+        correct_index: 0,
+      }),
+      () => ({
+        text: `You are part-way through the ${sop.title.toLowerCase()} procedure when you are pulled away. What is the correct action?`,
+        options: [
+          'Hand over the incomplete step explicitly so it is picked up',
+          'Leave it; the next person will notice',
+          'Mark it complete and finish it later',
+          'Start again from the beginning at the end of your shift',
+        ],
+        correct_index: 0,
+      }),
+    ],
+    // High: multi-step or exception scenarios where the wrong options are
+    // plausible near-miss mistakes staff actually make.
+    high: [
+      () => ({
+        text: `${sop.code} covers the normal case, but tonight you face an exception it does not name, and the duty manager is unreachable. What is the correct sequence?`,
+        options: [
+          'Apply the closest stated rule, record the deviation, and escalate at the first opportunity',
+          'Improvise and say nothing, since the SOP does not cover it',
+          'Refuse to act at all until the manager answers',
+          'Ask the guest to decide and follow whatever they choose',
+        ],
+        correct_index: 0,
+      }),
+      () => ({
+        text: `Two requirements of ${sop.code} appear to conflict during a busy period. What does the SOP expect of you?`,
+        options: [
+          'Satisfy the safety or compliance requirement first and record why the other slipped',
+          'Satisfy whichever is quicker and move on',
+          'Average the two and do neither fully',
+          'Wait until the rush is over and do both then',
+        ],
+        correct_index: 0,
+      }),
+      () => ({
+        text: `A near-miss occurs that ${sop.code} would have prevented, but no guest was affected and nobody else saw it. What now?`,
+        options: [
+          'Report it anyway, citing the code, so the cause is followed up',
+          'Do nothing, since there was no harm',
+          'Mention it verbally at handover only',
+          'Correct it quietly and keep it off the record',
+        ],
+        correct_index: 0,
+      }),
+    ],
+  }
+
+  const pool = templates[difficulty]
+  const out: DraftQuestion[] = []
+  for (let i = 0; i < count; i++) {
+    out.push(pool[i % pool.length]())
+  }
+  // Rotate the correct option around the four positions so the draft does not
+  // train staff to always pick A.
+  return out.map((q, i) => rotateAnswer(q, i % 4))
+}
+
+function rotateAnswer(q: DraftQuestion, target: number): DraftQuestion {
+  const options = [...q.options]
+  const [correct] = options.splice(q.correct_index, 1)
+  options.splice(target, 0, correct)
+  return { ...q, options, correct_index: target }
+}
+
+function shiftCode(code: string, by: number): string {
+  const m = /^([A-Z]{2,4})-(\d{3,})$/.exec(code)
+  if (!m) return `${code}-${by}`
+  return `${m[1]}-${String(Number(m[2]) + by).padStart(m[2].length, '0')}`
+}
+
+function firstClause(summary: string): string {
+  const clause = summary.split(/[,.;]/)[0]?.trim() ?? summary
+  return clause.charAt(0).toUpperCase() + clause.slice(1)
+}
+
+/**
+ * Stand-in for the translate call. It marks the string rather than inventing
+ * Urdu or Pashto that nobody has checked — an honest placeholder beats
+ * confident-looking machine text that a manager might wave through. The real
+ * Edge Function replaces this with the Claude API and the manager reviews the
+ * output as controlled content before it goes live.
+ */
+function mockTranslate(q: Question, lang: Language): { text: string; options: string[] } {
+  const existing = q.translations[lang]
+  if (existing) return existing
+  const tag = lang === 'ur' ? '[اردو ترجمہ زیرِ التوا]' : '[پښتو ژباړه پاتې ده]'
+  return {
+    text: `${tag} ${q.text}`,
+    options: q.options.map((o) => `${tag} ${o}`),
+  }
+}
