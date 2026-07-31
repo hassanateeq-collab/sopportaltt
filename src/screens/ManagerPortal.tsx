@@ -16,6 +16,8 @@ import { scopeIncludes } from '../lib/scope'
 import { certStatus, daysUntil } from '../lib/certs'
 import { fmtD } from '../lib/format'
 import { toast } from '../lib/toast'
+import { isSupabaseEnabled } from '../lib/supabase'
+import { DRIVE_DEPARTMENT_FOLDERS } from '../lib/drive'
 import { Viewer } from '../components/Viewer'
 
 /**
@@ -350,6 +352,20 @@ function AssignPanel({
 
 /* --------------------------------------------------------------- add SOP -- */
 
+interface Upload {
+  name: string
+  size: number
+  /** blob: URL for the in-portal preview (session only). */
+  src: string
+}
+
+/**
+ * Add an SOP by uploading its document (PDF) and an optional training video, and
+ * choosing which Drive folder they go into. In production these files are pushed
+ * to the chosen folder by the upload-sop Edge Function (view-only), which stores
+ * the returned file ids on the SOP. In the demo they are previewed inline so the
+ * whole flow is visible without a backend.
+ */
 function AddSopForm({
   dept,
   branch,
@@ -361,17 +377,36 @@ function AddSopForm({
   actor: Actor
   lockBranch: boolean
 }) {
+  const defaultFolder =
+    DRIVE_DEPARTMENT_FOLDERS.find((f) => f.name === dept.name)?.id ?? DRIVE_DEPARTMENT_FOLDERS[0]?.id ?? ''
   const [title, setTitle] = useState('')
   const [code, setCode] = useState('')
-  const [docId, setDocId] = useState('')
-  const [vidId, setVidId] = useState('')
+  const [folderId, setFolderId] = useState(defaultFolder)
+  const [pdf, setPdf] = useState<Upload | null>(null)
+  const [video, setVideo] = useState<Upload | null>(null)
   const [allBranches, setAllBranches] = useState(false)
   const [busy, setBusy] = useState(false)
 
+  function onPdf(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]
+    if (!f) return
+    if (f.type !== 'application/pdf' && !f.name.toLowerCase().endsWith('.pdf')) { toast('Upload a PDF file'); e.target.value = ''; return }
+    setPdf({ name: f.name, size: f.size, src: URL.createObjectURL(f) })
+  }
+
+  function onVideo(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]
+    if (!f) return
+    if (!f.type.startsWith('video/')) { toast('Upload a video file'); e.target.value = ''; return }
+    setVideo({ name: f.name, size: f.size, src: URL.createObjectURL(f) })
+  }
+
   async function submit() {
     if (!title.trim()) { toast('Give the SOP a title first'); return }
+    if (!pdf) { toast('Upload the SOP document (PDF) first'); return }
     setBusy(true)
     const scope: BranchScope = lockBranch || !allBranches ? { kind: 'LIST', branch_codes: [branch.code] } : { kind: 'ALL' }
+    const folderName = DRIVE_DEPARTMENT_FOLDERS.find((f) => f.id === folderId)?.name ?? 'the folder'
     try {
       const s = await api.publishSop(actor, {
         title,
@@ -379,11 +414,13 @@ function AddSopForm({
         department_id: dept.id,
         branch_scope: scope,
         code: code || undefined,
-        document_file_id: docId.trim() || null,
-        video_file_id: vidId.trim() || null,
+        // In the demo these carry the inline preview; in production the Edge
+        // Function replaces them with the Drive file ids after upload.
+        document_file_id: pdf.src,
+        video_file_id: video?.src ?? null,
       })
-      toast(`Published as ${s.code} — matching ${dept.name} staff notified`)
-      setTitle(''); setCode(''); setDocId(''); setVidId('')
+      toast(`Published as ${s.code} into ${folderName} — matching ${dept.name} staff notified`)
+      setTitle(''); setCode(''); setPdf(null); setVideo(null)
     } catch (e) {
       toast(e instanceof ApiError ? e.message : 'Could not publish.')
     } finally {
@@ -393,18 +430,56 @@ function AddSopForm({
 
   return (
     <details className="board">
-      <summary>Add SOP<span className="hint">document + video · to {dept.name}{lockBranch ? ` · ${branch.code} only` : ''}</span></summary>
+      <summary>Add SOP<span className="hint">upload document + video · to {dept.name}{lockBranch ? ` · ${branch.code} only` : ''}</span></summary>
       <div className="card-body">
+        {isSupabaseEnabled && (
+          <div className="notice info" style={{ marginBottom: 14 }}>
+            The document and video upload to your locked Drive folder through the upload function — deploy it (see
+            supabase/SETUP.md) to save against your live database.
+          </div>
+        )}
+
         <div className="field"><label htmlFor="f-title">Title</label>
           <input id="f-title" type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Guest Complaint Handling" /></div>
         <div className="field"><label htmlFor="f-code">SOP code — blank = auto</label>
           <input id="f-code" type="text" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} style={{ textTransform: 'uppercase' }} placeholder={`${dept.code}-00X`} /></div>
-        <div className="field"><label htmlFor="f-doc">Google Drive document file ID</label>
-          <input id="f-doc" type="text" value={docId} onChange={(e) => setDocId(e.target.value)} placeholder="optional — from the locked Drive folder" /></div>
-        <div className="field"><label htmlFor="f-vid">Google Drive video file ID</label>
-          <input id="f-vid" type="text" value={vidId} onChange={(e) => setVidId(e.target.value)} placeholder="optional" />
-          <div className="demo-hint">Both stream live inside the viewer. Set Drive files to Viewer + "Viewers can't download, print, or copy".</div>
+
+        <div className="field">
+          <label>SOP document (PDF)</label>
+          {pdf ? (
+            <div className="pdfchip">
+              <span className="mono">📄 {pdf.name}</span>
+              <span className="mono" style={{ color: 'var(--ink-faint)' }}>{(pdf.size / 1024).toFixed(0)} KB</span>
+              <button className="btn sm" onClick={() => setPdf(null)}>✕ Remove</button>
+            </div>
+          ) : (
+            <input type="file" accept="application/pdf,.pdf" onChange={onPdf} />
+          )}
         </div>
+
+        <div className="field">
+          <label>Training video (optional)</label>
+          {video ? (
+            <div className="pdfchip">
+              <span className="mono">🎬 {video.name}</span>
+              <span className="mono" style={{ color: 'var(--ink-faint)' }}>{(video.size / 1024 / 1024).toFixed(1)} MB</span>
+              <button className="btn sm" onClick={() => setVideo(null)}>✕ Remove</button>
+            </div>
+          ) : (
+            <input type="file" accept="video/*" onChange={onVideo} />
+          )}
+        </div>
+
+        <div className="field">
+          <label htmlFor="f-folder">Destination folder in Drive</label>
+          <select id="f-folder" value={folderId} onChange={(e) => setFolderId(e.target.value)}>
+            {DRIVE_DEPARTMENT_FOLDERS.map((f) => (
+              <option key={f.id} value={f.id}>Hamsun_SOP / {f.name}</option>
+            ))}
+          </select>
+          <div className="demo-hint">Files land here view-only inside the Hamsun_SOP folder. The viewer streams them; no downloads.</div>
+        </div>
+
         {lockBranch ? (
           <div className="field"><label>Scope</label>
             <div style={{ fontSize: 13.5 }}>{dept.name} · {branch.code} only — managers publish to their own department at their branch.</div></div>
@@ -416,7 +491,7 @@ function AddSopForm({
             </div></div>
         )}
         <button className="btn primary block" disabled={busy} onClick={() => void submit()}>
-          {busy ? <span className="spinner" /> : `Publish to ${dept.name}`}
+          {busy ? <span className="spinner" /> : `Upload & publish to ${dept.name}`}
         </button>
       </div>
     </details>

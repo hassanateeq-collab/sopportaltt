@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import type { Sop } from '../types'
 import { scopeLabel } from '../lib/scope'
 import { read } from '../data/store'
-import { documentEmbedUrl, videoEmbedUrl, VIEWER_SANDBOX } from '../lib/drive'
+import { documentEmbedUrl, videoEmbedUrl, VIEWER_SANDBOX, isInlineSource } from '../lib/drive'
 import { fmtD } from '../lib/format'
 
 /**
@@ -49,7 +49,24 @@ export function Viewer({
       </div>
 
       <div className="v-doc">
-        {fileId ? (
+        {fileId && isInlineSource(fileId) ? (
+          <div className="v-frame-wrap">
+            {kind === 'video' ? (
+              <video
+                src={fileId}
+                controls
+                controlsList="nodownload noplaybackrate"
+                disablePictureInPicture
+                style={{ width: '100%', height: '100%', maxHeight: '70vh', background: '#000', borderRadius: 'var(--r)' }}
+              />
+            ) : (
+              // The manager's own just-uploaded PDF, previewed inline. No sandbox
+              // here (unlike the Drive embed) so the browser's PDF viewer renders.
+              <iframe src={fileId} title={`${sop.code} document`} />
+            )}
+            <div className="noext" title="View only" />
+          </div>
+        ) : fileId ? (
           <div className="v-frame-wrap">
             <iframe
               src={kind === 'doc' ? documentEmbedUrl(fileId) : videoEmbedUrl(fileId)}

@@ -34,11 +34,32 @@
  */
 export const DRIVE_STORAGE_FOLDER_ID = '1ERAgtoCpbhCEzFYq0gxhfbXc_rM6l9LQ'
 
+/**
+ * Destination sub-folders created inside the storage folder, one per department.
+ * The upload Edge Function drops each SOP's document/video into the folder chosen
+ * in the form. In production the folder list is fetched live from Drive; this map
+ * is the current known set and the demo's folder picker.
+ */
+export const DRIVE_DEPARTMENT_FOLDERS: Array<{ name: string; id: string }> = [
+  { name: 'Front Desk', id: '1u3IDb7mnL64QTlcUOUvOUMi7Tr2lLhS0' },
+  { name: 'Housekeeping', id: '17bjHtTUmS-wcv82MSir4HCFI8hX8q-Kw' },
+  { name: 'Kitchen', id: '1BVSDXiPTwUXgEQE5uIQYujvKfrE7o46n' },
+  { name: 'Maintenance', id: '1QhpioEqlN6prb8u0pIpq-lhbjQah1RV4' },
+  { name: 'Quality & Compliance', id: '1uonBeYPsxXYWK-GbYObVXQxe6TRlN6Rc' },
+]
+
+/** True when a stored reference is an inline preview (demo upload), not a Drive id. */
+export function isInlineSource(ref: string | null | undefined): boolean {
+  return !!ref && (ref.startsWith('data:') || ref.startsWith('blob:') || ref.startsWith('http'))
+}
+
 export function documentEmbedUrl(fileId: string): string {
+  if (isInlineSource(fileId)) return fileId
   return `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/preview`
 }
 
 export function videoEmbedUrl(fileId: string): string {
+  if (isInlineSource(fileId)) return fileId
   return `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/preview`
 }
 
