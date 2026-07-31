@@ -139,20 +139,28 @@ Deno.serve(async (req) => {
       rules
     parts.push({ text: intro })
 
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
-      {
-        method: 'POST',
-        // Header auth works for both the classic AIza… keys and the newer AQ.… keys.
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts }],
-          generationConfig: { responseMimeType: 'application/json', temperature: 0.6, maxOutputTokens: 4096 },
-        }),
-      },
-    )
+    const reqInit: RequestInit = {
+      method: 'POST',
+      // Header auth works for both the classic AIza… keys and the newer AQ.… keys.
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts }],
+        generationConfig: { responseMimeType: 'application/json', temperature: 0.6, maxOutputTokens: 4096 },
+      }),
+    }
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`
+
+    // Gemini flash models can briefly 503 under load; retry transient errors.
+    let res = await fetch(url, reqInit)
+    for (let attempt = 0; attempt < 3 && (res.status === 503 || res.status === 500 || res.status === 502); attempt++) {
+      await new Promise((r) => setTimeout(r, 900 * (attempt + 1)))
+      res = await fetch(url, reqInit)
+    }
     if (!res.ok) {
       const errText = await res.text()
+      if (res.status === 503) {
+        return json({ error: 'Gemini is briefly overloaded — please click Generate again in a few seconds.' }, 503)
+      }
       if (res.status === 429) {
         return json({
           error: `Gemini quota: the free tier gives your project no quota for "${MODEL}". Try another model (set the GEMINI_MODEL secret), or enable billing on the Google Cloud project. Details: ${errText.slice(0, 200)}`,
