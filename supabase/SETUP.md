@@ -146,6 +146,18 @@ Hamsun account, and the SOP appears on the board. (Keep videos reasonably sized;
 very large files may exceed the function request limit — resumable upload is a
 later enhancement.)
 
+### Optional: delete SOPs from Drive too
+
+By default, deleting an SOP in the portal removes only the database record; the
+Drive file stays. Deploy the `delete-sop` function (same secrets, no new setup)
+to also remove the document/video from Drive on delete:
+
+```bash
+supabase functions deploy delete-sop
+```
+
+Until it's deployed, delete still works — it just leaves the file in the folder.
+
 ## Stage 3b — the remaining Edge Functions
 
 `staff-directory`, `staff-login` (bcrypt code + server-side lockout + a

@@ -1139,6 +1139,25 @@ export const api = {
    */
   async deleteSop(actor: Actor, sopId: string): Promise<void> {
     if (isSupabaseEnabled) {
+      // Prefer the delete-sop Edge Function, which also removes the Drive files.
+      // If it isn't deployed yet (404), fall back to a direct row delete so the
+      // button still works (the Drive file just stays in the folder).
+      const { data: { session } } = await supabase!.auth.getSession()
+      if (session) {
+        const res = await fetch(`${functionsBase}/delete-sop`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sop_id: sopId }),
+        }).catch(() => null)
+        if (res && res.ok) {
+          await hydrateFromSupabase()
+          return
+        }
+        if (res && res.status !== 404) {
+          const j = await res.json().catch(() => ({}))
+          throw new ApiError((j as { error?: string }).error ?? 'Delete failed.')
+        }
+      }
       const { error } = await supabase!.from('sops').delete().eq('id', sopId)
       if (error) throw new ApiError(error.message)
       await hydrateFromSupabase()

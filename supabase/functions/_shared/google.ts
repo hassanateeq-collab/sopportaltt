@@ -58,6 +58,15 @@ export async function uploadToDrive(
   return json.id as string
 }
 
+/** Delete a file from Drive. A missing file (404) is treated as already gone. */
+export async function deleteFromDrive(token: string, fileId: string): Promise<void> {
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok && res.status !== 404) throw new Error(`Drive delete failed: ${await res.text()}`)
+}
+
 /**
  * Make a file view-only: readers cannot download, print or copy, and anyone with
  * the link may view (so staff without Google accounts can see the preview embed).
