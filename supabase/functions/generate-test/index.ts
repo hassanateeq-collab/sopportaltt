@@ -147,7 +147,7 @@ Deno.serve(async (req) => {
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI },
         body: JSON.stringify({
           contents: [{ role: 'user', parts }],
-          generationConfig: { responseMimeType: 'application/json', temperature: 0.6, maxOutputTokens: 2048 },
+          generationConfig: { responseMimeType: 'application/json', temperature: 0.6, maxOutputTokens: 4096 },
         }),
       },
     )
@@ -161,17 +161,37 @@ Deno.serve(async (req) => {
       return json({ error: `Gemini error (${res.status}): ${errText.slice(0, 300)}` }, 502)
     }
     const data = await res.json()
-    const text: string = (data.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? '').join('')
-
-    let parsed: unknown = []
-    try {
-      const cleaned = text.replace(/```json|```/g, '').trim()
-      const m = cleaned.match(/\{[\s\S]*\}/)
-      const obj = JSON.parse(m ? m[0] : cleaned)
-      parsed = Array.isArray(obj.questions) ? obj.questions : []
-    } catch (_) {
-      return json({ questions: [], warnings: ['The model returned unreadable output — try again or write questions by hand.'] })
+    const cand = data.candidates?.[0]
+    const text: string = (cand?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? '').join('')
+    if (!text.trim()) {
+      return json({ questions: [], warnings: [`The model returned no text (finishReason: ${cand?.finishReason ?? 'unknown'}). Try again.`] })
     }
+
+    // Robust parse: the model may return a top-level array OR a { questions: [] }
+    // (or { data: [] }) wrapper, possibly inside markdown fences.
+    let obj: unknown = null
+    const cleaned = text.replace(/```json|```/g, '').trim()
+    try {
+      obj = JSON.parse(cleaned)
+    } catch {
+      const m = cleaned.match(/[[{][\s\S]*[\]}]/)
+      try {
+        obj = m ? JSON.parse(m[0]) : null
+      } catch {
+        obj = null
+      }
+    }
+    if (obj == null) {
+      return json({ questions: [], warnings: [`Could not read the model output. Raw start: ${cleaned.slice(0, 220)}`] })
+    }
+    const container = obj as { questions?: unknown; data?: unknown }
+    const parsed = Array.isArray(obj)
+      ? obj
+      : Array.isArray(container.questions)
+        ? container.questions
+        : Array.isArray(container.data)
+          ? container.data
+          : []
 
     return json(validate(parsed))
   } catch (e) {
