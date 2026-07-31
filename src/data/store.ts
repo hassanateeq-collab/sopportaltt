@@ -1087,8 +1087,29 @@ export const api = {
     sopId: string,
     changes: { title?: string; summary?: string; document_file_id?: string | null; video_file_id?: string | null },
   ): Promise<Sop> {
-    const sop = read.sop(sopId)
-    if (!sop) throw new ApiError('That SOP no longer exists.')
+    const current = read.sop(sopId)
+    if (!current) throw new ApiError('That SOP no longer exists.')
+
+    // Supabase mode: bump the version via PostgREST (RLS confines managers to
+    // their own department + branch). The bump reopens the sign-off because
+    // acknowledgments are pinned to the old version number.
+    if (isSupabaseEnabled) {
+      const patch: Record<string, unknown> = {
+        version: current.version + 1,
+        updated_at: nowIso(),
+        published_by: actorName(actor),
+      }
+      if (changes.title !== undefined) patch.title = changes.title.trim()
+      if (changes.summary !== undefined) patch.summary = changes.summary.trim()
+      if (changes.document_file_id !== undefined) patch.document_file_id = changes.document_file_id
+      if (changes.video_file_id !== undefined) patch.video_file_id = changes.video_file_id
+      const { data, error } = await supabase!.from('sops').update(patch).eq('id', sopId).select('*').single()
+      if (error) throw new ApiError(error.message)
+      await hydrateFromSupabase()
+      return data as Sop
+    }
+
+    const sop = current
     assertCanTouchScope(actor, sop.department_id, sop.branch_scope)
 
     if (changes.title !== undefined) sop.title = changes.title.trim()
@@ -1108,6 +1129,28 @@ export const api = {
     }
     commit()
     return sop
+  },
+
+  /**
+   * Delete an SOP and its acknowledgments. In Supabase mode this is a PostgREST
+   * delete (RLS lets admins delete anything and confines managers to their own
+   * department); the acknowledgments cascade via the foreign key. The Drive
+   * files are left in the folder — clean those up in Drive if you want them gone.
+   */
+  async deleteSop(actor: Actor, sopId: string): Promise<void> {
+    if (isSupabaseEnabled) {
+      const { error } = await supabase!.from('sops').delete().eq('id', sopId)
+      if (error) throw new ApiError(error.message)
+      await hydrateFromSupabase()
+      return
+    }
+
+    const sop = read.sop(sopId)
+    if (!sop) throw new ApiError('That SOP no longer exists.')
+    assertCanTouchScope(actor, sop.department_id, sop.branch_scope)
+    db.sops = db.sops.filter((s) => s.id !== sopId)
+    db.acknowledgments = db.acknowledgments.filter((a) => a.sop_id !== sopId)
+    commit()
   },
 
   /* ---- notifications ---- */

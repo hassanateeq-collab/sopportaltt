@@ -184,14 +184,29 @@ function SopBoard({
 function RevalidateRow({ actor, sop }: { actor: Actor; sop: Sop }) {
   return (
     <details className="inline">
-      <summary>Publish a new version</summary>
+      <summary>Manage this SOP</summary>
       <div style={{ marginTop: 8 }}>
         <p className="demo-hint" style={{ marginTop: 0 }}>
-          A new version reopens the register — everyone who signed v{sop.version} must sign again.
+          A new version reopens the register — everyone who signed v{sop.version} must sign it again. Deleting removes
+          the SOP and its sign-off records (the Drive file stays in your folder).
         </p>
-        <button className="btn sm" onClick={() => run(() => api.reviseSop(actor, sop.id, {}), `${sop.code} bumped to a new version`)}>
-          New version of {sop.code}
-        </button>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <button
+            className="btn sm"
+            onClick={() => run(() => api.reviseSop(actor, sop.id, {}), `${sop.code} bumped to v${sop.version + 1}`)}
+          >
+            ↑ New version of {sop.code}
+          </button>
+          <button
+            className="btn sm danger"
+            onClick={() => {
+              if (!confirm(`Delete ${sop.code} — ${sop.title}?\n\nThis removes the SOP and its sign-off records. It can't be undone.`)) return
+              run(() => api.deleteSop(actor, sop.id), `${sop.code} deleted`)
+            }}
+          >
+            ✕ Delete SOP
+          </button>
+        </div>
       </div>
     </details>
   )
