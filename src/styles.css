@@ -1370,6 +1370,17 @@ details.board > summary {
   font-family: var(--disp);
   font-size: 15px;
   font-weight: 600;
+  /* A light wash + brass accent rail so these read as expandable panels,
+     distinct from the static boards above — theme-matching, not loud. The
+     3px-narrower left padding offsets the rail so the title stays aligned. */
+  padding-left: 15px;
+  background: var(--ground);
+  border-left: 3px solid var(--brass-line);
+  transition: background 0.15s, border-color 0.15s;
+}
+
+details.board > summary:hover {
+  background: var(--pine-tint);
 }
 
 details.board > summary::-webkit-details-marker {
@@ -1379,7 +1390,7 @@ details.board > summary::-webkit-details-marker {
 details.board > summary::after {
   content: '›';
   margin-left: auto;
-  color: var(--ink-faint);
+  color: var(--pine);
   transform: rotate(90deg);
   transition: transform 0.15s;
   font-size: 16px;
@@ -1391,6 +1402,8 @@ details.board[open] > summary::after {
 
 details.board[open] > summary {
   border-bottom: 1px solid var(--line);
+  border-left-color: var(--brass);
+  background: var(--pine-tint);
 }
 
 details.board > summary .hint {
