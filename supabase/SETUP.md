@@ -217,31 +217,6 @@ preserved, so scoring is unchanged. It reuses `GEMINI_API_KEY`:
 supabase functions deploy translate-question
 ```
 
-### Read-aloud in Urdu & Pashto (Azure Speech)
-
-Browsers can only *speak* a language the device has a voice for, and most have
-neither Urdu nor Pashto. The `speak` function uses **Microsoft Azure Speech**,
-which has real neural voices for both (`ur-PK-UzmaNeural`, `ps-AF-LatifaNeural`),
-so the speaker button reads questions aloud on any device. English keeps using
-the browser's own voice (instant, no cost).
-
-1. **Create a free Azure Speech resource.** In the
-   [Azure portal](https://portal.azure.com) → **Create a resource → Speech**.
-   The free tier **F0** covers 0.5M characters/month at no cost. Note the
-   resource's **Region** (e.g. `southeastasia`) and one of its **Keys**
-   (Resource → *Keys and Endpoint*).
-2. **Set the secrets and deploy:**
-   ```bash
-   supabase secrets set AZURE_SPEECH_KEY=your-azure-key
-   supabase secrets set AZURE_SPEECH_REGION=your-region   # e.g. southeastasia
-   supabase functions deploy speak
-   ```
-
-On a test, tapping 🔊 now reads the question aloud in the shown language — Urdu
-or Pashto via Azure, English via the device. If the function isn't deployed or
-the key is missing, it falls back to the browser voice (and the friendly "ask
-your manager" note where no device voice exists).
-
 ## Stage 3b — staff sign-in + admin management  ✅ built
 
 This turns on the **staff side** (sign in by name + code, see assigned SOPs and

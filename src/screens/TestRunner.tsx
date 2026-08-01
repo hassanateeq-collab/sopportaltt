@@ -1,20 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { api, read, translateQuestion, speakText, ApiError } from '../data/store'
+import { api, read, translateQuestion, ApiError } from '../data/store'
 import type { Attempt, Certification, Language, Question, Test } from '../types'
 import { LANGUAGE_NAMES, RTL_LANGUAGES } from '../types'
 import { fmtD } from '../lib/format'
 import { toast } from '../lib/toast'
-import { isSupabaseEnabled } from '../lib/supabase'
-import { SpeakerIcon } from '../components/icons'
-import * as tts from '../lib/tts'
 
 /**
  * The test-taking flow, in the prototype's style: pick a language, answer each
- * question (right-to-left for Urdu/Pashto, with a speaker button that reads it
- * aloud), then a wax-stamp CERTIFIED result or a NOT PASSED box. Scoring is by
- * option position, so the result is identical in every language. The retest gate
- * is enforced in api.submitAttempt.
+ * question (right-to-left for Urdu/Pashto, with a per-question translate control),
+ * then a wax-stamp CERTIFIED result or a NOT PASSED box. Scoring is by option
+ * position, so the result is identical in every language. The retest gate is
+ * enforced in api.submitAttempt.
  */
 export function TestRunner({
   test,
@@ -39,18 +36,6 @@ export function TestRunner({
   const [xlate, setXlate] = useState<Record<number, { lang: Language; text: string; options: string[] }>>({})
   const [xbusy, setXbusy] = useState<number | null>(null)
   const [xpend, setXpend] = useState<Language | null>(null)
-  const [speaking, setSpeaking] = useState(false)
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-
-  function stopSpeaking() {
-    tts.stop()
-    if (audioRef.current) {
-      audioRef.current.pause()
-      audioRef.current = null
-    }
-  }
-
-  useEffect(() => () => stopSpeaking(), [])
 
   // Language chooser (only when the test offers more than English)
   if (!started) {
@@ -69,12 +54,6 @@ export function TestRunner({
                 <button key={l} aria-pressed={lang === l} onClick={() => setLang(l)}>{LANGUAGE_NAMES[l]}</button>
               ))}
             </div>
-            {RTL_LANGUAGES.includes(lang) && !tts.hasVoice(lang) && (
-              <div className="demo-hint">
-                No {LANGUAGE_NAMES[lang]} voice on this device — the questions still show in {LANGUAGE_NAMES[lang]};
-                production serves recorded audio.
-              </div>
-            )}
           </div>
           <div className="backlink">
             <button className="btn primary" onClick={() => setStarted(true)}>Start test</button>
@@ -128,7 +107,6 @@ export function TestRunner({
 
   async function translateTo(l: Language) {
     if (xlate[qi]?.lang === l) return
-    tts.stop()
     setXbusy(qi)
     setXpend(l)
     try {
@@ -142,39 +120,7 @@ export function TestRunner({
     }
   }
 
-  async function playAudio() {
-    stopSpeaking()
-    const letters = ['A', 'B', 'C', 'D']
-    const spoken =
-      activeLang === 'en'
-        ? `${shown.text}. ${shown.options.map((o, i) => `${letters[i]}. ${o}`).join('. ')}`
-        : `${shown.text}. ${shown.options.join('. ')}`
-    // Urdu/Pashto read aloud through the server voice (Azure), so it works on any
-    // device; English uses the browser's own voice (instant, offline).
-    if (isSupabaseEnabled && (activeLang === 'ur' || activeLang === 'ps')) {
-      setSpeaking(true)
-      try {
-        const blob = await speakText(token, spoken, activeLang)
-        const url = URL.createObjectURL(blob)
-        const audio = new Audio(url)
-        audioRef.current = audio
-        audio.onended = () => URL.revokeObjectURL(url)
-        await audio.play()
-      } catch (e) {
-        // If the voice service isn't set up, fall back to the browser voice.
-        const res = tts.playQuestion(shown, activeLang, undefined)
-        if (!res.ok) toast(e instanceof ApiError ? e.message : res.reason)
-      } finally {
-        setSpeaking(false)
-      }
-      return
-    }
-    const res = tts.playQuestion(shown, activeLang, q.audio[activeLang])
-    if (!res.ok) toast(res.reason)
-  }
-
   function choose(i: number) {
-    stopSpeaking()
     const next = [...answers]
     next[qi] = i
     setAnswers(next)
@@ -187,7 +133,6 @@ export function TestRunner({
 
   async function submit(finalAnswers: Array<number | null>) {
     setBusy(true)
-    stopSpeaking()
     try {
       const res = await api.submitAttempt(token, test.id, finalAnswers, lang)
       if (res.attempt.passed) toast(`Certified — ${test.title}`)
@@ -204,17 +149,7 @@ export function TestRunner({
       <div className="kcard">
         <div className="kmeta">
           <span>{test.title}</span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-            <button
-              className="spk"
-              aria-label="Listen to this question"
-              disabled={speaking}
-              onClick={() => void playAudio()}
-            >
-              {speaking ? <span className="spinner" /> : <SpeakerIcon />}
-            </button>
-            <span className="mono">Question {qi + 1} / {questions.length}</span>
-          </span>
+          <span className="mono">Question {qi + 1} / {questions.length}</span>
         </div>
         <div className="kbar"><i style={{ width: `${Math.round((qi / questions.length) * 100)}%` }} /></div>
         <div className="xlate-row">
@@ -248,7 +183,7 @@ export function TestRunner({
           </button>
         ))}
         <div className="backlink">
-          <button className="btn" onClick={() => { stopSpeaking(); onDone() }}>Cancel test</button>
+          <button className="btn" onClick={onDone}>Cancel test</button>
         </div>
       </div>
     </>

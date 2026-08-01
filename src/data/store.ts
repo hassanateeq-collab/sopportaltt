@@ -444,32 +444,6 @@ export async function attachSopVideo(sopId: string, video: File, fallbackFolderI
 }
 
 /**
- * Server-side read-aloud: synthesise text to speech via the `speak` Edge
- * Function (Azure Speech), which has real Urdu and Pashto voices. Returns the
- * MP3 as a Blob the caller plays. Only used in Supabase mode — in demo mode the
- * caller falls back to the browser's own speech synthesis.
- */
-export async function speakText(token: string, text: string, language: Language): Promise<Blob> {
-  if (!isSupabaseEnabled) throw new ApiError('Recorded read-aloud needs the server.')
-  let res: Response
-  try {
-    res = await fetch(`${functionsBase}/speak`, {
-      method: 'POST',
-      headers: staffFnHeaders(),
-      body: JSON.stringify({ token, text, language }),
-    })
-  } catch {
-    throw new ApiError('Could not reach the read-aloud service.')
-  }
-  if (res.status === 404) throw new ApiError('Deploy the speak function first (see supabase/SETUP.md).')
-  if (!res.ok) {
-    const j = await res.json().catch(() => ({}))
-    throw new ApiError((j as { error?: string }).error ?? 'Read-aloud failed.')
-  }
-  return await res.blob()
-}
-
-/**
  * On-demand translation of one quiz question + options into Urdu/Pashto, for a
  * staff member taking a test. Option order is preserved so scoring is unchanged.
  * In demo mode there's no translator, so it just tags the text (an honest
