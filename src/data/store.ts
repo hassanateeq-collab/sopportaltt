@@ -220,7 +220,28 @@ async function fetchAll<T>(table: string, columns = '*'): Promise<T[]> {
 // The employee-code hash column is not granted to the browser, so staff must be
 // selected by explicit columns — a plain `select *` trips the column privilege
 // and Postgres answers "permission denied for table staff".
-const STAFF_COLUMNS = 'id,name,department_id,branch_id,job_title,employee_code,active,created_at'
+const STAFF_COLUMNS_BASE = 'id,name,department_id,branch_id,job_title,active,created_at'
+const STAFF_COLUMNS = `${STAFF_COLUMNS_BASE},employee_code`
+
+/**
+ * Load the staff rows for a manager/admin, including the plaintext employee_code.
+ * If migration 0002 hasn't added that column yet (e.g. the new frontend deployed
+ * before the SQL was run), fall back to the base columns so the board still
+ * works — codes just show as "not set" until the migration runs.
+ */
+async function fetchStaffRows(): Promise<Record<string, unknown>[]> {
+  const client = supabase!
+  const first = await client.from('staff').select(STAFF_COLUMNS)
+  if (first.error) {
+    if (/employee_code/.test(first.error.message)) {
+      const base = await client.from('staff').select(STAFF_COLUMNS_BASE)
+      if (base.error) throw new ApiError(`Could not load staff: ${base.error.message}`)
+      return (base.data ?? []) as Record<string, unknown>[]
+    }
+    throw new ApiError(`Could not load staff: ${first.error.message}`)
+  }
+  return (first.data ?? []) as Record<string, unknown>[]
+}
 
 /** Load just the anon-readable org shell (branches + departments) for the login funnels. */
 async function hydratePublic(): Promise<void> {
@@ -258,7 +279,7 @@ async function hydrateFromSupabase(): Promise<void> {
   ] = await Promise.all([
     fetchAll<Branch>('branches'),
     fetchAll<Department>('departments'),
-    fetchAll<Record<string, unknown>>('staff', STAFF_COLUMNS),
+    fetchStaffRows(),
     fetchAll<Manager>('managers'),
     fetchAll<Admin>('admins'),
     fetchAll<Sop>('sops'),
@@ -1559,6 +1580,7 @@ export const api = {
   async regenerateStaffCode(actor: Actor, staffId: string): Promise<string> {
     if (isSupabaseEnabled) {
       const j = await callAdminFn('manage-staff', { action: 'regenerate', staff_id: staffId })
+      await hydrateFromSupabase() // so the roster row shows the new code at once
       return j.code as string
     }
     const staff = db.staff.find((s) => s.id === staffId)
