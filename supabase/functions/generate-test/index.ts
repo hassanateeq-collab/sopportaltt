@@ -35,6 +35,29 @@ const LEVELS: Record<string, string> = {
 
 const LANG_NAMES: Record<string, string> = { en: 'English', ur: 'Urdu (اردو)', ps: 'Pashto (پښتو)' }
 
+// A strict response schema forces Gemini to emit valid, well-formed JSON even
+// when the content is Urdu/Pashto (right-to-left) — without it the model
+// sometimes returns broken JSON for non-Latin scripts. Gemini's schema dialect
+// uses UPPERCASE type names.
+const RESPONSE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    questions: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          q: { type: 'STRING' },
+          opts: { type: 'ARRAY', items: { type: 'STRING' } },
+          ans: { type: 'INTEGER' },
+        },
+        required: ['q', 'opts', 'ans'],
+      },
+    },
+  },
+  required: ['questions'],
+}
+
 /** How to instruct the model to write the questions in the chosen language. */
 function languageDirective(language: string): string {
   if (language === 'en') return 'Write the questions and options in simple English hotel staff read easily.'
@@ -161,6 +184,7 @@ Deno.serve(async (req) => {
         contents: [{ role: 'user', parts }],
         generationConfig: {
           responseMimeType: 'application/json',
+          responseSchema: RESPONSE_SCHEMA,
           temperature: 0.6,
           maxOutputTokens: 8192,
           // Newer flash models spend output tokens on internal "thinking", which
