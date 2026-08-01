@@ -150,11 +150,8 @@ function SopBoard({
   const people = staffOf(dept.id, branch.id)
   const sops = sopsOf(dept.id, branch.code)
   return (
-    <div className="board">
-      <div className="board-head">
-        <h3>SOP sign-off — {dept.name} · {branch.code}</h3>
-        <span className="hint">{people.length} staff</span>
-      </div>
+    <details className="board" open>
+      <summary><SopSectionIcon />SOP sign-off — {dept.name} · {branch.code}<span className="hint">{people.length} staff</span></summary>
       {sops.length === 0 ? (
         <div className="empty-row">No SOPs here yet — add one below.</div>
       ) : (
@@ -189,7 +186,7 @@ function SopBoard({
           )
         })
       )}
-    </div>
+    </details>
   )
 }
 
@@ -298,11 +295,8 @@ function TestBoard({ dept, branch, actor }: { dept: Department; branch: Branch; 
   const people = staffOf(dept.id, branch.id)
   const tests = testsOf(dept.id, branch.code)
   return (
-    <div className="board">
-      <div className="board-head">
-        <h3>Tests &amp; scores — {dept.name} · {branch.code}</h3>
-        <span className="hint">Assign by name · latest score shown</span>
-      </div>
+    <details className="board" open>
+      <summary><TestSectionIcon />Tests &amp; scores — {dept.name} · {branch.code}<span className="hint">Assign by name · latest score shown</span></summary>
       {tests.length === 0 ? (
         <div className="empty-row">No tests for this department at this branch — create one below.</div>
       ) : (
@@ -310,7 +304,7 @@ function TestBoard({ dept, branch, actor }: { dept: Department; branch: Branch; 
           <TestRow key={t.id} test={t} dept={dept} branch={branch} people={people} actor={actor} />
         ))
       )}
-    </div>
+    </details>
   )
 }
 
