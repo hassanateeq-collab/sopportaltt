@@ -1769,7 +1769,9 @@ export const api = {
     },
   ): Promise<Test> {
     if (!input.title.trim()) throw new ApiError('A test needs a title.')
-    const languages: Language[] = input.languages.includes('en') ? input.languages : ['en', ...input.languages]
+    // Respect the languages the form chose (the generation language leads); only
+    // default to English when nothing was passed.
+    const languages: Language[] = input.languages.length ? Array.from(new Set(input.languages)) : ['en']
 
     if (isSupabaseEnabled) {
       const { data, error } = await supabase!
@@ -1924,7 +1926,7 @@ export const api = {
    */
   async generateTestDraft(
     actor: Actor,
-    input: { sopId: string; difficulty: Difficulty; count: number },
+    input: { sopId: string; difficulty: Difficulty; count: number; language?: Language },
   ): Promise<{ questions: DraftQuestion[]; warnings: string[] }> {
     const sop = read.sop(input.sopId)
     if (!sop) throw new ApiError('That SOP no longer exists.')
@@ -1937,7 +1939,7 @@ export const api = {
       const res = await fetch(`${functionsBase}/generate-test`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sopId: input.sopId, difficulty: input.difficulty, count: input.count }),
+        body: JSON.stringify({ sopId: input.sopId, difficulty: input.difficulty, count: input.count, language: input.language ?? 'en' }),
       }).catch(() => null)
       if (res && res.status === 404) throw new ApiError('The generate-test function isn’t deployed yet (see supabase/SETUP.md).')
       if (!res || !res.ok) {

@@ -17,6 +17,7 @@ import {
 } from '../data/store'
 import type { Actor, DraftQuestion } from '../data/store'
 import type { Branch, BranchScope, Department, Difficulty, Language, Manager, Sop, Staff, Test } from '../types'
+import { LANGUAGE_NAMES } from '../types'
 import { scopeIncludes } from '../lib/scope'
 import { certStatus, daysUntil } from '../lib/certs'
 import { fmtD } from '../lib/format'
@@ -687,6 +688,7 @@ function CreateTestForm({
   const [genSop, setGenSop] = useState('')
   const [level, setLevel] = useState<Difficulty>('medium')
   const [count, setCount] = useState('5')
+  const [genLang, setGenLang] = useState<Language>('en')
   const [genBusy, setGenBusy] = useState(false)
   const [draft, setDraft] = useState<DraftQuestion[]>([])
   const [warnings, setWarnings] = useState<string[]>([])
@@ -712,12 +714,14 @@ function CreateTestForm({
         sopId: genSop,
         difficulty: level,
         count: Math.min(6, Math.max(3, parseInt(count) || 5)),
+        language: genLang,
       })
       if (res.questions.length === 0) { toast('The generator returned nothing usable — add questions by hand'); setWarnings(res.warnings) }
       else {
         setDraft((d) => [...d, ...res.questions])
         setWarnings(res.warnings)
-        toast(`Generated ${res.questions.length} ${level}-level questions — review before publishing`)
+        const langName = genLang === 'en' ? '' : ` in ${LANGUAGE_NAMES[genLang]}`
+        toast(`Generated ${res.questions.length} ${level}-level questions${langName} — review before publishing`)
       }
     } catch (e) {
       toast(e instanceof ApiError ? e.message : 'Generation failed — add questions manually.')
@@ -739,6 +743,8 @@ function CreateTestForm({
     setPubBusy(true)
     const scope: BranchScope = lockBranch || !allBranches ? { kind: 'LIST', branch_codes: [branch.code] } : { kind: 'ALL' }
     const wanted: Language[] = (['ur', 'ps'] as const).filter((l) => langs[l])
+    // The generation language leads; any extra checked languages are added too.
+    const languages: Language[] = Array.from(new Set<Language>([genLang, ...wanted]))
     try {
       const test = await api.createTest(actor, {
         title,
@@ -747,12 +753,13 @@ function CreateTestForm({
         related_sop_id: relSop || null,
         pass_mark: Math.min(100, Math.max(1, parseInt(pass) || 80)),
         validity_months: Math.min(60, Math.max(1, parseInt(valid) || 12)),
-        languages: ['en', ...wanted],
+        languages,
       })
       await api.replaceQuestions(actor, test.id, draft)
-      if (wanted.length) await api.translateTest(actor, test.id, wanted)
+      const toTranslate = wanted.filter((l) => l !== genLang)
+      if (toTranslate.length) await api.translateTest(actor, test.id, toTranslate)
       await api.publishTest(actor, test.id)
-      toast(`Test published${wanted.length ? ' with translations' : ''} — now assign staff by name`)
+      toast(`Test published${toTranslate.length ? ' with translations' : ''} — now assign staff by name`)
       setDraft([]); setTitle(''); setWarnings([])
     } catch (e) {
       toast(e instanceof ApiError ? e.message : 'Could not publish.')
@@ -789,6 +796,20 @@ function CreateTestForm({
             <div className="field"><label htmlFor="g-count">Questions (3–6)</label>
               <input id="g-count" inputMode="numeric" value={count} onChange={(e) => setCount(e.target.value)} /></div>
           </div>
+          <div className="fieldrow">
+            <div className="field"><label htmlFor="g-lang">Generate in language</label>
+              <select id="g-lang" value={genLang} onChange={(e) => setGenLang(e.target.value as Language)}>
+                <option value="en">English</option>
+                <option value="ur">اردو Urdu</option>
+                <option value="ps">پښتو Pashto</option>
+              </select>
+              {genLang !== 'en' && (
+                <div className="demo-hint">
+                  The AI writes the questions in {LANGUAGE_NAMES[genLang]}, and the test is offered to staff in {LANGUAGE_NAMES[genLang]}.
+                </div>
+              )}
+            </div>
+          </div>
           <button className="btn primary block" disabled={genBusy} onClick={() => void generate()}>
             {genBusy ? <><span className="spinner" /> Generating…</> : '✦ Generate questions'}
           </button>
@@ -822,11 +843,11 @@ function CreateTestForm({
         )}
         <div className="field"><label>Test languages</label>
           <div className="radio-row">
-            <label><input type="checkbox" checked disabled /> English — record copy</label>
-            <label><input type="checkbox" checked={langs.ur} onChange={(e) => setLangs({ ...langs, ur: e.target.checked })} /> اردو Urdu</label>
-            <label><input type="checkbox" checked={langs.ps} onChange={(e) => setLangs({ ...langs, ps: e.target.checked })} /> پښتو Pashto</label>
+            <label><input type="checkbox" checked disabled /> {LANGUAGE_NAMES[genLang]} — generated above</label>
+            <label><input type="checkbox" checked={genLang === 'ur' || langs.ur} disabled={genLang === 'ur'} onChange={(e) => setLangs({ ...langs, ur: e.target.checked })} /> اردو Urdu</label>
+            <label><input type="checkbox" checked={genLang === 'ps' || langs.ps} disabled={genLang === 'ps'} onChange={(e) => setLangs({ ...langs, ps: e.target.checked })} /> پښتو Pashto</label>
           </div>
-          <div className="demo-hint">Extra languages are auto-translated when you publish — review them like any controlled content. English remains the record copy; scoring is identical in every language.</div>
+          <div className="demo-hint">The test is offered in the language you generate in above. Ticking another language auto-translates a copy on publish — review it like any controlled content; scoring is identical in every language.</div>
         </div>
 
         <div className="field"><label>Questions in draft ({draft.length})</label>
@@ -834,7 +855,7 @@ function CreateTestForm({
             draft.map((q, i) => (
               <div className="qb-item" key={i}>
                 <span className="n">Q{i + 1}</span>
-                <span className="q">{q.text}<br /><span style={{ color: 'var(--pine)', fontSize: 12 }}>✓ {q.options[q.correct_index]}</span></span>
+                <span className="q" dir="auto">{q.text}<br /><span style={{ color: 'var(--pine)', fontSize: 12 }}>✓ {q.options[q.correct_index]}</span></span>
                 <button onClick={() => setDraft((d) => d.filter((_, idx) => idx !== i))}>remove</button>
               </div>
             ))

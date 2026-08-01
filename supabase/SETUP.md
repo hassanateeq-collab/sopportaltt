@@ -198,8 +198,13 @@ reviews and edits the draft.
    ```
 
 Then, in **Create a test → Generate the test from an SOP**, pick a source SOP,
-difficulty and count → **Generate questions** drafts them from the real document.
-Until it's deployed, the button explains it's needed.
+difficulty, count and **language** → **Generate questions** drafts them from the
+real document. Choose **Urdu** or **Pashto** and the questions come back written
+in that language, and the test is offered to staff in it. Until it's deployed,
+the button explains it's needed.
+
+> Re-deploy `generate-test` (same command) after pulling to pick up the language
+> option.
 
 ## Stage 3b — staff sign-in + admin management  ✅ built
 

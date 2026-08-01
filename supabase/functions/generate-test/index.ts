@@ -33,6 +33,18 @@ const LEVELS: Record<string, string> = {
   high: 'HIGH difficulty — judgment: multi-step or exception scenarios; wrong options must be plausible near-miss mistakes staff actually make.',
 }
 
+const LANG_NAMES: Record<string, string> = { en: 'English', ur: 'Urdu (اردو)', ps: 'Pashto (پښتو)' }
+
+/** How to instruct the model to write the questions in the chosen language. */
+function languageDirective(language: string): string {
+  if (language === 'en') return 'Write the questions and options in simple English hotel staff read easily.'
+  const name = LANG_NAMES[language] ?? 'English'
+  return (
+    `Write EVERY question and ALL four options in ${name} — natural, simple ${name} that hotel staff in Karachi read easily. ` +
+    `Do NOT add any English translation or transliteration. The JSON keys stay in English ("q", "opts", "ans"), but every value must be written in ${name} script.`
+  )
+}
+
 function toBase64(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf)
   let binary = ''
@@ -102,6 +114,7 @@ Deno.serve(async (req) => {
     const sopId = String(body.sopId ?? '')
     const difficulty = ['low', 'medium', 'high'].includes(body.difficulty) ? body.difficulty : 'medium'
     const count = Math.min(6, Math.max(3, Number(body.count) || 5))
+    const language = ['en', 'ur', 'ps'].includes(body.language) ? body.language : 'en'
 
     const { data: sop } = await admin
       .from('sops')
@@ -115,6 +128,7 @@ Deno.serve(async (req) => {
 
     const rules =
       `Difficulty: ${LEVELS[difficulty]}\n` +
+      `${languageDirective(language)}\n` +
       `Write exactly ${count} multiple-choice questions based ONLY on this SOP. Do not invent policies not in it. ` +
       'Each question: max 35 words. Exactly 4 options, max 12 words each, exactly one correct. Wrong options must be realistic mistakes staff actually make. Vary the position of the correct answer.\n' +
       'Respond with ONLY this JSON, no markdown fences: {"questions":[{"q":"...","opts":["...","...","...","..."],"ans":0}]}\n' +
@@ -134,7 +148,7 @@ Deno.serve(async (req) => {
       }
     }
     const intro =
-      'You write staff certification quiz questions for a boutique hotel group in Karachi. Staff read simple English.\n' +
+      `You write staff certification quiz questions for a boutique hotel group in Karachi, in ${LANG_NAMES[language]}.\n` +
       (usedPdf ? 'Read the attached SOP document.\n' : `SOP: ${sop.title} (${sop.code}). ${sop.summary || ''}\n`) +
       rules
     parts.push({ text: intro })
