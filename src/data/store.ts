@@ -402,6 +402,84 @@ export async function uploadSopViaFunction(
 }
 
 /**
+ * Add or replace the training video on an EXISTING SOP, without bumping the
+ * version (a video change is not a new revision, so it doesn't reopen sign-off).
+ * In Supabase mode the attach-video Edge Function uploads it to the SOP's Drive
+ * folder view-only and swaps the id; in demo mode it just points at the file.
+ */
+export async function attachSopVideo(sopId: string, video: File, fallbackFolderId: string): Promise<void> {
+  const sop = read.sop(sopId)
+  if (!sop) throw new ApiError('That SOP no longer exists.')
+
+  if (!isSupabaseEnabled) {
+    sop.video_file_id = URL.createObjectURL(video)
+    commit()
+    return
+  }
+  if (!supabase) throw new ApiError('Not connected to the database.')
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) throw new ApiError('Please sign in again.')
+
+  const fd = new FormData()
+  fd.set('sop_id', sopId)
+  fd.set('folder_id', fallbackFolderId)
+  fd.set('video', video)
+
+  let res: Response
+  try {
+    res = await fetch(`${functionsBase}/attach-video`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+      body: fd,
+    })
+  } catch {
+    throw new ApiError('Could not reach the attach-video function.')
+  }
+  if (res.status === 404) throw new ApiError('Deploy the attach-video function first (see supabase/SETUP.md).')
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}))
+    throw new ApiError((j as { error?: string }).error ?? 'Could not update the video.')
+  }
+  await hydrateFromSupabase()
+}
+
+/** Remove the training video from an SOP (deletes the Drive file in Supabase mode). */
+export async function removeSopVideo(sopId: string): Promise<void> {
+  const sop = read.sop(sopId)
+  if (!sop) throw new ApiError('That SOP no longer exists.')
+
+  if (!isSupabaseEnabled) {
+    sop.video_file_id = null
+    commit()
+    return
+  }
+  if (!supabase) throw new ApiError('Not connected to the database.')
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) throw new ApiError('Please sign in again.')
+
+  const fd = new FormData()
+  fd.set('sop_id', sopId)
+  fd.set('remove', 'true')
+
+  let res: Response
+  try {
+    res = await fetch(`${functionsBase}/attach-video`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+      body: fd,
+    })
+  } catch {
+    throw new ApiError('Could not reach the attach-video function.')
+  }
+  if (res.status === 404) throw new ApiError('Deploy the attach-video function first (see supabase/SETUP.md).')
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}))
+    throw new ApiError((j as { error?: string }).error ?? 'Could not remove the video.')
+  }
+  await hydrateFromSupabase()
+}
+
+/**
  * Drive folder picker for the Add-SOP form. In Supabase mode these call the
  * drive-folders Edge Function (live Drive folders + create). If it isn't
  * deployed yet, listing falls back to the known department folders and creating

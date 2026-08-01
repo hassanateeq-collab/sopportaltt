@@ -88,6 +88,17 @@ export async function createFolder(
   return { id: json.id, name: json.name }
 }
 
+/** The id of a file's first parent folder (so a new video lands next to its SOP). */
+export async function getFileParent(token: string, fileId: string): Promise<string | null> {
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?fields=parents&supportsAllDrives=true`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!res.ok) return null
+  const json = await res.json()
+  return Array.isArray(json.parents) && json.parents.length ? (json.parents[0] as string) : null
+}
+
 /** Download a file's bytes from Drive. */
 export async function downloadFromDrive(token: string, fileId: string): Promise<ArrayBuffer> {
   const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`, {

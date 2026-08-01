@@ -9,6 +9,8 @@ import {
   latestCertification,
   openGrant,
   uploadSopViaFunction,
+  attachSopVideo,
+  removeSopVideo,
   listDriveFolders,
   createDriveFolder,
   ApiError,
@@ -210,8 +212,76 @@ function RevalidateRow({ actor, sop }: { actor: Actor; sop: Sop }) {
             ✕ Delete SOP
           </button>
         </div>
+
+        <SopVideoControl sop={sop} />
       </div>
     </details>
+  )
+}
+
+/* ---- add / replace / remove the training video on an existing SOP ---- */
+
+function SopVideoControl({ sop }: { sop: Sop }) {
+  const [video, setVideo] = useState<Upload | null>(null)
+  const [busy, setBusy] = useState(false)
+  const dept = read.department(sop.department_id)
+  const fallbackFolder =
+    DRIVE_DEPARTMENT_FOLDERS.find((f) => f.name === dept?.name)?.id ?? DRIVE_DEPARTMENT_FOLDERS[0]?.id ?? ''
+
+  function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]
+    if (!f) return
+    if (!f.type.startsWith('video/')) { toast('Upload a video file'); e.target.value = ''; return }
+    setVideo({ name: f.name, size: f.size, src: URL.createObjectURL(f), file: f })
+  }
+
+  async function upload() {
+    if (!video) { toast('Choose a video file first'); return }
+    const replacing = !!sop.video_file_id
+    setBusy(true)
+    try {
+      await attachSopVideo(sop.id, video.file, fallbackFolder)
+      toast(replacing ? `Video replaced for ${sop.code}` : `Video added to ${sop.code}`)
+      setVideo(null)
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Could not update the video.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
+      <p className="demo-hint" style={{ marginTop: 0 }}>
+        Training video (optional) — {sop.video_file_id ? 'one is attached. Upload a new file to replace it.' : 'none yet. Add one any time.'}
+      </p>
+      {video ? (
+        <div className="pdfchip">
+          <span className="mono">🎬 {video.name}</span>
+          <span className="mono" style={{ color: 'var(--ink-faint)' }}>{(video.size / 1048576).toFixed(1)} MB</span>
+          <button className="btn sm" onClick={() => setVideo(null)}>✕ Remove</button>
+        </div>
+      ) : (
+        <input type="file" accept="video/*" onChange={onPick} />
+      )}
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+        <button className="btn sm primary" disabled={busy || !video} onClick={() => void upload()}>
+          {busy ? <span className="spinner" /> : sop.video_file_id ? 'Replace video' : 'Add video'}
+        </button>
+        {sop.video_file_id && (
+          <button
+            className="btn sm"
+            disabled={busy}
+            onClick={() => {
+              if (!confirm(`Remove the training video from ${sop.code}?`)) return
+              run(() => removeSopVideo(sop.id), `Video removed from ${sop.code}`)
+            }}
+          >
+            Remove video
+          </button>
+        )}
+      </div>
+    </div>
   )
 }
 

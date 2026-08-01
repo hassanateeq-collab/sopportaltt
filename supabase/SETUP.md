@@ -171,6 +171,18 @@ supabase functions deploy delete-sop
 
 Until it's deployed, delete still works — it just leaves the file in the folder.
 
+### Optional: add / replace / remove an SOP's training video
+
+The **Manage this SOP** panel can add a training video to an SOP that has none,
+replace an existing one, or remove it — without bumping the version (a video
+change isn't a new revision, so it doesn't reopen sign-off). The new video lands
+in the same Drive folder as the SOP's document, view-only, and replacing/removing
+deletes the old Drive file. Deploy it (reuses the `GOOGLE_*` secrets):
+
+```bash
+supabase functions deploy attach-video
+```
+
 ## Stage 5 — AI test generation (Gemini)
 
 `generate-test` reads an SOP's PDF from Drive and drafts questions with the
