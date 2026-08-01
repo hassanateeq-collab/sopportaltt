@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { api, read, translateQuestion, ApiError } from '../data/store'
+import { api, read, translateQuestion, speakText, ApiError } from '../data/store'
 import type { Attempt, Certification, Language, Question, Test } from '../types'
 import { LANGUAGE_NAMES, RTL_LANGUAGES } from '../types'
 import { fmtD } from '../lib/format'
 import { toast } from '../lib/toast'
+import { isSupabaseEnabled } from '../lib/supabase'
 import { SpeakerIcon } from '../components/icons'
 import * as tts from '../lib/tts'
 
@@ -38,8 +39,18 @@ export function TestRunner({
   const [xlate, setXlate] = useState<Record<number, { lang: Language; text: string; options: string[] }>>({})
   const [xbusy, setXbusy] = useState<number | null>(null)
   const [xpend, setXpend] = useState<Language | null>(null)
+  const [speaking, setSpeaking] = useState(false)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
 
-  useEffect(() => () => tts.stop(), [])
+  function stopSpeaking() {
+    tts.stop()
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current = null
+    }
+  }
+
+  useEffect(() => () => stopSpeaking(), [])
 
   // Language chooser (only when the test offers more than English)
   if (!started) {
@@ -131,8 +142,39 @@ export function TestRunner({
     }
   }
 
+  async function playAudio() {
+    stopSpeaking()
+    const letters = ['A', 'B', 'C', 'D']
+    const spoken =
+      activeLang === 'en'
+        ? `${shown.text}. ${shown.options.map((o, i) => `${letters[i]}. ${o}`).join('. ')}`
+        : `${shown.text}. ${shown.options.join('. ')}`
+    // Urdu/Pashto read aloud through the server voice (Azure), so it works on any
+    // device; English uses the browser's own voice (instant, offline).
+    if (isSupabaseEnabled && (activeLang === 'ur' || activeLang === 'ps')) {
+      setSpeaking(true)
+      try {
+        const blob = await speakText(token, spoken, activeLang)
+        const url = URL.createObjectURL(blob)
+        const audio = new Audio(url)
+        audioRef.current = audio
+        audio.onended = () => URL.revokeObjectURL(url)
+        await audio.play()
+      } catch (e) {
+        // If the voice service isn't set up, fall back to the browser voice.
+        const res = tts.playQuestion(shown, activeLang, undefined)
+        if (!res.ok) toast(e instanceof ApiError ? e.message : res.reason)
+      } finally {
+        setSpeaking(false)
+      }
+      return
+    }
+    const res = tts.playQuestion(shown, activeLang, q.audio[activeLang])
+    if (!res.ok) toast(res.reason)
+  }
+
   function choose(i: number) {
-    tts.stop()
+    stopSpeaking()
     const next = [...answers]
     next[qi] = i
     setAnswers(next)
@@ -145,7 +187,7 @@ export function TestRunner({
 
   async function submit(finalAnswers: Array<number | null>) {
     setBusy(true)
-    tts.stop()
+    stopSpeaking()
     try {
       const res = await api.submitAttempt(token, test.id, finalAnswers, lang)
       if (res.attempt.passed) toast(`Certified — ${test.title}`)
@@ -166,12 +208,10 @@ export function TestRunner({
             <button
               className="spk"
               aria-label="Listen to this question"
-              onClick={() => {
-                const res = tts.playQuestion(shown, activeLang, q.audio[activeLang])
-                if (!res.ok) toast(res.reason)
-              }}
+              disabled={speaking}
+              onClick={() => void playAudio()}
             >
-              <SpeakerIcon />
+              {speaking ? <span className="spinner" /> : <SpeakerIcon />}
             </button>
             <span className="mono">Question {qi + 1} / {questions.length}</span>
           </span>
@@ -208,7 +248,7 @@ export function TestRunner({
           </button>
         ))}
         <div className="backlink">
-          <button className="btn" onClick={() => { tts.stop(); onDone() }}>Cancel test</button>
+          <button className="btn" onClick={() => { stopSpeaking(); onDone() }}>Cancel test</button>
         </div>
       </div>
     </>
