@@ -1048,6 +1048,49 @@ h2.section {
   transition: width 0.25s ease;
 }
 
+/* Per-question on-demand translate control (Urdu / Pashto). */
+.xlate-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+}
+
+.xlate-label {
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-right: 2px;
+}
+
+.xbtn {
+  font-size: 13px;
+  padding: 4px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--pine);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.xbtn:hover:not(:disabled) {
+  background: var(--pine-tint);
+}
+
+.xbtn.on {
+  background: var(--pine);
+  color: #fff;
+  border-color: var(--pine);
+}
+
+.xbtn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .qtext {
   font-family: var(--disp);
   font-size: 16.5px;

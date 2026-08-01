@@ -206,6 +206,17 @@ the button explains it's needed.
 > Re-deploy `generate-test` (same command) after pulling to pick up the language
 > option.
 
+### On-demand translation while taking a test
+
+`translate-question` lets a staff member translate any question + its options
+into Urdu or Pashto on the spot (a "Read in اردو / پښتو" control on each
+question), with the speaker reading the translated text. The option order is
+preserved, so scoring is unchanged. It reuses `GEMINI_API_KEY`:
+
+```bash
+supabase functions deploy translate-question
+```
+
 ## Stage 3b — staff sign-in + admin management  ✅ built
 
 This turns on the **staff side** (sign in by name + code, see assigned SOPs and

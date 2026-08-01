@@ -443,6 +443,26 @@ export async function attachSopVideo(sopId: string, video: File, fallbackFolderI
   await hydrateFromSupabase()
 }
 
+/**
+ * On-demand translation of one quiz question + options into Urdu/Pashto, for a
+ * staff member taking a test. Option order is preserved so scoring is unchanged.
+ * In demo mode there's no translator, so it just tags the text (an honest
+ * placeholder), matching the demo translate behaviour elsewhere.
+ */
+export async function translateQuestion(
+  token: string,
+  q: string,
+  opts: string[],
+  language: Language,
+): Promise<{ q: string; opts: string[] }> {
+  if (!isSupabaseEnabled) {
+    const tag = language === 'ur' ? '[اردو]' : language === 'ps' ? '[پښتو]' : ''
+    return { q: `${tag} ${q}`.trim(), opts: opts.map((o) => `${tag} ${o}`.trim()) }
+  }
+  const j = await callStaffFn('translate-question', { token, q, opts, language })
+  return { q: j.q as string, opts: j.opts as string[] }
+}
+
 /** Remove the training video from an SOP (deletes the Drive file in Supabase mode). */
 export async function removeSopVideo(sopId: string): Promise<void> {
   const sop = read.sop(sopId)

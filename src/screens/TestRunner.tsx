@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { api, read, ApiError } from '../data/store'
+import { api, read, translateQuestion, ApiError } from '../data/store'
 import type { Attempt, Certification, Language, Question, Test } from '../types'
 import { LANGUAGE_NAMES, RTL_LANGUAGES } from '../types'
 import { fmtD } from '../lib/format'
@@ -33,10 +33,13 @@ export function TestRunner({
   const [answers, setAnswers] = useState<Array<number | null>>(() => questions.map(() => null))
   const [result, setResult] = useState<{ attempt: Attempt; certification: Certification | null } | null>(null)
   const [busy, setBusy] = useState(false)
+  // Per-question on-demand translation the staff member can toggle while taking
+  // the test — the option order is preserved, so scoring is unaffected.
+  const [xlate, setXlate] = useState<Record<number, { lang: Language; text: string; options: string[] }>>({})
+  const [xbusy, setXbusy] = useState<number | null>(null)
+  const [xpend, setXpend] = useState<Language | null>(null)
 
   useEffect(() => () => tts.stop(), [])
-
-  const rtl = RTL_LANGUAGES.includes(lang)
 
   // Language chooser (only when the test offers more than English)
   if (!started) {
@@ -107,7 +110,26 @@ export function TestRunner({
   }
 
   const q = questions[qi]
-  const shown = renderQuestion(q, lang)
+  const active = xlate[qi]
+  const shown = active ? { text: active.text, options: active.options } : renderQuestion(q, lang)
+  const activeLang: Language = active?.lang ?? lang
+  const rtlNow = RTL_LANGUAGES.includes(activeLang)
+
+  async function translateTo(l: Language) {
+    if (xlate[qi]?.lang === l) return
+    tts.stop()
+    setXbusy(qi)
+    setXpend(l)
+    try {
+      const t = await translateQuestion(token, q.text, q.options, l)
+      setXlate((m) => ({ ...m, [qi]: { lang: l, text: t.q, options: t.opts } }))
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Could not translate this question.')
+    } finally {
+      setXbusy(null)
+      setXpend(null)
+    }
+  }
 
   function choose(i: number) {
     tts.stop()
@@ -145,7 +167,7 @@ export function TestRunner({
               className="spk"
               aria-label="Listen to this question"
               onClick={() => {
-                const res = tts.playQuestion(shown, lang, q.audio[lang])
+                const res = tts.playQuestion(shown, activeLang, q.audio[activeLang])
                 if (!res.ok) toast(res.reason)
               }}
             >
@@ -155,9 +177,33 @@ export function TestRunner({
           </span>
         </div>
         <div className="kbar"><i style={{ width: `${Math.round((qi / questions.length) * 100)}%` }} /></div>
-        <div className="qtext" dir={rtl ? 'rtl' : 'ltr'}>{shown.text}</div>
+        <div className="xlate-row">
+          <span className="xlate-label">Read in</span>
+          {(['ur', 'ps'] as const).map((l) => (
+            <button
+              key={l}
+              type="button"
+              className={`xbtn ${activeLang === l ? 'on' : ''}`}
+              disabled={xbusy !== null}
+              onClick={() => void translateTo(l)}
+            >
+              {xbusy === qi && xpend === l ? '…' : LANGUAGE_NAMES[l]}
+            </button>
+          ))}
+          {active && (
+            <button
+              type="button"
+              className="xbtn"
+              disabled={xbusy !== null}
+              onClick={() => setXlate((m) => { const n = { ...m }; delete n[qi]; return n })}
+            >
+              Original
+            </button>
+          )}
+        </div>
+        <div className="qtext" dir={rtlNow ? 'rtl' : 'ltr'}>{shown.text}</div>
         {shown.options.map((o, i) => (
-          <button key={i} className="opt" dir={rtl ? 'rtl' : 'ltr'} disabled={busy} onClick={() => choose(i)}>
+          <button key={i} className="opt" dir={rtlNow ? 'rtl' : 'ltr'} disabled={busy} onClick={() => choose(i)}>
             {o}
           </button>
         ))}
