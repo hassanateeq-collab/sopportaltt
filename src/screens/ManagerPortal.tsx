@@ -24,6 +24,13 @@ import { toast } from '../lib/toast'
 import { isSupabaseEnabled } from '../lib/supabase'
 import { DRIVE_DEPARTMENT_FOLDERS } from '../lib/drive'
 import { Viewer } from '../components/Viewer'
+import {
+  SopSectionIcon,
+  TestSectionIcon,
+  StaffSectionIcon,
+  ManagerSectionIcon,
+  AddSectionIcon,
+} from '../components/icons'
 
 /**
  * Manager / admin portal, in the prototype's board style. A manager is pinned to
@@ -582,7 +589,7 @@ function AddSopForm({
 
   return (
     <details className="board">
-      <summary>Add SOP<span className="hint">upload document + video · to {dept.name}{lockBranch ? ` · ${branch.code} only` : ''}</span></summary>
+      <summary><SopSectionIcon />Add SOP<span className="hint">upload document + video · to {dept.name}{lockBranch ? ` · ${branch.code} only` : ''}</span></summary>
       <div className="card-body">
         {isSupabaseEnabled && (
           <div className="notice info" style={{ marginBottom: 14 }}>
@@ -762,7 +769,7 @@ function CreateTestForm({
 
   return (
     <details className="board" open={draft.length > 0}>
-      <summary>Create a test<span className="hint">for {dept.name}{lockBranch ? ` · ${branch.code} only` : ''}</span></summary>
+      <summary><TestSectionIcon />Create a test<span className="hint">for {dept.name}{lockBranch ? ` · ${branch.code} only` : ''}</span></summary>
       <div className="card-body">
         <div className="genblock">
           <div className="gh">✦ Generate the test from an SOP</div>
@@ -891,7 +898,7 @@ function StaffCodes({ dept, branch }: { dept: Department; branch: Branch }) {
 
   return (
     <details className="board">
-      <summary>Staff codes — {dept.name} · {branch.code}<span className="hint">{people.length} on file</span></summary>
+      <summary><StaffSectionIcon />Staff codes — {dept.name} · {branch.code}<span className="hint">{people.length} on file</span></summary>
       <div className="card-body">
         {people.length === 0 ? (
           <div className="empty-row">No staff here yet — an admin adds them.</div>
@@ -929,7 +936,7 @@ function StaffRoster({ actor, dept, branch }: { actor: Actor; dept: Department; 
 
   return (
     <details className="board">
-      <summary>Staff — {dept.name} · {branch.code}<span className="hint">{people.length} on file</span></summary>
+      <summary><StaffSectionIcon />Staff — {dept.name} · {branch.code}<span className="hint">{people.length} on file</span></summary>
       <div className="card-body">
         {people.length === 0 ? (
           <div className="empty-row">No staff here yet — add one below.</div>
@@ -994,7 +1001,7 @@ function AddStaff({ actor, dept, branch }: { actor: Actor; dept: Department; bra
 
   return (
     <details className="board">
-      <summary>Add staff member<span className="hint">code auto-generated</span></summary>
+      <summary><AddSectionIcon />Add staff member<span className="hint">code auto-generated</span></summary>
       <div className="card-body">
         <div className="field"><label>Name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Areeba" /></div>
         <div className="field"><label>Job title</label><input value={job} onChange={(e) => setJob(e.target.value)} placeholder="e.g. Room Attendant" /></div>
@@ -1046,7 +1053,7 @@ function ManagerRoster({ actor, dept, branch }: { actor: Actor; dept: Department
 
   return (
     <details className="board">
-      <summary>Managers — {dept.name} · {branch.code}<span className="hint">{managers.length} with access</span></summary>
+      <summary><ManagerSectionIcon />Managers — {dept.name} · {branch.code}<span className="hint">{managers.length} with access</span></summary>
       <div className="card-body">
         {managers.length === 0 ? (
           <div className="empty-row">No manager has access here yet — add one below.</div>
@@ -1116,7 +1123,7 @@ function AddManager({ actor, dept, branch }: { actor: Actor; dept: Department; b
 
   return (
     <details className="board">
-      <summary>Add department manager<span className="hint">creates their sign-in</span></summary>
+      <summary><AddSectionIcon />Add department manager<span className="hint">creates their sign-in</span></summary>
       <div className="card-body">
         <div className="field"><label>Name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Faisal" /></div>
         <div className="field"><label>Email (their Supabase Auth login)</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@hamsun.example" /></div>
@@ -1175,7 +1182,7 @@ function AddBranch({ actor }: { actor: Actor }) {
   const [name, setName] = useState('')
   return (
     <details className="board">
-      <summary>Add branch</summary>
+      <summary><AddSectionIcon />Add branch</summary>
       <div className="card-body">
         <div className="field"><label>Branch code</label><input maxLength={4} value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} style={{ textTransform: 'uppercase' }} placeholder="e.g. GLB" /></div>
         <div className="field"><label>Branch name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Gulberg" /></div>
@@ -1200,7 +1207,7 @@ function AddDepartment({ actor }: { actor: Actor }) {
   const [name, setName] = useState('')
   return (
     <details className="board">
-      <summary>Add department</summary>
+      <summary><AddSectionIcon />Add department</summary>
       <div className="card-body">
         <div className="field"><label>Code (2–4 letters)</label><input maxLength={4} value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} style={{ textTransform: 'uppercase' }} placeholder="e.g. SP" /></div>
         <div className="field"><label>Department name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Spa" /></div>

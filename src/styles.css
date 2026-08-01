@@ -1360,6 +1360,24 @@ details.inline summary::-webkit-details-marker {
   font-size: 12.5px;
 }
 
+/* Collapsible panels get a stronger, shaded border so each reads as its own
+   distinct, expandable row — separate from the static boards above. */
+details.board {
+  border-color: var(--line-strong);
+  box-shadow: 0 1px 2px rgba(20, 53, 40, 0.06);
+}
+
+details.board[open] {
+  box-shadow: 0 2px 8px rgba(20, 53, 40, 0.08);
+}
+
+/* Duotone pine-and-brass section icon at the start of each header. */
+.sec-ico {
+  width: 19px;
+  height: 19px;
+  flex: 0 0 auto;
+}
+
 details.board > summary {
   list-style: none;
   padding: 13px 18px;
