@@ -1686,6 +1686,55 @@ export const api = {
     return dept
   },
 
+  /** Rename a department. Its code is fixed (it prefixes its SOP codes). */
+  async updateDepartment(actor: Actor, deptId: string, changes: { name?: string }): Promise<void> {
+    const patch: Record<string, unknown> = {}
+    if (changes.name !== undefined) {
+      if (!changes.name.trim()) throw new ApiError('A department needs a name.')
+      patch.name = changes.name.trim()
+    }
+    if (Object.keys(patch).length === 0) return
+
+    if (isSupabaseEnabled) {
+      const { error } = await supabase!.from('departments').update(patch).eq('id', deptId)
+      if (error) throw new ApiError(error.message)
+      await hydrateFromSupabase()
+      return
+    }
+    requireAdmin(actor)
+    const dept = db.departments.find((d) => d.id === deptId)
+    if (!dept) throw new ApiError('That department no longer exists.')
+    Object.assign(dept, patch)
+    commit()
+  },
+
+  /** Delete a department — refused while anything is still filed under it. */
+  async deleteDepartment(actor: Actor, deptId: string): Promise<void> {
+    const dept = read.department(deptId)
+    if (!dept) throw new ApiError('That department no longer exists.')
+    if (
+      db.staff.some((s) => s.department_id === deptId) ||
+      db.managers.some((m) => m.department_id === deptId) ||
+      db.sops.some((s) => s.department_id === deptId) ||
+      db.tests.some((t) => t.department_id === deptId)
+    ) {
+      throw new ApiError(`${dept.name} still has staff, managers, SOPs or tests. Remove those first.`)
+    }
+
+    if (isSupabaseEnabled) {
+      const { error } = await supabase!.from('departments').delete().eq('id', deptId)
+      if (error) {
+        if (error.code === '23503') throw new ApiError(`${dept.name} is still in use — remove its staff, SOPs and tests first.`)
+        throw new ApiError(error.message)
+      }
+      await hydrateFromSupabase()
+      return
+    }
+    requireAdmin(actor)
+    db.departments = db.departments.filter((d) => d.id !== deptId)
+    commit()
+  },
+
   /**
    * Adds a staff member and returns the generated employee code ONCE. The
    * plaintext is never stored — only the hash goes into the table — so if the

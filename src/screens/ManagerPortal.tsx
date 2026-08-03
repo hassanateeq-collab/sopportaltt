@@ -33,6 +33,7 @@ import {
   ManagerSectionIcon,
   AddSectionIcon,
   BranchSectionIcon,
+  DepartmentSectionIcon,
 } from '../components/icons'
 
 /**
@@ -69,7 +70,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
     tiles.push(
       { key: 'managers', icon: <ManagerSectionIcon />, title: 'Managers', sub: `${mgrCount} here · access & postings` },
       { key: 'branches', icon: <BranchSectionIcon />, title: 'Branches', sub: `${branches.length} · add, rename, status` },
-      { key: 'departments', icon: <AddSectionIcon />, title: 'Departments', sub: `${departments.length} · add` },
+      { key: 'departments', icon: <DepartmentSectionIcon />, title: 'Departments', sub: `${departments.length} · add, rename, delete` },
     )
   }
 
@@ -157,7 +158,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
           )}
 
           {page === 'branches' && isAdmin && <BranchAdmin actor={actor} />}
-          {page === 'departments' && isAdmin && <AddDepartment actor={actor} />}
+          {page === 'departments' && isAdmin && <DepartmentAdmin actor={actor} />}
         </>
       )}
 
@@ -1359,27 +1360,103 @@ function NewBranch({ actor }: { actor: Actor }) {
   )
 }
 
-function AddDepartment({ actor }: { actor: Actor }) {
-  const [code, setCode] = useState('')
-  const [name, setName] = useState('')
+/* ---- departments: add, rename, delete ---- */
+
+function DepartmentAdmin({ actor }: { actor: Actor }) {
+  const departments = read.departments().slice().sort((a, b) => a.code.localeCompare(b.code))
   return (
     <details className="board">
-      <summary><AddSectionIcon />Add department</summary>
+      <summary><DepartmentSectionIcon />Departments<span className="hint">{departments.length}</span></summary>
       <div className="card-body">
-        <div className="field"><label>Code (2–4 letters)</label><input maxLength={4} value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} style={{ textTransform: 'uppercase' }} placeholder="e.g. SP" /></div>
-        <div className="field"><label>Department name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Spa" /></div>
-        <button
-          className="btn primary block"
-          onClick={() =>
-            run(async () => {
-              await api.addDepartment(actor, code, name)
-              setCode(''); setName('')
-            }, 'Department added — now add its staff, SOPs and tests')
-          }
-        >
-          Add department
-        </button>
+        {departments.length === 0 ? (
+          <div className="empty-row">No departments yet — add one below.</div>
+        ) : (
+          departments.map((d) => <DepartmentRow key={d.id} actor={actor} dept={d} />)
+        )}
+        <NewDepartment actor={actor} />
+        <p className="demo-hint" style={{ marginTop: 8 }}>
+          A department code (e.g. FD) can't be changed — it prefixes its SOP codes. Rename it above.
+        </p>
       </div>
     </details>
+  )
+}
+
+function DepartmentRow({ actor, dept }: { actor: Actor; dept: Department }) {
+  const [name, setName] = useState(dept.name)
+  const dirty = name.trim() !== dept.name
+  const inUse =
+    read.staff().some((s) => s.department_id === dept.id) ||
+    read.managers().some((m) => m.department_id === dept.id) ||
+    read.sops().some((s) => s.department_id === dept.id) ||
+    read.tests().some((t) => t.department_id === dept.id)
+
+  return (
+    <div className="brow">
+      <div className="brow-top">
+        <span className="brow-title"><span className="ver mono">{dept.code}</span> {dept.name}</span>
+      </div>
+      <div className="fieldrow" style={{ marginTop: 6 }}>
+        <div className="field"><label>Name</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} /></div>
+      </div>
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button
+          className="btn sm primary"
+          disabled={!dirty}
+          onClick={() => run(() => api.updateDepartment(actor, dept.id, { name }), `${dept.code} updated`)}
+        >
+          Save changes
+        </button>
+        <button
+          className="btn sm danger"
+          disabled={inUse}
+          onClick={() => {
+            if (!confirm(`Delete department ${dept.code} — ${dept.name}?\n\nThis can't be undone.`)) return
+            run(() => api.deleteDepartment(actor, dept.id), `${dept.name} deleted`)
+          }}
+        >
+          ✕ Delete
+        </button>
+        {inUse && <span className="demo-hint">Has staff, SOPs or tests — remove those before deleting.</span>}
+      </div>
+    </div>
+  )
+}
+
+function NewDepartment({ actor }: { actor: Actor }) {
+  const [code, setCode] = useState('')
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  return (
+    <div className="brow" style={{ background: 'var(--ground)' }}>
+      <div className="brow-top"><span className="brow-title">＋ Add a department</span></div>
+      <div className="fieldrow" style={{ marginTop: 6 }}>
+        <div className="field"><label>Code (2–4 letters)</label>
+          <input maxLength={4} value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} style={{ textTransform: 'uppercase' }} placeholder="e.g. SP" /></div>
+        <div className="field"><label>Name</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Spa" /></div>
+      </div>
+      <button
+        className="btn sm primary"
+        disabled={busy}
+        onClick={async () => {
+          if (!code.trim() || !name.trim()) { toast('Enter a code and a name'); return }
+          setBusy(true)
+          try {
+            await api.addDepartment(actor, code, name)
+            toast(`Department ${code.toUpperCase()} added`)
+            setCode(''); setName('')
+          } catch (e) {
+            toast(e instanceof ApiError ? e.message : 'Could not add department.')
+          } finally {
+            setBusy(false)
+          }
+        }}
+      >
+        {busy ? <span className="spinner" /> : '＋ Add department'}
+      </button>
+    </div>
   )
 }

@@ -95,6 +95,17 @@ export function AddSectionIcon() {
   )
 }
 
+export function DepartmentSectionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="sec-ico" aria-hidden>
+      <rect x="3.5" y="3.5" width="7" height="7" rx="1.6" fill={BRASS_SOFT} stroke={PINE} strokeWidth="1.6" />
+      <rect x="13.5" y="3.5" width="7" height="7" rx="1.6" fill="#fff" stroke={BRASS} strokeWidth="1.5" />
+      <rect x="3.5" y="13.5" width="7" height="7" rx="1.6" fill="#fff" stroke={BRASS} strokeWidth="1.5" />
+      <rect x="13.5" y="13.5" width="7" height="7" rx="1.6" fill={BRASS_SOFT} stroke={PINE} strokeWidth="1.6" />
+    </svg>
+  )
+}
+
 export function BranchSectionIcon() {
   return (
     <svg viewBox="0 0 24 24" className="sec-ico" aria-hidden>
