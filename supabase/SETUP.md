@@ -173,11 +173,12 @@ Until it's deployed, delete still works — it just leaves the file in the folde
 
 ### Optional: PDF test reports (filed to Drive)
 
-`test-report` builds a PDF of a staff member's result on a test — their details,
-the test, the latest result, the full attempt history and any certificate — for
-an admin or the owning manager to download from **Tests → a test → Download
-reports**. A copy is also filed in the department's Drive folder, named by SOP +
-date + person. Reuses the `GOOGLE_*` secrets:
+A staff member's result on a test — their details, the test, the latest result,
+the per-question breakdown, the full attempt history and any certificate — can be
+downloaded as a PDF from **Tests → a test → Download reports** by an admin or the
+owning manager. The PDF is built **in the browser** (so Urdu/Pashto render
+correctly), and the `test-report` function files a copy in the department's Drive
+folder, named by SOP + date + person. Reuses the `GOOGLE_*` secrets:
 
 ```bash
 supabase functions deploy test-report

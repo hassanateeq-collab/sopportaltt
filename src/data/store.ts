@@ -456,18 +456,182 @@ export async function downloadTestReport(
   folderId: string,
 ): Promise<{ driveSaved: boolean }> {
   if (!isSupabaseEnabled) throw new ApiError('Report download works in the live app.')
-  const j = await callAdminFn('test-report', { test_id: testId, staff_id: staffId, folder_id: folderId })
-  const bytes = Uint8Array.from(atob(j.pdf as string), (c) => c.charCodeAt(0))
-  const blob = new Blob([bytes], { type: 'application/pdf' })
+
+  const test = read.test(testId)
+  if (!test) throw new ApiError('That test no longer exists.')
+  const staff = read.staffMember(staffId)
+  if (!staff) throw new ApiError('That staff record no longer exists.')
+  const attempts = attemptsFor(staffId, testId)
+  const latest = attempts[0]
+  if (!latest) throw new ApiError('This person has not attempted this test yet.')
+
+  const data = {
+    test,
+    staff,
+    dept: read.department(staff.department_id),
+    branch: read.branch(staff.branch_id),
+    attempts,
+    latest,
+    cert: latestCertification(staffId, testId),
+    relSop: test.related_sop_id ? read.sop(test.related_sop_id) : null,
+    questions: read.questionsFor(testId),
+    answers: (latest as unknown as { answers?: Array<number | null> }).answers ?? null,
+  }
+
+  // Rendered in the browser so Urdu/Pashto (right-to-left, shaped) come out
+  // correct — a PDF font can't lay out those scripts on the server.
+  const el = buildReportElement(data)
+  document.body.appendChild(el)
+  let blob: Blob
+  try {
+    const [h2c, jspdf] = await Promise.all([import('html2canvas'), import('jspdf')])
+    const html2canvas = h2c.default
+    const { jsPDF } = jspdf
+    const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff' })
+    const pdf = new jsPDF({ unit: 'pt', format: 'a4' })
+    const pageW = pdf.internal.pageSize.getWidth()
+    const pageH = pdf.internal.pageSize.getHeight()
+    const imgH = (canvas.height * pageW) / canvas.width
+    const imgData = canvas.toDataURL('image/jpeg', 0.92)
+    let position = 0
+    let heightLeft = imgH
+    pdf.addImage(imgData, 'JPEG', 0, position, pageW, imgH)
+    heightLeft -= pageH
+    while (heightLeft > 0) {
+      position -= pageH
+      pdf.addPage()
+      pdf.addImage(imgData, 'JPEG', 0, position, pageW, imgH)
+      heightLeft -= pageH
+    }
+    blob = pdf.output('blob')
+  } finally {
+    el.remove()
+  }
+
+  const sopName = data.relSop ? `${data.relSop.code} ${data.relSop.title}` : test.title
+  const filename = `${sopName} - ${staff.name} - ${latest.attempted_at.slice(0, 10)}.pdf`
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = (j.filename as string) || 'test-report.pdf'
+  a.download = filename
   document.body.appendChild(a)
   a.click()
   a.remove()
   setTimeout(() => URL.revokeObjectURL(url), 5000)
-  return { driveSaved: !!j.driveSaved }
+
+  // File a copy in the department's Drive folder (best-effort — the download
+  // already happened, so a filing failure just means no archived copy).
+  let driveSaved = false
+  try {
+    const pdfBase64 = await blobToBase64(blob)
+    const j = await callAdminFn('test-report', {
+      test_id: testId,
+      staff_id: staffId,
+      folder_id: folderId,
+      filename,
+      pdf: pdfBase64,
+    })
+    driveSaved = !!j.driveSaved
+  } catch {
+    driveSaved = false
+  }
+  return { driveSaved }
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result).split(',')[1] ?? '')
+    r.onerror = reject
+    r.readAsDataURL(blob)
+  })
+}
+
+/** Build the off-screen HTML the report PDF is rendered from. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildReportElement(d: any): HTMLElement {
+  const esc = (s: unknown) =>
+    String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string)
+  const LANG: Record<string, string> = { en: 'English', ur: 'Urdu', ps: 'Pashto' }
+  const fmtD = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+  const fmtDT = (iso: string) =>
+    new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+
+  const { test, staff, dept, branch, attempts, latest, cert, relSop, questions, answers } = d
+
+  const rows = (list: Array<[string, string]>) =>
+    list
+      .map(
+        ([l, v]) =>
+          `<div style="display:flex;margin-bottom:7px"><div style="width:170px;color:#4e5d56;font-size:12px">${esc(l)}</div><div style="flex:1;font-size:13px">${esc(v)}</div></div>`,
+      )
+      .join('')
+
+  let qHtml: string
+  if (!Array.isArray(answers)) {
+    qHtml = '<p style="color:#4e5d56;font-size:12px">This attempt predates answer capture, so the per-question breakdown is unavailable.</p>'
+  } else if (!questions.length) {
+    qHtml = '<p style="color:#4e5d56;font-size:12px">The test has no questions on file.</p>'
+  } else {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    qHtml = questions
+      .map((q: any, i: number) => {
+        const sel = answers[i]
+        const opts = (q.options as string[])
+          .map((opt, oi) => {
+            const isC = oi === q.correct_index
+            const isS = sel === oi
+            let tag = ''
+            if (isC && isS) tag = ' — correct answer, their choice'
+            else if (isC) tag = ' — correct answer'
+            else if (isS) tag = ' — their choice'
+            const color = isC ? '#1f5030' : isS ? '#99271f' : '#182b25'
+            const weight = isC || isS ? '600' : '400'
+            return `<div dir="auto" style="margin:3px 0;color:${color};font-weight:${weight};font-size:13px">${String.fromCharCode(65 + oi)}.&nbsp; ${esc(opt)}${esc(tag)}</div>`
+          })
+          .join('')
+        const none = sel === null || sel === undefined ? '<div style="color:#4e5d56;font-size:11px">(no answer selected)</div>' : ''
+        return `<div style="margin-bottom:14px"><div dir="auto" style="font-weight:700;font-size:13.5px;margin-bottom:4px">Q${i + 1}. ${esc(q.text)}</div><div style="padding-left:12px">${opts}${none}</div></div>`
+      })
+      .join('')
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const hist = (attempts as any[])
+    .map(
+      (a) =>
+        `<div style="display:flex;font-size:12px;margin-bottom:4px"><div style="width:180px">${esc(fmtDT(a.attempted_at))}</div><div style="width:70px">${a.score}/${a.total}</div><div style="width:50px">${a.percentage}%</div><div style="font-weight:600;color:${a.passed ? '#1f5030' : '#99271f'}">${a.passed ? 'PASS' : 'FAIL'}</div></div>`,
+    )
+    .join('')
+
+  const H = (t: string) =>
+    `<div style="color:#a07e2c;font-weight:700;font-size:13px;margin:18px 0 10px;border-top:1px solid #e2e6dc;padding-top:14px">${t}</div>`
+
+  const el = document.createElement('div')
+  el.setAttribute('dir', 'ltr')
+  el.style.cssText =
+    'position:fixed;left:-10000px;top:0;width:794px;box-sizing:border-box;padding:48px;background:#fff;color:#182b25;font-family:"Segoe UI","Noto Naskh Arabic","Nirmala UI",Tahoma,Arial,sans-serif;font-size:13px;line-height:1.5'
+  el.innerHTML = `
+    <div style="font-size:24px;font-weight:800">Training Test Report</div>
+    <div style="color:#4e5d56;font-size:12px;margin-top:4px">Hamsun Hospitality — SOP &amp; Training Portal</div>
+    ${H('Staff member')}
+    ${rows([['Name', staff.name], ['Job title', staff.job_title || 'Staff'], ['Department', dept ? `${dept.name} (${dept.code})` : '—'], ['Branch', branch ? `${branch.name} (${branch.code})` : '—']])}
+    ${H('Test')}
+    ${rows([['Title', test.title], ['Related SOP', relSop ? `${relSop.code} — ${relSop.title}` : 'None'], ['Pass mark', `${test.pass_mark}%`], ['Certificate validity', `${test.validity_months} months`]])}
+    ${H('Result (latest attempt)')}
+    ${rows([['Attempt date', fmtDT(latest.attempted_at)], ['Score', `${latest.score} / ${latest.total}  (${latest.percentage}%)`], ['Outcome', latest.passed ? 'PASS' : 'FAIL'], ['Language taken', LANG[latest.language] || latest.language], ...(cert ? [['Certification', `Issued ${fmtD(cert.issued_at)} · valid until ${fmtD(cert.expires_at)}`] as [string, string]] : [])])}
+    ${H('Questions &amp; answers — latest attempt')}
+    ${qHtml}
+    ${H('Attempt history')}
+    <div style="display:flex;font-size:11px;color:#4e5d56;margin-bottom:5px"><div style="width:180px">Date</div><div style="width:70px">Score</div><div style="width:50px">%</div><div>Result</div></div>
+    ${hist}
+    <div style="margin-top:22px;border-top:1px solid #e2e6dc;padding-top:12px;color:#4e5d56;font-size:10.5px">Generated ${fmtDT(new Date().toISOString())}. Scoring is by answer position and is identical in every language the test is offered in.</div>
+  `
+  return el
 }
 
 /**
