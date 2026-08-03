@@ -1587,27 +1587,99 @@ export const api = {
   /* ---- admin: org management ---- */
 
   async addBranch(actor: Actor, code: string, name: string, status: Branch['status']): Promise<Branch> {
-    requireAdmin(actor)
     const normalised = code.trim().toUpperCase()
     if (!/^[A-Z]{2,4}$/.test(normalised)) throw new ApiError('Branch code must be 2–4 letters, e.g. DHA.')
-    if (db.branches.some((b) => b.code === normalised)) throw new ApiError(`Branch ${normalised} already exists.`)
     if (!name.trim()) throw new ApiError('A branch needs a name.')
+    if (db.branches.some((b) => b.code === normalised)) throw new ApiError(`Branch ${normalised} already exists.`)
 
+    // Adding a branch is enough on its own: every ALL-scope SOP and test now
+    // applies to it by derivation, with nothing copied.
+    if (isSupabaseEnabled) {
+      const { data, error } = await supabase!
+        .from('branches')
+        .insert({ code: normalised, name: name.trim(), status })
+        .select('*')
+        .single()
+      if (error) throw new ApiError(error.message)
+      await hydrateFromSupabase()
+      return data as Branch
+    }
+
+    requireAdmin(actor)
     const branch: Branch = { id: id('br'), code: normalised, name: name.trim(), status }
     db.branches.push(branch)
     commit()
-    // Note: nothing else happens here, and that is the design working. Every
-    // ALL-scope SOP and test now applies to this branch by derivation alone.
     return branch
   },
 
-  async addDepartment(actor: Actor, code: string, name: string): Promise<Department> {
+  /** Rename a branch or change its open / pre-opening status. The code is fixed. */
+  async updateBranch(
+    actor: Actor,
+    branchId: string,
+    changes: { name?: string; status?: Branch['status'] },
+  ): Promise<void> {
+    const patch: Record<string, unknown> = {}
+    if (changes.name !== undefined) {
+      if (!changes.name.trim()) throw new ApiError('A branch needs a name.')
+      patch.name = changes.name.trim()
+    }
+    if (changes.status !== undefined) patch.status = changes.status
+    if (Object.keys(patch).length === 0) return
+
+    if (isSupabaseEnabled) {
+      const { error } = await supabase!.from('branches').update(patch).eq('id', branchId)
+      if (error) throw new ApiError(error.message)
+      await hydrateFromSupabase()
+      return
+    }
     requireAdmin(actor)
+    const branch = db.branches.find((b) => b.id === branchId)
+    if (!branch) throw new ApiError('That branch no longer exists.')
+    Object.assign(branch, patch)
+    commit()
+  },
+
+  /** Delete a branch — refused while any staff or manager is still posted there. */
+  async deleteBranch(actor: Actor, branchId: string): Promise<void> {
+    const branch = read.branch(branchId)
+    if (!branch) throw new ApiError('That branch no longer exists.')
+    if (db.staff.some((s) => s.branch_id === branchId) || db.managers.some((m) => m.branch_id === branchId)) {
+      throw new ApiError(`${branch.code} still has staff or managers. Move or remove them first.`)
+    }
+
+    if (isSupabaseEnabled) {
+      const { error } = await supabase!.from('branches').delete().eq('id', branchId)
+      if (error) {
+        // 23503 = foreign-key violation (something still references the branch).
+        if (error.code === '23503') throw new ApiError(`${branch.code} is still in use — move its staff and managers first.`)
+        throw new ApiError(error.message)
+      }
+      await hydrateFromSupabase()
+      return
+    }
+    requireAdmin(actor)
+    db.branches = db.branches.filter((b) => b.id !== branchId)
+    commit()
+  },
+
+  async addDepartment(actor: Actor, code: string, name: string): Promise<Department> {
     const normalised = code.trim().toUpperCase()
     if (!/^[A-Z]{2,4}$/.test(normalised)) throw new ApiError('Department code must be 2–4 letters, e.g. FD.')
-    if (db.departments.some((d) => d.code === normalised)) throw new ApiError(`Department ${normalised} already exists.`)
     if (!name.trim()) throw new ApiError('A department needs a name.')
+    if (db.departments.some((d) => d.code === normalised)) throw new ApiError(`Department ${normalised} already exists.`)
 
+    if (isSupabaseEnabled) {
+      const { data, error } = await supabase!
+        .from('departments')
+        .insert({ code: normalised, name: name.trim() })
+        .select('*')
+        .single()
+      if (error) throw new ApiError(error.message)
+      await hydrateFromSupabase()
+      return data as Department
+    }
+
+    requireAdmin(actor)
     const dept: Department = { id: id('dp'), code: normalised, name: name.trim() }
     db.departments.push(dept)
     commit()

@@ -94,3 +94,13 @@ export function AddSectionIcon() {
     </svg>
   )
 }
+
+export function BranchSectionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="sec-ico" aria-hidden>
+      <path d="M4 21V9.6l8-5 8 5V21z" fill={BRASS_SOFT} stroke={PINE} strokeWidth="1.6" strokeLinejoin="round" />
+      <rect x="10" y="14.5" width="4" height="6.5" fill="#fff" stroke={BRASS} strokeWidth="1.4" />
+      <path d="M2.5 21h19" stroke={PINE} strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}

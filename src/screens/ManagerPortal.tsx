@@ -31,6 +31,7 @@ import {
   StaffSectionIcon,
   ManagerSectionIcon,
   AddSectionIcon,
+  BranchSectionIcon,
 } from '../components/icons'
 
 /**
@@ -897,7 +898,7 @@ function AdminOrg({ actor, dept, branch }: { actor: Actor; dept: Department; bra
       <AddStaff actor={actor} dept={dept} branch={branch} />
       <ManagerRoster actor={actor} dept={dept} branch={branch} />
       <AddManager actor={actor} dept={dept} branch={branch} />
-      <AddBranch actor={actor} />
+      <BranchAdmin actor={actor} />
       <AddDepartment actor={actor} />
     </>
   )
@@ -1192,28 +1193,118 @@ function AddManager({ actor, dept, branch }: { actor: Actor; dept: Department; b
   )
 }
 
-function AddBranch({ actor }: { actor: Actor }) {
-  const [code, setCode] = useState('')
-  const [name, setName] = useState('')
+/* ---- branches: add, rename, set status, delete ---- */
+
+function BranchAdmin({ actor }: { actor: Actor }) {
+  const branches = read.branches().slice().sort((a, b) => a.code.localeCompare(b.code))
   return (
     <details className="board">
-      <summary><AddSectionIcon />Add branch</summary>
+      <summary><BranchSectionIcon />Branches<span className="hint">{branches.length}</span></summary>
       <div className="card-body">
-        <div className="field"><label>Branch code</label><input maxLength={4} value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} style={{ textTransform: 'uppercase' }} placeholder="e.g. GLB" /></div>
-        <div className="field"><label>Branch name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Gulberg" /></div>
-        <button
-          className="btn primary block"
-          onClick={() =>
-            run(async () => {
-              await api.addBranch(actor, code, name, 'open')
-              setCode(''); setName('')
-            }, `Branch ${code} added — "all branches" SOPs and tests apply to it automatically`)
-          }
-        >
-          Add branch
-        </button>
+        {branches.length === 0 ? (
+          <div className="empty-row">No branches yet — add one below.</div>
+        ) : (
+          branches.map((b) => <BranchRow key={b.id} actor={actor} branch={b} />)
+        )}
+        <NewBranch actor={actor} />
+        <p className="demo-hint" style={{ marginTop: 8 }}>
+          A branch code (e.g. FSL) can't be changed — SOPs and tests are scoped to it. An “all branches” SOP or test
+          applies to every branch here automatically.
+        </p>
       </div>
     </details>
+  )
+}
+
+function BranchRow({ actor, branch }: { actor: Actor; branch: Branch }) {
+  const [name, setName] = useState(branch.name)
+  const [status, setStatus] = useState<Branch['status']>(branch.status)
+  const dirty = name.trim() !== branch.name || status !== branch.status
+  const inUse =
+    read.staff().some((s) => s.branch_id === branch.id) ||
+    read.managers().some((m) => m.branch_id === branch.id)
+
+  return (
+    <div className="brow">
+      <div className="brow-top">
+        <span className="brow-title">
+          <span className="ver mono">{branch.code}</span> {branch.name}
+          {branch.status === 'pre_opening' && <span className="vidchip" style={{ marginLeft: 6 }}>PRE-OPENING</span>}
+        </span>
+      </div>
+      <div className="fieldrow" style={{ marginTop: 6 }}>
+        <div className="field"><label>Name</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} /></div>
+        <div className="field"><label>Status</label>
+          <select value={status} onChange={(e) => setStatus(e.target.value as Branch['status'])}>
+            <option value="open">Open</option>
+            <option value="pre_opening">Pre-opening</option>
+          </select></div>
+      </div>
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button
+          className="btn sm primary"
+          disabled={!dirty}
+          onClick={() => run(() => api.updateBranch(actor, branch.id, { name, status }), `${branch.code} updated`)}
+        >
+          Save changes
+        </button>
+        <button
+          className="btn sm danger"
+          disabled={inUse}
+          onClick={() => {
+            if (!confirm(`Delete branch ${branch.code} — ${branch.name}?\n\nThis can't be undone.`)) return
+            run(() => api.deleteBranch(actor, branch.id), `${branch.code} deleted`)
+          }}
+        >
+          ✕ Delete
+        </button>
+        {inUse && <span className="demo-hint">Has staff/managers — move them before deleting.</span>}
+      </div>
+    </div>
+  )
+}
+
+function NewBranch({ actor }: { actor: Actor }) {
+  const [code, setCode] = useState('')
+  const [name, setName] = useState('')
+  const [status, setStatus] = useState<Branch['status']>('open')
+  const [busy, setBusy] = useState(false)
+
+  return (
+    <div className="brow" style={{ background: 'var(--ground)' }}>
+      <div className="brow-top"><span className="brow-title">＋ Add a branch</span></div>
+      <div className="fieldrow" style={{ marginTop: 6 }}>
+        <div className="field"><label>Code (2–4 letters)</label>
+          <input maxLength={4} value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} style={{ textTransform: 'uppercase' }} placeholder="e.g. GLB" /></div>
+        <div className="field"><label>Name</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Gulberg" /></div>
+        <div className="field"><label>Status</label>
+          <select value={status} onChange={(e) => setStatus(e.target.value as Branch['status'])}>
+            <option value="open">Open</option>
+            <option value="pre_opening">Pre-opening</option>
+          </select></div>
+      </div>
+      <button
+        className="btn sm primary"
+        disabled={busy}
+        onClick={async () => {
+          if (!code.trim() || !name.trim()) { toast('Enter a code and a name'); return }
+          setBusy(true)
+          try {
+            await api.addBranch(actor, code, name, status)
+            toast(`Branch ${code.toUpperCase()} added`)
+            setCode(''); setName(''); setStatus('open')
+          } catch (e) {
+            toast(e instanceof ApiError ? e.message : 'Could not add branch.')
+          } finally {
+            setBusy(false)
+          }
+        }}
+      >
+        {busy ? <span className="spinner" /> : '＋ Add branch'}
+      </button>
+    </div>
   )
 }
 
