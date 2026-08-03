@@ -478,6 +478,12 @@ export async function downloadTestReport(
     answers: (latest as unknown as { answers?: Array<number | null> }).answers ?? null,
   }
 
+  const sopName = data.relSop ? `${data.relSop.code} ${data.relSop.title}` : test.title
+  const filename = `${sopName} - ${staff.name} - ${latest.attempted_at.slice(0, 10)}.pdf`
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+
   // Rendered in the browser so Urdu/Pashto (right-to-left, shaped) come out
   // correct — a PDF font can't lay out those scripts on the server.
   const el = buildReportElement(data)
@@ -487,7 +493,15 @@ export async function downloadTestReport(
     const [h2c, jspdf] = await Promise.all([import('html2canvas'), import('jspdf')])
     const html2canvas = h2c.default
     const { jsPDF } = jspdf
-    const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff' })
+    const canvas = await html2canvas(el, {
+      scale: 2,
+      backgroundColor: '#ffffff',
+      logging: false,
+      width: el.offsetWidth,
+      height: el.offsetHeight,
+      windowWidth: el.offsetWidth,
+      windowHeight: el.offsetHeight,
+    })
     const pdf = new jsPDF({ unit: 'pt', format: 'a4' })
     const pageW = pdf.internal.pageSize.getWidth()
     const pageH = pdf.internal.pageSize.getHeight()
@@ -504,15 +518,11 @@ export async function downloadTestReport(
       heightLeft -= pageH
     }
     blob = pdf.output('blob')
+  } catch (e) {
+    throw new ApiError(`Could not build the PDF in this browser: ${e instanceof Error ? e.message : String(e)}`)
   } finally {
     el.remove()
   }
-
-  const sopName = data.relSop ? `${data.relSop.code} ${data.relSop.title}` : test.title
-  const filename = `${sopName} - ${staff.name} - ${latest.attempted_at.slice(0, 10)}.pdf`
-    .replace(/[\\/:*?"<>|]/g, '-')
-    .replace(/\s+/g, ' ')
-    .trim()
 
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
