@@ -103,11 +103,6 @@ export function App() {
         ) : (
           <ManagerLogin onLoggedIn={(a) => setActor(a)} />
         )}
-        <p className="foot">
-          STAFF = NAME + HASHED CODE VIA EDGE FUNCTION · MANAGERS &amp; ADMIN = SUPABASE AUTH
-          <br />
-          VIEW-ONLY ENFORCED IN GOOGLE DRIVE SHARE SETTINGS
-        </p>
       </main>
 
       <Toaster />
