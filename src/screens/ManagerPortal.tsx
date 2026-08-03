@@ -12,6 +12,7 @@ import {
   uploadSopViaFunction,
   attachSopVideo,
   removeSopVideo,
+  downloadTestReport,
   listDriveFolders,
   createDriveFolder,
   ApiError,
@@ -398,6 +399,7 @@ function TestRow({
     return h.length && !h[0].passed
   })
   const qCount = read.questionsFor(test.id).length
+  const attemptedPeople = assigned.filter((p) => attemptsFor(p.id, test.id).length > 0)
 
   return (
     <div className="brow">
@@ -461,6 +463,28 @@ function TestRow({
         <AssignPanel test={test} people={people} branch={branch} actor={actor} assignedIds={assignedIds} />
       )}
 
+      {attemptedPeople.length > 0 && (
+        <details className="inline">
+          <summary>Download reports</summary>
+          <div style={{ marginTop: 8 }}>
+            {attemptedPeople.map((p) => {
+              const last = attemptsFor(p.id, test.id)[0]
+              return (
+                <div key={p.id} className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
+                  <span style={{ minWidth: 150 }}>
+                    {p.name} <span className="ver">{last.score}/{last.total} · {last.passed ? 'PASS' : 'FAIL'}</span>
+                  </span>
+                  <ReportBtn testId={test.id} staffId={p.id} deptId={test.department_id} name={p.name} />
+                </div>
+              )
+            })}
+            <p className="demo-hint" style={{ marginTop: 6 }}>
+              A PDF is downloaded and a copy is filed in the department's Drive folder, named by SOP, date and person.
+            </p>
+          </div>
+        </details>
+      )}
+
       <details className="inline">
         <summary>Manage this test</summary>
         <div style={{ marginTop: 8 }}>
@@ -480,6 +504,32 @@ function TestRow({
         </div>
       </details>
     </div>
+  )
+}
+
+function ReportBtn({ testId, staffId, deptId, name }: { testId: string; staffId: string; deptId: string; name: string }) {
+  const [busy, setBusy] = useState(false)
+  const deptName = read.department(deptId)?.name
+  const folderId = DRIVE_DEPARTMENT_FOLDERS.find((f) => f.name === deptName)?.id ?? ''
+
+  return (
+    <button
+      className="btn sm primary"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true)
+        try {
+          const { driveSaved } = await downloadTestReport(testId, staffId, folderId)
+          toast(driveSaved ? `Report for ${name} downloaded and filed in Drive` : `Report for ${name} downloaded`)
+        } catch (e) {
+          toast(e instanceof ApiError ? e.message : 'Could not generate the report.')
+        } finally {
+          setBusy(false)
+        }
+      }}
+    >
+      {busy ? <span className="spinner" /> : '⬇ PDF report'}
+    </button>
   )
 }
 

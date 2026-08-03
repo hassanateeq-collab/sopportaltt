@@ -444,6 +444,33 @@ export async function attachSopVideo(sopId: string, video: File, fallbackFolderI
 }
 
 /**
+ * Generate and download a PDF report of one staff member's result on one test
+ * (their details, the test, the latest result, the full attempt history and any
+ * certificate). The report is built server-side by the test-report Edge Function
+ * and a copy is filed in the department's Drive folder, named by SOP + date +
+ * person. Returns whether the Drive copy was saved.
+ */
+export async function downloadTestReport(
+  testId: string,
+  staffId: string,
+  folderId: string,
+): Promise<{ driveSaved: boolean }> {
+  if (!isSupabaseEnabled) throw new ApiError('Report download works in the live app.')
+  const j = await callAdminFn('test-report', { test_id: testId, staff_id: staffId, folder_id: folderId })
+  const bytes = Uint8Array.from(atob(j.pdf as string), (c) => c.charCodeAt(0))
+  const blob = new Blob([bytes], { type: 'application/pdf' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = (j.filename as string) || 'test-report.pdf'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 5000)
+  return { driveSaved: !!j.driveSaved }
+}
+
+/**
  * On-demand translation of one quiz question + options into Urdu/Pashto, for a
  * staff member taking a test. Option order is preserved so scoring is unchanged.
  * In demo mode there's no translator, so it just tags the text (an honest

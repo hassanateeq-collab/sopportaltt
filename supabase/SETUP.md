@@ -171,6 +171,21 @@ supabase functions deploy delete-sop
 
 Until it's deployed, delete still works — it just leaves the file in the folder.
 
+### Optional: PDF test reports (filed to Drive)
+
+`test-report` builds a PDF of a staff member's result on a test — their details,
+the test, the latest result, the full attempt history and any certificate — for
+an admin or the owning manager to download from **Tests → a test → Download
+reports**. A copy is also filed in the department's Drive folder, named by SOP +
+date + person. Reuses the `GOOGLE_*` secrets:
+
+```bash
+supabase functions deploy test-report
+```
+
+If Drive isn't configured the download still works — only the filed copy is
+skipped.
+
 ### Optional: add / replace / remove an SOP's training video
 
 The **Manage this SOP** panel can add a training video to an SOP that has none,
