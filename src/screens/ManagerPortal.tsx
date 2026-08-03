@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import {
   api,
   read,
@@ -40,6 +41,8 @@ import {
  * and also manages the org. The boards and forms are the same; only the scope
  * and the extra admin sections differ.
  */
+type Page = 'home' | 'sops' | 'tests' | 'staff' | 'managers' | 'branches' | 'departments'
+
 export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
   const isAdmin = actor.kind === 'admin'
   const branches = read.branches()
@@ -48,11 +51,27 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
   const [aBranch, setABranch] = useState(branches[0]?.code ?? '')
   const [aDept, setADept] = useState(departments[0]?.id ?? '')
   const [viewer, setViewer] = useState<{ sop: Sop; kind: 'doc' | 'video' } | null>(null)
+  const [page, setPage] = useState<Page>('home')
 
   const branch = isAdmin ? read.branchByCode(aBranch) : read.branch(actor.manager.branch_id)
   const dept = isAdmin ? read.department(aDept) : read.department(actor.manager.department_id)
 
   if (!branch || !dept) return <div className="allclear">No branches or departments yet.</div>
+
+  const staffCount = read.staff().filter((s) => s.department_id === dept.id && s.branch_id === branch.id).length
+  const mgrCount = read.managers().filter((m) => m.department_id === dept.id && m.branch_id === branch.id).length
+  const tiles: Array<{ key: Page; icon: ReactNode; title: string; sub: string }> = [
+    { key: 'sops', icon: <SopSectionIcon />, title: 'SOPs', sub: `${sopsOf(dept.id, branch.code).length} here · sign-off & publish` },
+    { key: 'tests', icon: <TestSectionIcon />, title: 'Tests & scores', sub: `${testsOf(dept.id, branch.code).length} here · assign & create` },
+    { key: 'staff', icon: <StaffSectionIcon />, title: 'Staff', sub: isAdmin ? `${staffCount} here · add & codes` : `${staffCount} here · view codes` },
+  ]
+  if (isAdmin) {
+    tiles.push(
+      { key: 'managers', icon: <ManagerSectionIcon />, title: 'Managers', sub: `${mgrCount} here · access & postings` },
+      { key: 'branches', icon: <BranchSectionIcon />, title: 'Branches', sub: `${branches.length} · add, rename, status` },
+      { key: 'departments', icon: <AddSectionIcon />, title: 'Departments', sub: `${departments.length} · add` },
+    )
+  }
 
   return (
     <>
@@ -89,13 +108,58 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
         </div>
       )}
 
-      <SopBoard dept={dept} branch={branch} actor={actor} onOpen={(sop, kind) => setViewer({ sop, kind })} />
-      <TestBoard dept={dept} branch={branch} actor={actor} />
-      <AddSopForm dept={dept} branch={branch} actor={actor} lockBranch={!isAdmin} />
-      <CreateTestForm dept={dept} branch={branch} actor={actor} lockBranch={!isAdmin} />
+      {page === 'home' ? (
+        <div className="mtiles">
+          {tiles.map((t) => (
+            <button key={t.key} className="mtile" onClick={() => setPage(t.key)}>
+              <span className="mtile-ico">{t.icon}</span>
+              <span className="mtile-body">
+                <span className="mtile-title">{t.title}</span>
+                <span className="mtile-sub">{t.sub}</span>
+              </span>
+              <span className="mtile-go" aria-hidden>›</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <>
+          <button className="btn backbtn" onClick={() => setPage('home')}>← Menu</button>
 
-      {!isAdmin && <StaffCodes dept={dept} branch={branch} />}
-      {isAdmin && <AdminOrg actor={actor} dept={dept} branch={branch} />}
+          {page === 'sops' && (
+            <>
+              <SopBoard dept={dept} branch={branch} actor={actor} onOpen={(sop, kind) => setViewer({ sop, kind })} />
+              <AddSopForm dept={dept} branch={branch} actor={actor} lockBranch={!isAdmin} />
+            </>
+          )}
+
+          {page === 'tests' && (
+            <>
+              <TestBoard dept={dept} branch={branch} actor={actor} />
+              <CreateTestForm dept={dept} branch={branch} actor={actor} lockBranch={!isAdmin} />
+            </>
+          )}
+
+          {page === 'staff' &&
+            (isAdmin ? (
+              <>
+                <StaffRoster actor={actor} dept={dept} branch={branch} />
+                <AddStaff actor={actor} dept={dept} branch={branch} />
+              </>
+            ) : (
+              <StaffCodes dept={dept} branch={branch} />
+            ))}
+
+          {page === 'managers' && isAdmin && (
+            <>
+              <ManagerRoster actor={actor} dept={dept} branch={branch} />
+              <AddManager actor={actor} dept={dept} branch={branch} />
+            </>
+          )}
+
+          {page === 'branches' && isAdmin && <BranchAdmin actor={actor} />}
+          {page === 'departments' && isAdmin && <AddDepartment actor={actor} />}
+        </>
+      )}
 
       {viewer && (
         <Viewer sop={viewer.sop} initialKind={viewer.kind} showViewOnly={false} onClose={() => setViewer(null)} />
@@ -890,19 +954,6 @@ function CreateTestForm({
 }
 
 /* ------------------------------------------------------------- admin org -- */
-
-function AdminOrg({ actor, dept, branch }: { actor: Actor; dept: Department; branch: Branch }) {
-  return (
-    <>
-      <StaffRoster actor={actor} dept={dept} branch={branch} />
-      <AddStaff actor={actor} dept={dept} branch={branch} />
-      <ManagerRoster actor={actor} dept={dept} branch={branch} />
-      <AddManager actor={actor} dept={dept} branch={branch} />
-      <BranchAdmin actor={actor} />
-      <AddDepartment actor={actor} />
-    </>
-  )
-}
 
 /* ---- staff codes: read-only roster a manager can look codes up in ---- */
 

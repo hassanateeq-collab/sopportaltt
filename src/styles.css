@@ -1187,6 +1187,79 @@ h2.section {
   margin-bottom: 18px;
 }
 
+/* Manager / admin home: a grid of tiles, each opening its own page. */
+.mtiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 14px;
+  margin-top: 6px;
+}
+
+.mtile {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  text-align: left;
+  padding: 18px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--brass-line);
+  border-radius: var(--r);
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(20, 53, 40, 0.05);
+  transition: box-shadow 0.15s, border-color 0.15s, transform 0.05s;
+}
+
+.mtile:hover {
+  box-shadow: 0 6px 18px rgba(20, 53, 40, 0.11);
+  border-left-color: var(--brass);
+}
+
+.mtile:active {
+  transform: translateY(1px);
+}
+
+.mtile-ico {
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+
+.mtile-ico .sec-ico {
+  width: 30px;
+  height: 30px;
+}
+
+.mtile-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.mtile-title {
+  font-family: var(--disp);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.mtile-sub {
+  font-size: 12.5px;
+  color: var(--ink-faint);
+}
+
+.mtile-go {
+  margin-left: auto;
+  color: var(--pine);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.backbtn {
+  margin-bottom: 14px;
+}
+
 .board-head {
   padding: 13px 18px;
   border-bottom: 1px solid var(--line);
