@@ -186,6 +186,19 @@ supabase functions deploy test-report
 If Drive isn't configured the download still works — only the filed copy is
 skipped.
 
+To include the **per-question breakdown** (each question with the correct option
+and the one the person picked), run migration `0003` and re-deploy the two
+functions below, so new attempts store the selected answers:
+
+```bash
+# in the SQL Editor: run migrations/0003_attempt_answers.sql
+supabase functions deploy submit-attempt
+supabase functions deploy test-report
+```
+
+Attempts taken before this still report fine — they just note the breakdown
+isn't available for those older attempts.
+
 ### Optional: add / replace / remove an SOP's training video
 
 The **Manage this SOP** panel can add a training video to an SOP that has none,

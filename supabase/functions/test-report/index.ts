@@ -41,19 +41,37 @@ function base64FromBytes(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
+// Wrap a long string to a given character width so it doesn't run off the page.
+function wrap(s: string, width: number): string[] {
+  const words = clean(s).split(/\s+/)
+  const lines: string[] = []
+  let line = ''
+  for (const w of words) {
+    if (line.length + w.length + 1 > width && line) { lines.push(line); line = w }
+    else line = line ? `${line} ${w}` : w
+  }
+  if (line) lines.push(line)
+  return lines.length ? lines : ['']
+}
+
 // deno-lint-ignore no-explicit-any
 async function buildPdf(ctx: any): Promise<Uint8Array> {
-  const { test, staff, dept, branch, attempts, cert, relSop, actorName } = ctx
+  const { test, staff, dept, branch, attempts, cert, relSop, questions, actorName } = ctx
+  const A4: [number, number] = [595.28, 841.89]
   const doc = await PDFDocument.create()
-  const page = doc.addPage([595.28, 841.89]) // A4
   const font = await doc.embedFont(StandardFonts.Helvetica)
   const bold = await doc.embedFont(StandardFonts.HelveticaBold)
   const ink = rgb(0.09, 0.17, 0.14)
   const soft = rgb(0.3, 0.36, 0.34)
   const brass = rgb(0.627, 0.494, 0.173)
+  const green = rgb(0.12, 0.3, 0.16)
+  const red = rgb(0.6, 0.15, 0.12)
   const M = 50
+  let page = doc.addPage(A4)
   let y = 800
 
+  const newPage = () => { page = doc.addPage(A4); y = 800 }
+  const ensure = (space: number) => { if (y < space) newPage() }
   // deno-lint-ignore no-explicit-any
   const draw = (s: string, o: any = {}) =>
     page.drawText(clean(s), { x: o.x ?? M, y, size: o.size ?? 11, font: o.f ?? font, color: o.color ?? ink })
@@ -64,7 +82,7 @@ async function buildPdf(ctx: any): Promise<Uint8Array> {
     page.drawText(clean(value), { x: M + 155, y, size: 11, font, color: ink })
     gap(17)
   }
-  const section = (t: string) => { draw(t, { size: 12, f: bold, color: brass }); gap(18) }
+  const section = (t: string) => { ensure(70); draw(t, { size: 12, f: bold, color: brass }); gap(18) }
 
   draw('Training Test Report', { size: 22, f: bold })
   gap(19)
@@ -94,6 +112,39 @@ async function buildPdf(ctx: any): Promise<Uint8Array> {
   if (cert) row('Certification', `Issued ${fmtDate(cert.issued_at)} · valid until ${fmtDate(cert.expires_at)}`)
   gap(6); rule(); gap(22)
 
+  // Per-question breakdown of the latest attempt.
+  section('Questions & answers — latest attempt')
+  const ans = latest.answers
+  if (!Array.isArray(ans)) {
+    draw('This attempt predates answer capture, so the per-question breakdown is unavailable.', { size: 10, color: soft }); gap(16)
+  } else if (!Array.isArray(questions) || questions.length === 0) {
+    draw('The test has no questions on file.', { size: 10, color: soft }); gap(16)
+  } else {
+    // deno-lint-ignore no-explicit-any
+    questions.forEach((q: any, i: number) => {
+      const opts: string[] = Array.isArray(q.options) ? q.options : []
+      const sel = ans[i]
+      ensure(34 + wrap(`Q${i + 1}. ${q.text}`, 82).length * 14 + opts.length * 15 + 26)
+      for (const ln of wrap(`Q${i + 1}. ${q.text}`, 82)) { draw(ln, { size: 11, f: bold }); gap(15) }
+      opts.forEach((opt: string, oi: number) => {
+        const isCorrect = oi === q.correct_index
+        const isSel = sel === oi
+        let suffix = ''
+        if (isCorrect && isSel) suffix = '   (correct answer — their choice)'
+        else if (isCorrect) suffix = '   (correct answer)'
+        else if (isSel) suffix = '   (their choice)'
+        const color = isCorrect ? green : isSel ? red : ink
+        const f = isCorrect || isSel ? bold : font
+        for (const ln of wrap(`${String.fromCharCode(65 + oi)}.  ${opt}${suffix}`, 88)) {
+          draw(ln, { size: 10, color, f, x: M + 14 }); gap(14)
+        }
+      })
+      if (sel === null || sel === undefined) { draw('(no answer selected)', { size: 9, color: soft, x: M + 14 }); gap(14) }
+      gap(9)
+    })
+  }
+  gap(4); ensure(70); rule(); gap(22)
+
   section('Attempt history')
   draw('Date', { size: 10, color: soft })
   page.drawText('Score', { x: M + 230, y, size: 10, font, color: soft })
@@ -101,18 +152,18 @@ async function buildPdf(ctx: any): Promise<Uint8Array> {
   page.drawText('Result', { x: M + 370, y, size: 10, font, color: soft })
   gap(16)
   for (const a of attempts) {
-    if (y < 90) break
+    ensure(30)
     draw(fmtDateTime(a.attempted_at), { size: 10 })
     page.drawText(clean(`${a.score}/${a.total}`), { x: M + 230, y, size: 10, font, color: ink })
     page.drawText(clean(`${a.percentage}%`), { x: M + 310, y, size: 10, font, color: ink })
     page.drawText(a.passed ? 'PASS' : 'FAIL', {
-      x: M + 370, y, size: 10, font: bold, color: a.passed ? rgb(0.12, 0.3, 0.16) : rgb(0.6, 0.15, 0.12),
+      x: M + 370, y, size: 10, font: bold, color: a.passed ? green : red,
     })
     gap(15)
   }
 
-  y = 58
-  rule(); gap(14)
+  ensure(70)
+  gap(6); rule(); gap(14)
   draw(`Generated ${fmtDateTime(new Date().toISOString())} by ${actorName}.`, { size: 9, color: soft })
   gap(12)
   draw('Scoring is by answer position and is identical in every language the test is offered in.', { size: 9, color: soft })
@@ -147,10 +198,11 @@ Deno.serve(async (req) => {
       }
     }
 
-    const [{ data: dept }, { data: branch }, { data: attempts }] = await Promise.all([
+    const [{ data: dept }, { data: branch }, { data: attempts }, { data: questions }] = await Promise.all([
       admin.from('departments').select('code, name').eq('id', staff.department_id).maybeSingle(),
       admin.from('branches').select('code, name').eq('id', staff.branch_id).maybeSingle(),
       admin.from('attempts').select('*').eq('staff_id', staffId).eq('test_id', testId).order('attempted_at', { ascending: false }),
+      admin.from('questions').select('text, options, correct_index, position').eq('test_id', testId).order('position'),
     ])
     if (!attempts || attempts.length === 0) return json({ error: 'This person has not attempted this test yet.' }, 400)
 
@@ -161,7 +213,7 @@ Deno.serve(async (req) => {
       ? (await admin.from('sops').select('code, title, document_file_id').eq('id', test.related_sop_id).maybeSingle()).data
       : null
 
-    const pdfBytes = await buildPdf({ test, staff, dept, branch, attempts, cert, relSop, actorName: role.name })
+    const pdfBytes = await buildPdf({ test, staff, dept, branch, attempts, cert, relSop, questions, actorName: role.name })
 
     const sopName = relSop ? `${relSop.code} ${relSop.title}` : test.title
     const dateStr = String(attempts[0].attempted_at).slice(0, 10)

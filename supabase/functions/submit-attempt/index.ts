@@ -90,7 +90,7 @@ Deno.serve(async (req) => {
 
     const { data: attempt, error: attErr } = await admin
       .from('attempts')
-      .insert({ staff_id: staff.id, test_id: testId, score, total, percentage, passed, language })
+      .insert({ staff_id: staff.id, test_id: testId, score, total, percentage, passed, language, answers })
       .select('*')
       .single()
     if (attErr) return json({ error: attErr.message }, 500)
