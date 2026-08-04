@@ -505,17 +505,36 @@ export async function downloadTestReport(
     const pdf = new jsPDF({ unit: 'pt', format: 'a4' })
     const pageW = pdf.internal.pageSize.getWidth()
     const pageH = pdf.internal.pageSize.getHeight()
-    const imgH = (canvas.height * pageW) / canvas.width
-    const imgData = canvas.toDataURL('image/jpeg', 0.92)
-    let position = 0
-    let heightLeft = imgH
-    pdf.addImage(imgData, 'JPEG', 0, position, pageW, imgH)
-    heightLeft -= pageH
-    while (heightLeft > 0) {
-      position -= pageH
-      pdf.addPage()
-      pdf.addImage(imgData, 'JPEG', 0, position, pageW, imgH)
-      heightLeft -= pageH
+    const f = pageW / canvas.width // pt per canvas-pixel
+    const pagePx = Math.floor(pageH / f) // canvas-pixels that fill one PDF page
+    const scale = canvas.width / el.offsetWidth // canvas-pixels per CSS pixel
+
+    // Allowed page breaks are the tops of the blocks, so a question block is
+    // never cut in half. Greedily fit as many whole blocks per page as possible.
+    const bounds = (Array.from(el.querySelectorAll('.rpt-block')) as HTMLElement[])
+      .map((b) => Math.round(b.offsetTop * scale))
+      .filter((v) => v > 0)
+    bounds.push(canvas.height)
+
+    let start = 0
+    let pageIdx = 0
+    while (start < canvas.height - 1) {
+      const maxEnd = start + pagePx
+      let end = -1
+      for (const b of bounds) if (b > start && b <= maxEnd) end = b
+      if (end === -1) end = Math.min(maxEnd, canvas.height) // a block taller than a page
+      const h = end - start
+      const slice = document.createElement('canvas')
+      slice.width = canvas.width
+      slice.height = h
+      const ctx = slice.getContext('2d')!
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, slice.width, slice.height)
+      ctx.drawImage(canvas, 0, start, canvas.width, h, 0, 0, canvas.width, h)
+      if (pageIdx > 0) pdf.addPage()
+      pdf.addImage(slice.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, pageW, h * f)
+      start = end
+      pageIdx++
     }
     blob = pdf.output('blob')
   } catch (e) {
@@ -581,31 +600,44 @@ function buildReportElement(d: any): HTMLElement {
       )
       .join('')
 
-  let qHtml: string
+  const H = (t: string) =>
+    `<div style="color:#a07e2c;font-weight:700;font-size:13px;margin:18px 0 10px;border-top:1px solid #e2e6dc;padding-top:14px">${t}</div>`
+  // Each .rpt-block is kept whole — page breaks only fall between blocks, so a
+  // question is never split across two pages.
+  const block = (inner: string) => `<div class="rpt-block">${inner}</div>`
+
+  const qaHeader = H('Questions &amp; answers — latest attempt')
+  // Options carry no A/B/C/D letters (Latin letters disturb the Urdu/Pashto
+  // right-to-left alignment). The correct option is green and the staff member's
+  // choice is highlighted; a legend explains it.
+  const legend =
+    '<div style="font-size:11px;color:#4e5d56;margin:-2px 0 12px">Correct answer in <span style="color:#1f5030;font-weight:700">green</span> · the staff member\'s choice is <span style="background:#f5eedb;padding:1px 5px;border-radius:3px">highlighted</span>.</div>'
+
+  let qBlocks: string
   if (!Array.isArray(answers)) {
-    qHtml = '<p style="color:#4e5d56;font-size:12px">This attempt predates answer capture, so the per-question breakdown is unavailable.</p>'
+    qBlocks = block(qaHeader + '<p style="color:#4e5d56;font-size:12px">This attempt predates answer capture, so the per-question breakdown is unavailable.</p>')
   } else if (!questions.length) {
-    qHtml = '<p style="color:#4e5d56;font-size:12px">The test has no questions on file.</p>'
+    qBlocks = block(qaHeader + '<p style="color:#4e5d56;font-size:12px">The test has no questions on file.</p>')
   } else {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    qHtml = questions
+    qBlocks = questions
       .map((q: any, i: number) => {
         const sel = answers[i]
         const opts = (q.options as string[])
           .map((opt, oi) => {
             const isC = oi === q.correct_index
             const isS = sel === oi
-            let tag = ''
-            if (isC && isS) tag = ' — correct answer, their choice'
-            else if (isC) tag = ' — correct answer'
-            else if (isS) tag = ' — their choice'
             const color = isC ? '#1f5030' : isS ? '#99271f' : '#182b25'
-            const weight = isC || isS ? '600' : '400'
-            return `<div dir="auto" style="margin:3px 0;color:${color};font-weight:${weight};font-size:13px">${String.fromCharCode(65 + oi)}.&nbsp; ${esc(opt)}${esc(tag)}</div>`
+            const weight = isC || isS ? '700' : '400'
+            const bg = isS ? 'background:#f5eedb;' : ''
+            return `<div dir="auto" style="${bg}color:${color};font-weight:${weight};font-size:13px;padding:3px 8px;border-radius:4px;margin:3px 0">${esc(opt)}</div>`
           })
           .join('')
-        const none = sel === null || sel === undefined ? '<div style="color:#4e5d56;font-size:11px">(no answer selected)</div>' : ''
-        return `<div style="margin-bottom:14px"><div dir="auto" style="font-weight:700;font-size:13.5px;margin-bottom:4px">Q${i + 1}. ${esc(q.text)}</div><div style="padding-left:12px">${opts}${none}</div></div>`
+        const none = sel === null || sel === undefined ? '<div style="color:#99271f;font-size:11px;margin-top:3px">No answer selected.</div>' : ''
+        const q1 = i === 0 ? qaHeader + legend : ''
+        return block(
+          `${q1}<div style="margin-bottom:15px"><div style="color:#4e5d56;font-size:11px;margin-bottom:3px">Question ${i + 1}</div><div dir="auto" style="font-weight:700;font-size:13.5px;margin-bottom:5px">${esc(q.text)}</div><div>${opts}${none}</div></div>`,
+        )
       })
       .join('')
   }
@@ -618,28 +650,18 @@ function buildReportElement(d: any): HTMLElement {
     )
     .join('')
 
-  const H = (t: string) =>
-    `<div style="color:#a07e2c;font-weight:700;font-size:13px;margin:18px 0 10px;border-top:1px solid #e2e6dc;padding-top:14px">${t}</div>`
-
   const el = document.createElement('div')
   el.setAttribute('dir', 'ltr')
   el.style.cssText =
     'position:fixed;left:-10000px;top:0;width:794px;box-sizing:border-box;padding:48px;background:#fff;color:#182b25;font-family:"Segoe UI","Noto Naskh Arabic","Nirmala UI",Tahoma,Arial,sans-serif;font-size:13px;line-height:1.5'
   el.innerHTML = `
-    <div style="font-size:24px;font-weight:800">Training Test Report</div>
-    <div style="color:#4e5d56;font-size:12px;margin-top:4px">Hamsun Hospitality — SOP &amp; Training Portal</div>
-    ${H('Staff member')}
-    ${rows([['Name', staff.name], ['Job title', staff.job_title || 'Staff'], ['Department', dept ? `${dept.name} (${dept.code})` : '—'], ['Branch', branch ? `${branch.name} (${branch.code})` : '—']])}
-    ${H('Test')}
-    ${rows([['Title', test.title], ['Related SOP', relSop ? `${relSop.code} — ${relSop.title}` : 'None'], ['Pass mark', `${test.pass_mark}%`], ['Certificate validity', `${test.validity_months} months`]])}
-    ${H('Result (latest attempt)')}
-    ${rows([['Attempt date', fmtDT(latest.attempted_at)], ['Score', `${latest.score} / ${latest.total}  (${latest.percentage}%)`], ['Outcome', latest.passed ? 'PASS' : 'FAIL'], ['Language taken', LANG[latest.language] || latest.language], ...(cert ? [['Certification', `Issued ${fmtD(cert.issued_at)} · valid until ${fmtD(cert.expires_at)}`] as [string, string]] : [])])}
-    ${H('Questions &amp; answers — latest attempt')}
-    ${qHtml}
-    ${H('Attempt history')}
-    <div style="display:flex;font-size:11px;color:#4e5d56;margin-bottom:5px"><div style="width:180px">Date</div><div style="width:70px">Score</div><div style="width:50px">%</div><div>Result</div></div>
-    ${hist}
-    <div style="margin-top:22px;border-top:1px solid #e2e6dc;padding-top:12px;color:#4e5d56;font-size:10.5px">Generated ${fmtDT(new Date().toISOString())}. Scoring is by answer position and is identical in every language the test is offered in.</div>
+    ${block('<div style="font-size:24px;font-weight:800">Training Test Report</div><div style="color:#4e5d56;font-size:12px;margin-top:4px">Hamsun Hospitality — SOP &amp; Training Portal</div>')}
+    ${block(H('Staff member') + rows([['Name', staff.name], ['Job title', staff.job_title || 'Staff'], ['Department', dept ? `${dept.name} (${dept.code})` : '—'], ['Branch', branch ? `${branch.name} (${branch.code})` : '—']]))}
+    ${block(H('Test') + rows([['Title', test.title], ['Related SOP', relSop ? `${relSop.code} — ${relSop.title}` : 'None'], ['Pass mark', `${test.pass_mark}%`], ['Certificate validity', `${test.validity_months} months`]]))}
+    ${block(H('Result (latest attempt)') + rows([['Attempt date', fmtDT(latest.attempted_at)], ['Score', `${latest.score} / ${latest.total}  (${latest.percentage}%)`], ['Outcome', latest.passed ? 'PASS' : 'FAIL'], ['Language taken', LANG[latest.language] || latest.language], ...(cert ? [['Certification', `Issued ${fmtD(cert.issued_at)} · valid until ${fmtD(cert.expires_at)}`] as [string, string]] : [])]))}
+    ${qBlocks}
+    ${block(H('Attempt history') + '<div style="display:flex;font-size:11px;color:#4e5d56;margin-bottom:5px"><div style="width:180px">Date</div><div style="width:70px">Score</div><div style="width:50px">%</div><div>Result</div></div>' + hist)}
+    ${block(`<div style="margin-top:22px;border-top:1px solid #e2e6dc;padding-top:12px;color:#4e5d56;font-size:10.5px">Generated ${fmtDT(new Date().toISOString())}. Scoring is by answer position and is identical in every language the test is offered in.</div>`)}
   `
   return el
 }
