@@ -795,6 +795,36 @@ export async function staffDirectory(
   }
 }
 
+/** A staff member as seen by the cross-department assign picker (never a code). */
+export interface OrgStaff {
+  id: string
+  name: string
+  department_id: string
+  branch_id: string
+}
+
+/**
+ * Every active staff member across all departments and branches, for a manager
+ * assigning a test beyond their own department. In Supabase mode this goes
+ * through the org-staff Edge Function (which returns names but never codes); in
+ * demo mode it reads the local roster.
+ */
+export async function orgStaffDirectory(): Promise<OrgStaff[]> {
+  if (!isSupabaseEnabled) {
+    return read
+      .staff()
+      .filter((s) => s.active)
+      .map((s) => ({ id: s.id, name: s.name, department_id: s.department_id, branch_id: s.branch_id }))
+  }
+  try {
+    const j = await callAdminFn('org-staff', {})
+    return (Array.isArray(j.staff) ? j.staff : []) as OrgStaff[]
+  } catch {
+    // If the function isn't deployed, fall back to what the manager already has.
+    return read.staff().map((s) => ({ id: s.id, name: s.name, department_id: s.department_id, branch_id: s.branch_id }))
+  }
+}
+
 /** On boot, resume a still-valid manager/admin session and hydrate the cache. */
 async function resumeSupabaseSession(): Promise<void> {
   try {
@@ -1137,19 +1167,17 @@ export function openGrant(staffId: string, testId: string): RetestGrant | null {
   return db.grants.find((g) => g.staff_id === staffId && g.test_id === testId && !g.used) ?? null
 }
 
-/** Tests this person can actually see: eligible by scope AND assigned by name. */
+/**
+ * Tests this person can actually see. Assignment by name is the authority: a
+ * published test assigned to this person shows up even if it was built in
+ * another department (a cross-department / HR-style assignment). The department
+ * and branch scope only seed the default pool a manager assigns from.
+ */
 export function assignedTestsFor(staff: Staff): Test[] {
-  const branch = read.branch(staff.branch_id)
-  if (!branch) return []
   const assignedIds = new Set(
     db.assignments.filter((a) => a.staff_id === staff.id).map((a) => a.test_id),
   )
-  return db.tests.filter(
-    (t) =>
-      t.status === 'published' &&
-      assignedIds.has(t.id) &&
-      appliesToStaff(t, staff, branch.code),
-  )
+  return db.tests.filter((t) => t.status === 'published' && assignedIds.has(t.id))
 }
 
 export function unreadCount(staffId: string): number {
@@ -1590,29 +1618,26 @@ export const api = {
 
   /* ---- assignment ---- */
 
+  /**
+   * Assign a test to a staff member. A manager may assign a test they built in
+   * their own department to ANY active staff — including people in another
+   * department or branch (an HR/compliance test everyone must pass). The
+   * assign-test function enforces "own department's test" and notifies the person.
+   */
   async assignTest(actor: Actor, testId: string, staffId: string): Promise<void> {
     if (isSupabaseEnabled) {
-      const { error } = await supabase!
-        .from('test_assignments')
-        .insert({ test_id: testId, staff_id: staffId, assigned_by: actorName(actor) })
-      // 23505 = already assigned; treat as success.
-      if (error && error.code !== '23505') throw new ApiError(error.message)
+      await callAdminFn('assign-test', { test_id: testId, staff_id: staffId, action: 'assign' })
       await hydrateFromSupabase()
       return
     }
 
     const staff = db.staff.find((s) => s.id === staffId)
     if (!staff) throw new ApiError('That staff record no longer exists.')
-    assertCanTouchStaff(actor, staff)
-
     const test = read.test(testId)
     if (!test) throw new ApiError('That test no longer exists.')
-
-    const branch = read.branch(staff.branch_id)
-    if (!branch || !appliesToStaff(test, staff, branch.code)) {
-      throw new ApiError('That test does not apply to this person’s department or branch.')
+    if (actor.kind === 'manager' && test.department_id !== actor.manager.department_id) {
+      throw new ApiError('You can only assign tests you created in your own department.')
     }
-
     if (db.assignments.some((a) => a.test_id === testId && a.staff_id === staffId)) return
 
     db.assignments.push({
@@ -1628,14 +1653,14 @@ export const api = {
 
   async unassignTest(actor: Actor, testId: string, staffId: string): Promise<void> {
     if (isSupabaseEnabled) {
-      const { error } = await supabase!.from('test_assignments').delete().eq('test_id', testId).eq('staff_id', staffId)
-      if (error) throw new ApiError(error.message)
+      await callAdminFn('assign-test', { test_id: testId, staff_id: staffId, action: 'unassign' })
       await hydrateFromSupabase()
       return
     }
-    const staff = db.staff.find((s) => s.id === staffId)
-    if (!staff) throw new ApiError('That staff record no longer exists.')
-    assertCanTouchStaff(actor, staff)
+    const test = read.test(testId)
+    if (actor.kind === 'manager' && test && test.department_id !== actor.manager.department_id) {
+      throw new ApiError('You can only unassign tests you created in your own department.')
+    }
     db.assignments = db.assignments.filter((a) => !(a.test_id === testId && a.staff_id === staffId))
     commit()
   },

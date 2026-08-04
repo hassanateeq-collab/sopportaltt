@@ -32,21 +32,43 @@ Deno.serve(async (req) => {
     const { data: branchRow } = await admin.from('branches').select('code').eq('id', staff.branch_id).maybeSingle()
     const branchCode = branchRow?.code as string | undefined
 
-    const [{ data: branches }, { data: departments }, { data: deptSops }, { data: deptTests }] = await Promise.all([
-      admin.from('branches').select('*'),
-      admin.from('departments').select('*'),
-      admin.from('sops').select('*').eq('department_id', staff.department_id),
-      admin.from('tests').select('*').eq('department_id', staff.department_id).eq('status', 'published'),
-    ])
+    const [{ data: branches }, { data: departments }, { data: deptSops }, { data: deptTests }, { data: assignments }] =
+      await Promise.all([
+        admin.from('branches').select('*'),
+        admin.from('departments').select('*'),
+        admin.from('sops').select('*').eq('department_id', staff.department_id),
+        admin.from('tests').select('*').eq('department_id', staff.department_id).eq('status', 'published'),
+        admin.from('test_assignments').select('*').eq('staff_id', staff.id),
+      ])
 
-    const sops = (deptSops ?? []).filter((s) => scopeIncludes(s.branch_scope, branchCode))
-    const tests = (deptTests ?? []).filter((t) => scopeIncludes(t.branch_scope, branchCode))
+    let sops = (deptSops ?? []).filter((s) => scopeIncludes(s.branch_scope, branchCode))
+
+    // The tests this person can see: their department's published tests in
+    // their branch scope, PLUS any test explicitly assigned to them — even one
+    // built in another department (a cross-department assignment). Assignment is
+    // the authority; the department/branch scope only seeds the default pool.
+    const byId = new Map<string, Record<string, unknown>>()
+    for (const t of (deptTests ?? []).filter((t) => scopeIncludes(t.branch_scope, branchCode))) byId.set(t.id as string, t)
+    const missingAssigned = [...new Set((assignments ?? []).map((a) => a.test_id as string))].filter((id) => !byId.has(id))
+    if (missingAssigned.length) {
+      const { data: extraTests } = await admin.from('tests').select('*').in('id', missingAssigned).eq('status', 'published')
+      for (const t of extraTests ?? []) byId.set(t.id as string, t)
+    }
+    const tests = [...byId.values()]
     const testIds = tests.map((t) => t.id as string)
+
+    // Related SOPs of these tests, so "Review SOP" works even for a test assigned
+    // from another department (these don't enter the staff's own sign-off list).
+    const haveSop = new Set(sops.map((s) => s.id as string))
+    const relSopIds = [...new Set(tests.map((t) => t.related_sop_id as string | null).filter((id): id is string => !!id && !haveSop.has(id)))]
+    if (relSopIds.length) {
+      const { data: extraSops } = await admin.from('sops').select('*').in('id', relSopIds)
+      sops = [...sops, ...(extraSops ?? [])]
+    }
 
     const [
       { data: questions },
       { data: acknowledgments },
-      { data: assignments },
       { data: attempts },
       { data: certifications },
       { data: grants },
@@ -56,7 +78,6 @@ Deno.serve(async (req) => {
         ? admin.from('questions').select('*').in('test_id', testIds)
         : Promise.resolve({ data: [] as unknown[] }),
       admin.from('acknowledgments').select('*').eq('staff_id', staff.id),
-      admin.from('test_assignments').select('*').eq('staff_id', staff.id),
       admin.from('attempts').select('*').eq('staff_id', staff.id),
       admin.from('certifications').select('*').eq('staff_id', staff.id),
       admin.from('retest_grants').select('*').eq('staff_id', staff.id),

@@ -299,6 +299,31 @@ After they deploy:
   a temporary password is shown once unless you set one), reassign their
   department/branch, disable/enable, or delete (removes the login).
 
+### Cross-department test assignment
+
+A manager builds a test from their own department's SOP but can assign it to
+**any staff member in any department or branch** (e.g. an HR/compliance test
+everyone must pass). Assignment is the authority — an assigned person sees and
+takes the test even though it's another department's test.
+
+1. **Run migration `0004`** in the SQL Editor
+   ([`migrations/0004_cross_department_assign.sql`](./migrations/0004_cross_department_assign.sql)).
+   It widens a manager's *read* access just enough to see the results of people
+   they assigned from other departments (assignment/attempt/certificate rows for
+   the manager's own tests). Staff-row reads are **not** widened, so employee
+   codes stay confined to a person's own department manager.
+2. **Deploy the functions** (re-deploy `staff-data` so assigned cross-department
+   tests reach the staff portal):
+   ```bash
+   supabase functions deploy org-staff       # names for the cross-dept picker
+   supabase functions deploy assign-test      # assign/unassign any staff + notify
+   supabase functions deploy staff-data       # include assigned cross-dept tests
+   ```
+
+On **Tests → a test → Assign staff by name**, the manager now searches all staff
+(name / department / branch) and assigns anyone. The manager can only assign
+tests **they built in their own department**; an admin can assign any test.
+
 > **On employee codes.** These are simple sign-in PINs, so the plaintext is kept
 > and shown to authorised people who need to hand them out. Row-level security
 > makes the code readable only by an admin, by the manager of that person's

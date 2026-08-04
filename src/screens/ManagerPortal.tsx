@@ -13,11 +13,12 @@ import {
   attachSopVideo,
   removeSopVideo,
   downloadTestReport,
+  orgStaffDirectory,
   listDriveFolders,
   createDriveFolder,
   ApiError,
 } from '../data/store'
-import type { Actor, DraftQuestion } from '../data/store'
+import type { Actor, DraftQuestion, OrgStaff } from '../data/store'
 import type { Branch, BranchScope, Department, Difficulty, Language, Manager, Sop, Staff, Test } from '../types'
 import { LANGUAGE_NAMES } from '../types'
 import { scopeIncludes } from '../lib/scope'
@@ -360,17 +361,23 @@ function SopVideoControl({ sop }: { sop: Sop }) {
 /* ------------------------------------------------------------- Test board -- */
 
 function TestBoard({ dept, branch, actor }: { dept: Department; branch: Branch; actor: Actor }) {
-  const people = staffOf(dept.id, branch.id)
+  // Every active staff member across all departments/branches — a test can be
+  // assigned beyond its own department, so the board and picker work over the
+  // whole org, not just this department's people.
+  const [everyone, setEveryone] = useState<OrgStaff[]>([])
+  useEffect(() => {
+    let active = true
+    orgStaffDirectory().then((list) => { if (active) setEveryone(list) })
+    return () => { active = false }
+  }, [])
   const tests = testsOf(dept.id, branch.code)
   return (
     <details className="board" open>
-      <summary><TestSectionIcon />Tests &amp; scores — {dept.name} · {branch.code}<span className="hint">Assign by name · latest score shown</span></summary>
+      <summary><TestSectionIcon />Tests &amp; scores — {dept.name} · {branch.code}<span className="hint">Assign anyone · latest score shown</span></summary>
       {tests.length === 0 ? (
         <div className="empty-row">No tests for this department at this branch — create one below.</div>
       ) : (
-        tests.map((t) => (
-          <TestRow key={t.id} test={t} dept={dept} branch={branch} people={people} actor={actor} />
-        ))
+        tests.map((t) => <TestRow key={t.id} test={t} people={everyone} actor={actor} />)
       )}
     </details>
   )
@@ -378,14 +385,11 @@ function TestBoard({ dept, branch, actor }: { dept: Department; branch: Branch; 
 
 function TestRow({
   test,
-  branch,
   people,
   actor,
 }: {
   test: Test
-  dept: Department
-  branch: Branch
-  people: Staff[]
+  people: OrgStaff[]
   actor: Actor
 }) {
   const assignedIds = new Set(read.assignments().filter((a) => a.test_id === test.id).map((a) => a.staff_id))
@@ -460,7 +464,7 @@ function TestRow({
           </div>
         </details>
       ) : (
-        <AssignPanel test={test} people={people} branch={branch} actor={actor} assignedIds={assignedIds} />
+        <AssignPanel test={test} people={people} actor={actor} assignedIds={assignedIds} />
       )}
 
       {attemptedPeople.length > 0 && (
@@ -540,37 +544,61 @@ function AssignPanel({
   assignedIds,
 }: {
   test: Test
-  people: Staff[]
-  branch: Branch
+  people: OrgStaff[]
   actor: Actor
   assignedIds: Set<string>
 }) {
+  const [q, setQ] = useState('')
+  const query = q.trim().toLowerCase()
+  const labelled = people.map((p) => ({
+    ...p,
+    dept: read.department(p.department_id)?.name ?? '',
+    branchCode: read.branch(p.branch_id)?.code ?? '',
+  }))
+  const shown = labelled
+    .filter((p) => !query || `${p.name} ${p.dept} ${p.branchCode}`.toLowerCase().includes(query))
+    .sort((a, b) => Number(assignedIds.has(b.id)) - Number(assignedIds.has(a.id)) || a.name.localeCompare(b.name))
+    .slice(0, 200)
+
   return (
     <details className="inline">
-      <summary>Assign staff by name</summary>
-      <div className="asgn">
-        {people.length === 0 ? (
-          <span className="nm">No staff in this department here</span>
-        ) : (
-          people.map((p) => {
-            const on = assignedIds.has(p.id)
-            return (
-              <button
-                key={p.id}
-                className={`nm ${on ? 'ok' : ''}`}
-                style={{ cursor: 'pointer' }}
-                onClick={() =>
-                  run(
-                    () => (on ? api.unassignTest(actor, test.id, p.id) : api.assignTest(actor, test.id, p.id)),
-                    on ? `${p.name} unassigned` : `${p.name} assigned`,
-                  )
-                }
-              >
-                {on ? '✓ ' : '+ '}{p.name}
-              </button>
-            )
-          })
-        )}
+      <summary>Assign staff by name<span className="hint">{assignedIds.size} assigned</span></summary>
+      <div style={{ marginTop: 8 }}>
+        <p className="demo-hint" style={{ marginTop: 0 }}>
+          Assign this test to anyone — any department, any branch. Search by name, department or branch.
+        </p>
+        <input
+          type="text"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search staff…"
+          style={{ width: '100%', marginBottom: 8, padding: '8px 11px', border: '1px solid var(--line-strong)', borderRadius: 'var(--r-sm)', fontSize: 13 }}
+        />
+        <div className="asgn" style={{ maxHeight: 280, overflowY: 'auto' }}>
+          {shown.length === 0 ? (
+            <span className="nm">No matching staff</span>
+          ) : (
+            shown.map((p) => {
+              const on = assignedIds.has(p.id)
+              return (
+                <button
+                  key={p.id}
+                  className={`nm ${on ? 'ok' : ''}`}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() =>
+                    run(
+                      () => (on ? api.unassignTest(actor, test.id, p.id) : api.assignTest(actor, test.id, p.id)),
+                      on ? `${p.name} unassigned` : `${p.name} assigned`,
+                    )
+                  }
+                >
+                  {on ? '✓ ' : '+ '}{p.name}
+                  <span style={{ opacity: 0.6, fontSize: 11 }}> · {p.dept} · {p.branchCode}</span>
+                </button>
+              )
+            })
+          )}
+        </div>
       </div>
     </details>
   )
