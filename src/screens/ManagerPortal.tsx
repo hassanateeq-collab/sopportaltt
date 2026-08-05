@@ -555,14 +555,26 @@ function AssignPanel({
     dept: read.department(p.department_id)?.name ?? '',
     branchCode: read.branch(p.branch_id)?.code ?? '',
   }))
-  const shown = labelled
-    .filter((p) => !query || `${p.name} ${p.dept} ${p.branchCode}`.toLowerCase().includes(query))
-    .sort((a, b) => Number(assignedIds.has(b.id)) - Number(assignedIds.has(a.id)) || a.name.localeCompare(b.name))
-    .slice(0, 200)
+  const shown = labelled.filter((p) => !query || `${p.name} ${p.dept} ${p.branchCode}`.toLowerCase().includes(query))
+
+  // Group the picker by branch, then department, so people are easy to find.
+  const groups = new Map<string, { branchCode: string; dept: string; items: typeof shown }>()
+  for (const p of shown) {
+    const key = `${p.branchCode}||${p.dept}`
+    const g = groups.get(key) ?? { branchCode: p.branchCode, dept: p.dept, items: [] as typeof shown }
+    g.items.push(p)
+    groups.set(key, g)
+  }
+  const groupList = [...groups.values()].sort(
+    (a, b) => a.branchCode.localeCompare(b.branchCode) || a.dept.localeCompare(b.dept),
+  )
+  groupList.forEach((g) => g.items.sort((a, b) => a.name.localeCompare(b.name)))
 
   return (
     <details className="inline">
-      <summary>Assign staff by name<span className="hint">{assignedIds.size} assigned</span></summary>
+      <summary>
+        Assign staff by name <span style={{ color: 'var(--ink-faint)', fontWeight: 500 }}>· {assignedIds.size} assigned</span>
+      </summary>
       <div style={{ marginTop: 8 }}>
         <p className="demo-hint" style={{ marginTop: 0 }}>
           Assign this test to anyone — any department, any branch. Search by name, department or branch.
@@ -572,31 +584,39 @@ function AssignPanel({
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search staff…"
-          style={{ width: '100%', marginBottom: 8, padding: '8px 11px', border: '1px solid var(--line-strong)', borderRadius: 'var(--r-sm)', fontSize: 13 }}
+          style={{ width: '100%', marginBottom: 6, padding: '8px 11px', border: '1px solid var(--line-strong)', borderRadius: 'var(--r-sm)', fontSize: 13 }}
         />
-        <div className="asgn" style={{ maxHeight: 280, overflowY: 'auto' }}>
-          {shown.length === 0 ? (
-            <span className="nm">No matching staff</span>
+        <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+          {groupList.length === 0 ? (
+            <div className="asgn"><span className="nm">No matching staff</span></div>
           ) : (
-            shown.map((p) => {
-              const on = assignedIds.has(p.id)
-              return (
-                <button
-                  key={p.id}
-                  className={`nm ${on ? 'ok' : ''}`}
-                  style={{ cursor: 'pointer' }}
-                  onClick={() =>
-                    run(
-                      () => (on ? api.unassignTest(actor, test.id, p.id) : api.assignTest(actor, test.id, p.id)),
-                      on ? `${p.name} unassigned` : `${p.name} assigned`,
+            groupList.map((g) => (
+              <div key={`${g.branchCode}-${g.dept}`} style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--brass-deep)', fontWeight: 700, margin: '8px 0 5px' }}>
+                  {g.branchCode} · {g.dept}
+                </div>
+                <div className="asgn" style={{ marginTop: 0 }}>
+                  {g.items.map((p) => {
+                    const on = assignedIds.has(p.id)
+                    return (
+                      <button
+                        key={p.id}
+                        className={`nm ${on ? 'ok' : ''}`}
+                        style={{ cursor: 'pointer' }}
+                        onClick={() =>
+                          run(
+                            () => (on ? api.unassignTest(actor, test.id, p.id) : api.assignTest(actor, test.id, p.id)),
+                            on ? `${p.name} unassigned` : `${p.name} assigned`,
+                          )
+                        }
+                      >
+                        {on ? '✓ ' : '+ '}{p.name}
+                      </button>
                     )
-                  }
-                >
-                  {on ? '✓ ' : '+ '}{p.name}
-                  <span style={{ opacity: 0.6, fontSize: 11 }}> · {p.dept} · {p.branchCode}</span>
-                </button>
-              )
-            })
+                  })}
+                </div>
+              </div>
+            ))
           )}
         </div>
       </div>
