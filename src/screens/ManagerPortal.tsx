@@ -51,12 +51,15 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
   const branches = read.branches()
   const departments = read.departments()
 
-  const [aBranch, setABranch] = useState(branches[0]?.code ?? '')
+  // A manager runs her whole department across every branch, so she gets a
+  // branch selector too (department locked to hers); an admin picks both.
+  const managerHomeBranchCode = actor.kind === 'manager' ? read.branch(actor.manager.branch_id)?.code ?? '' : ''
+  const [aBranch, setABranch] = useState(isAdmin ? branches[0]?.code ?? '' : managerHomeBranchCode || branches[0]?.code || '')
   const [aDept, setADept] = useState(departments[0]?.id ?? '')
   const [viewer, setViewer] = useState<{ sop: Sop; kind: 'doc' | 'video' } | null>(null)
   const [page, setPage] = useState<Page>('home')
 
-  const branch = isAdmin ? read.branchByCode(aBranch) : read.branch(actor.manager.branch_id)
+  const branch = read.branchByCode(aBranch)
   const dept = isAdmin ? read.department(aDept) : read.department(actor.manager.department_id)
 
   if (!branch || !dept) return <div className="allclear">No branches or departments yet.</div>
@@ -101,14 +104,26 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
           </div>
         </div>
       ) : (
-        <div className="crumbs">
-          <span className="here">{actor.manager.name} — {dept.name} Manager</span>
-          <span className="sep">·</span>
-          <span className="here mono">{branch.code}</span>
-          <span className="who">
-            <button onClick={onLogout} style={{ color: 'var(--pine)', fontWeight: 600 }}>Sign out</button>
-          </span>
-        </div>
+        <>
+          <div className="crumbs">
+            <span className="here">{actor.manager.name} — {dept.name} Manager</span>
+            <span className="sep">·</span>
+            <span className="here">all branches</span>
+            <span className="who">
+              <button onClick={onLogout} style={{ color: 'var(--pine)', fontWeight: 600 }}>Sign out</button>
+            </span>
+          </div>
+          <div className="filters">
+            <div className="field">
+              <label htmlFor="m-branch">Viewing branch</label>
+              <select id="m-branch" value={aBranch} onChange={(e) => setABranch(e.target.value)}>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.code}>{b.code} — {b.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </>
       )}
 
       {page === 'home' ? (
@@ -131,14 +146,14 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
           {page === 'sops' && (
             <>
               <SopBoard dept={dept} branch={branch} actor={actor} onOpen={(sop, kind) => setViewer({ sop, kind })} />
-              <AddSopForm dept={dept} branch={branch} actor={actor} lockBranch={!isAdmin} />
+              <AddSopForm dept={dept} branch={branch} actor={actor} lockBranch={false} />
             </>
           )}
 
           {page === 'tests' && (
             <>
               <TestBoard dept={dept} branch={branch} actor={actor} />
-              <CreateTestForm dept={dept} branch={branch} actor={actor} lockBranch={!isAdmin} />
+              <CreateTestForm dept={dept} branch={branch} actor={actor} lockBranch={false} />
             </>
           )}
 

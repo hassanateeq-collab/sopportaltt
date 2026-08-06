@@ -75,16 +75,11 @@ Deno.serve(async (req) => {
       return json({ error: 'Drive is not configured — set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REFRESH_TOKEN.' }, 500)
     }
 
-    // ---- authorisation: managers are pinned to their own department + branch ----
+    // ---- authorisation: a manager runs her whole department across all
+    // branches, so she may publish to any branch scope (a single branch or all
+    // branches) — only the department has to be hers. ----
     if (!isAdmin) {
       if (departmentId !== mgrRow!.department_id) return json({ error: 'You can only publish for your own department.' }, 403)
-      const { data: br } = await admin.from('branches').select('code').eq('id', mgrRow!.branch_id).single()
-      const ok =
-        branchScope.kind === 'LIST' &&
-        Array.isArray(branchScope.branch_codes) &&
-        branchScope.branch_codes.length === 1 &&
-        branchScope.branch_codes[0] === br?.code
-      if (!ok) return json({ error: 'You can only publish to your own branch.' }, 403)
     }
 
     // ---- document-control code ----

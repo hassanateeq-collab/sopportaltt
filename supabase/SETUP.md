@@ -299,6 +299,37 @@ After they deploy:
   a temporary password is shown once unless you set one), reassign their
   department/branch, disable/enable, or delete (removes the login).
 
+### Managers run their whole department (all branches)
+
+A manager now owns their department across **every branch**, not one branch. They
+get a "Viewing branch" selector, can publish an SOP or test to a single branch OR
+to all branches, and see/assign staff across all branches of their department.
+Department is still the wall — a Housekeeping manager never sees Kitchen, and
+employee codes stay confined to the department.
+
+1. **Run migration `0005`**
+   ([`migrations/0005_manager_all_branches.sql`](./migrations/0005_manager_all_branches.sql))
+   in the SQL Editor — it drops the single-branch restriction from the manager
+   policies.
+2. **Re-deploy** the function that enforced single-branch publishing:
+   ```bash
+   supabase functions deploy upload-sop
+   ```
+
+Existing managers keep their branch as a default "home" view; nothing else to
+change.
+
+### Test reports filed into a per-department "Tests" folder
+
+Test-result PDFs are never stored in Supabase — they're generated in the browser
+and filed to Google Drive. They now land in a **`Tests`** sub-folder of each
+department's Drive folder (created automatically), kept separate from the SOP
+documents. Re-deploy:
+
+```bash
+supabase functions deploy test-report
+```
+
 ### Cross-department test assignment
 
 A manager builds a test from their own department's SOP but can assign it to

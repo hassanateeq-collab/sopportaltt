@@ -99,6 +99,23 @@ export async function getFileParent(token: string, fileId: string): Promise<stri
   return Array.isArray(json.parents) && json.parents.length ? (json.parents[0] as string) : null
 }
 
+/** Find a sub-folder by name inside a parent, creating it if it doesn't exist. */
+export async function findOrCreateFolder(token: string, parentId: string, name: string): Promise<string> {
+  const q = encodeURIComponent(
+    `'${parentId}' in parents and name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+  )
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (res.ok) {
+    const json = await res.json()
+    if (json.files?.[0]?.id) return json.files[0].id as string
+  }
+  const created = await createFolder(token, parentId, name)
+  return created.id
+}
+
 /** Download a file's bytes from Drive. */
 export async function downloadFromDrive(token: string, fileId: string): Promise<ArrayBuffer> {
   const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`, {

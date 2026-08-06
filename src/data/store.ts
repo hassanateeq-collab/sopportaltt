@@ -1288,25 +1288,20 @@ function assertLocalWrite(): void {
 function assertCanTouchStaff(actor: Actor, staff: Staff): void {
   assertLocalWrite()
   if (actor.kind === 'admin') return
-  if (staff.department_id !== actor.manager.department_id || staff.branch_id !== actor.manager.branch_id) {
-    throw new ApiError('You can only act on staff in your own department at your own branch.')
+  // A manager runs her whole department across all branches.
+  if (staff.department_id !== actor.manager.department_id) {
+    throw new ApiError('You can only act on staff in your own department.')
   }
 }
 
 function assertCanTouchScope(actor: Actor, departmentId: string, scope: BranchScope): void {
   assertLocalWrite()
+  void scope
   if (actor.kind === 'admin') return
-  const branch = read.branch(actor.manager.branch_id)
-  if (!branch) throw new ApiError('Your branch record is missing.')
+  // A manager runs her whole department across all branches, so she may publish
+  // to a single branch or to all branches — only the department must be hers.
   if (departmentId !== actor.manager.department_id) {
     throw new ApiError('You can only publish for your own department.')
-  }
-  // Only an admin publishes group-wide. A manager is confined to her own branch.
-  if (scope.kind === 'ALL') {
-    throw new ApiError('Only an admin can publish to all branches.')
-  }
-  if (scope.branch_codes.length !== 1 || scope.branch_codes[0] !== branch.code) {
-    throw new ApiError('You can only publish to your own branch.')
   }
 }
 
