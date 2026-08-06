@@ -1589,10 +1589,14 @@ export const api = {
 
     const staff = db.staff.find((s) => s.id === staffId)
     if (!staff) throw new ApiError('That staff record no longer exists.')
-    assertCanTouchStaff(actor, staff)
 
     const test = read.test(testId)
     if (!test) throw new ApiError('That test no longer exists.')
+    // A manager may approve a retest for any staff she assigned the test to, as
+    // long as it is a test she owns — mirrors assign-test and grant-retest.
+    if (actor.kind === 'manager' && test.department_id !== actor.manager.department_id) {
+      throw new ApiError('You can only approve retests for tests you created in your own department.')
+    }
 
     const already = openGrant(staffId, testId)
     if (already) return already

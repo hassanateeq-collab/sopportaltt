@@ -5,7 +5,8 @@
  * writes the staff notification in the same step. RLS deliberately exposes no
  * INSERT on retest_grants to managers/admins so this stays the single, audited
  * path (grant + notification, atomically, as the service_role). A manager may
- * only approve within her own department + branch.
+ * approve a retest for any staff member — any department, any branch — as long
+ * as it is a test she owns (built in her own department), mirroring assign-test.
  */
 
 import { serviceClient, callerRole, bearer } from '../_shared/auth.ts'
@@ -35,13 +36,11 @@ Deno.serve(async (req) => {
     const { data: test } = await admin.from('tests').select('id, title, department_id').eq('id', testId).maybeSingle()
     if (!test) return json({ error: 'That test no longer exists.' }, 404)
 
-    if (role.kind === 'manager') {
-      if (staff.department_id !== role.department_id || staff.branch_id !== role.branch_id) {
-        return json({ error: 'You can only act on staff in your own department at your own branch.' }, 403)
-      }
-      if (test.department_id !== role.department_id) {
-        return json({ error: 'You can only approve retests for your own department’s tests.' }, 403)
-      }
+    // A manager owns the test she built, so she may approve its retests for
+    // anyone she assigned it to — across departments and branches. An admin may
+    // approve any retest.
+    if (role.kind === 'manager' && test.department_id !== role.department_id) {
+      return json({ error: 'You can only approve retests for tests you created in your own department.' }, 403)
     }
 
     // Idempotent: an existing open grant is returned as-is.
