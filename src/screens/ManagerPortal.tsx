@@ -7,6 +7,7 @@ import {
   hasSigned,
   acknowledgmentFor,
   attemptsFor,
+  assignedTestsFor,
   latestCertification,
   openGrant,
   uploadSopViaFunction,
@@ -79,6 +80,19 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
     )
   }
 
+  const branchSelect = (
+    <div className="filters">
+      <div className="field">
+        <label htmlFor="m-branch">Viewing branch</label>
+        <select id="m-branch" value={aBranch} onChange={(e) => setABranch(e.target.value)}>
+          {branches.map((b) => (
+            <option key={b.id} value={b.code}>{b.code} — {b.name}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  )
+
   return (
     <>
       {isAdmin ? (
@@ -104,43 +118,40 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
           </div>
         </div>
       ) : (
-        <>
-          <div className="crumbs">
-            <span className="here">{actor.manager.name} — {dept.name} Manager</span>
-            <span className="sep">·</span>
-            <span className="here">all branches</span>
-            <span className="who">
-              <button onClick={onLogout} style={{ color: 'var(--pine)', fontWeight: 600 }}>Sign out</button>
-            </span>
-          </div>
-          <div className="filters">
-            <div className="field">
-              <label htmlFor="m-branch">Viewing branch</label>
-              <select id="m-branch" value={aBranch} onChange={(e) => setABranch(e.target.value)}>
-                {branches.map((b) => (
-                  <option key={b.id} value={b.code}>{b.code} — {b.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </>
+        <div className="crumbs">
+          <span className="here">{actor.manager.name} — {dept.name} Manager</span>
+          <span className="sep">·</span>
+          <span className="here">all branches</span>
+          <span className="who">
+            <button onClick={onLogout} style={{ color: 'var(--pine)', fontWeight: 600 }}>Sign out</button>
+          </span>
+        </div>
       )}
 
       {page === 'home' ? (
-        <div className="mtiles">
-          {tiles.map((t) => (
-            <button key={t.key} className="mtile" onClick={() => setPage(t.key)}>
-              <span className="mtile-ico">{t.icon}</span>
-              <span className="mtile-body">
-                <span className="mtile-title">{t.title}</span>
-                <span className="mtile-sub">{t.sub}</span>
-              </span>
-              <span className="mtile-go" aria-hidden>›</span>
-            </button>
-          ))}
-        </div>
+        <>
+          <div className="mtiles">
+            {tiles.map((t) => (
+              <button key={t.key} className="mtile" onClick={() => setPage(t.key)}>
+                <span className="mtile-ico">{t.icon}</span>
+                <span className="mtile-body">
+                  <span className="mtile-title">{t.title}</span>
+                  <span className="mtile-sub">{t.sub}</span>
+                </span>
+                <span className="mtile-go" aria-hidden>›</span>
+              </button>
+            ))}
+          </div>
+          {!isAdmin && (
+            <>
+              {branchSelect}
+              <EmployeeResults dept={dept} branch={branch} />
+            </>
+          )}
+        </>
       ) : (
         <>
+          {!isAdmin && branchSelect}
           <button className="btn backbtn" onClick={() => setPage('home')}>← Menu</button>
 
           {page === 'sops' && (
@@ -655,6 +666,88 @@ function AssignPanel({
         </div>
       </div>
     </details>
+  )
+}
+
+/* --------------------------------------------------- employees & results -- */
+
+/**
+ * The manager's home board: every employee in her department at the selected
+ * branch — each shown with their sign-in code and an expandable panel of every
+ * test assigned to them (latest score, pass/fail, certificate status) plus a
+ * per-person PDF report. This is what a manager lands on, below the tiles.
+ */
+function EmployeeResults({ dept, branch }: { dept: Department; branch: Branch }) {
+  const people = read
+    .staff()
+    .filter((s) => s.department_id === dept.id && s.branch_id === branch.id)
+    .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name))
+
+  return (
+    <details className="board" open>
+      <summary>
+        <StaffSectionIcon />Employees &amp; results — {dept.name} · {branch.code}
+        <span className="hint">{people.length} on file · codes &amp; test scores</span>
+      </summary>
+      {people.length === 0 ? (
+        <div className="empty-row">No staff at this branch yet — an admin adds them.</div>
+      ) : (
+        people.map((emp) => <EmployeeCard key={emp.id} emp={emp} />)
+      )}
+    </details>
+  )
+}
+
+function EmployeeCard({ emp }: { emp: Staff }) {
+  const tests = assignedTestsFor(emp).sort((a, b) => a.title.localeCompare(b.title))
+
+  return (
+    <div className="brow">
+      <div className="brow-top">
+        <span className="brow-title">
+          {emp.name} <span className="ver">{emp.job_title}</span>
+          {!emp.active && <span className="vidchip" style={{ marginLeft: 6 }}>INACTIVE</span>}
+        </span>
+        <span className="mono" style={{ fontWeight: 700 }} title="Employee code">
+          {emp.employee_code ?? '— no code yet'}
+        </span>
+      </div>
+
+      {tests.length === 0 ? (
+        <div className="names"><span className="nm">No tests assigned yet</span></div>
+      ) : (
+        <details className="inline">
+          <summary>Test results ({tests.length})</summary>
+          <div style={{ marginTop: 8 }}>
+            {tests.map((t) => {
+              const last = attemptsFor(emp.id, t.id)[0]
+              const cert = latestCertification(emp.id, t.id)
+              const sc = last ? `${last.score}/${last.total}` : ''
+              let cls = ''
+              let status = 'not attempted'
+              if (last) {
+                if (cert) {
+                  const s = certStatus(cert)
+                  if (s === 'valid') { cls = 'ok'; status = `✓ ${sc} · certified until ${fmtD(cert.expires_at)}` }
+                  else if (s === 'expiring_soon') { cls = 'warn'; status = `⚠ ${sc} · ${daysUntil(cert.expires_at)} d left` }
+                  else { cls = 'bad'; status = `✗ ${sc} · certificate expired` }
+                } else {
+                  cls = last.passed ? 'ok' : 'bad'
+                  status = `${sc} · ${last.passed ? 'PASS' : 'FAIL'}`
+                }
+              }
+              return (
+                <div key={t.id} className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
+                  <span style={{ flex: 1, minWidth: 150, fontSize: 13 }}>{t.title}</span>
+                  <span className={`nm ${cls}`}>{status}</span>
+                  {last && <ReportBtn testId={t.id} staffId={emp.id} deptId={t.department_id} name={emp.name} />}
+                </div>
+              )
+            })}
+          </div>
+        </details>
+      )}
+    </div>
   )
 }
 
