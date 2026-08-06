@@ -571,6 +571,7 @@ function AssignPanel({
     branchCode: read.branch(p.branch_id)?.code ?? '',
   }))
   const shown = labelled.filter((p) => !query || `${p.name} ${p.dept} ${p.branchCode}`.toLowerCase().includes(query))
+  const unassignedShown = shown.filter((p) => !assignedIds.has(p.id))
 
   // Group the picker by branch, then department, so people are easy to find.
   const groups = new Map<string, { branchCode: string; dept: string; items: typeof shown }>()
@@ -601,6 +602,24 @@ function AssignPanel({
           placeholder="Search staff…"
           style={{ width: '100%', marginBottom: 6, padding: '8px 11px', border: '1px solid var(--line-strong)', borderRadius: 'var(--r-sm)', fontSize: 13 }}
         />
+        {unassignedShown.length > 0 && (
+          <div style={{ marginBottom: 8 }}>
+            <button
+              className="btn sm primary"
+              onClick={async () => {
+                if (!confirm(`Assign "${test.title}" to all ${unassignedShown.length} staff ${query ? 'shown' : 'in every branch'}?`)) return
+                try {
+                  const n = await api.assignMany(actor, test.id, unassignedShown.map((p) => p.id))
+                  toast(n ? `Assigned to ${n} staff` : 'Everyone shown was already assigned')
+                } catch (e) {
+                  toast(e instanceof ApiError ? e.message : 'Could not assign.')
+                }
+              }}
+            >
+              ＋ Assign all {query ? 'shown' : ''} ({unassignedShown.length})
+            </button>
+          </div>
+        )}
         <div style={{ maxHeight: 320, overflowY: 'auto' }}>
           {groupList.length === 0 ? (
             <div className="asgn"><span className="nm">No matching staff</span></div>
@@ -676,7 +695,7 @@ function AddSopForm({
   const [folderId, setFolderId] = useState(defaultFolder)
   const [pdf, setPdf] = useState<Upload | null>(null)
   const [video, setVideo] = useState<Upload | null>(null)
-  const [allBranches, setAllBranches] = useState(false)
+  const [allBranches, setAllBranches] = useState(true)
   const [busy, setBusy] = useState(false)
   const [newFolder, setNewFolder] = useState('')
   const [showNewFolder, setShowNewFolder] = useState(false)
@@ -876,7 +895,7 @@ function CreateTestForm({
   const [pass, setPass] = useState('80')
   const [valid, setValid] = useState('12')
   const [relSop, setRelSop] = useState('')
-  const [allBranches, setAllBranches] = useState(false)
+  const [allBranches, setAllBranches] = useState(true)
   const [langs, setLangs] = useState<{ ur: boolean; ps: boolean }>({ ur: false, ps: false })
   const [pubBusy, setPubBusy] = useState(false)
 

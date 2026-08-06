@@ -22,9 +22,14 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}))
     const testId = String(body.test_id ?? '')
-    const staffId = String(body.staff_id ?? '')
     const action = body.action === 'unassign' ? 'unassign' : 'assign'
-    if (!testId || !staffId) return json({ error: 'Missing test or staff.' }, 400)
+    // Accept a single staff_id or a bulk staff_ids array (assign everyone).
+    const staffIds = [
+      ...new Set(
+        (Array.isArray(body.staff_ids) ? body.staff_ids.map(String) : []).concat(body.staff_id ? [String(body.staff_id)] : []),
+      ),
+    ].filter(Boolean)
+    if (!testId || staffIds.length === 0) return json({ error: 'Missing test or staff.' }, 400)
 
     const { data: test } = await admin.from('tests').select('id, title, department_id').eq('id', testId).maybeSingle()
     if (!test) return json({ error: 'That test no longer exists.' }, 404)
@@ -32,28 +37,36 @@ Deno.serve(async (req) => {
       return json({ error: 'You can only assign tests you created in your own department.' }, 403)
     }
 
-    const { data: staff } = await admin.from('staff').select('id, active').eq('id', staffId).maybeSingle()
-    if (!staff || !staff.active) return json({ error: 'That staff member is not active.' }, 400)
-
     if (action === 'unassign') {
-      const { error } = await admin.from('test_assignments').delete().eq('test_id', testId).eq('staff_id', staffId)
+      const { error } = await admin.from('test_assignments').delete().eq('test_id', testId).in('staff_id', staffIds)
       if (error) return json({ error: error.message }, 500)
       return json({ ok: true })
     }
 
+    // Assign only active staff; ignore anyone already assigned.
+    const { data: active } = await admin.from('staff').select('id').in('id', staffIds).eq('active', true)
+    const ids = (active ?? []).map((s) => s.id as string)
+    if (ids.length === 0) return json({ ok: true, assigned: 0 })
+
+    const { data: existing } = await admin.from('test_assignments').select('staff_id').eq('test_id', testId).in('staff_id', ids)
+    const already = new Set((existing ?? []).map((r) => r.staff_id as string))
+    const fresh = ids.filter((id) => !already.has(id))
+
     const { error } = await admin
       .from('test_assignments')
-      .insert({ test_id: testId, staff_id: staffId, assigned_by: role.name })
-    // 23505 = already assigned; treat as success (idempotent).
-    if (error && error.code !== '23505') return json({ error: error.message }, 500)
-    if (!error) {
-      await admin.from('notifications').insert({
-        staff_id: staffId,
-        kind: 'test_assigned',
-        text: `${test.title} has been assigned to you by ${role.name}.`,
+      .upsert(ids.map((sid) => ({ test_id: testId, staff_id: sid, assigned_by: role.name })), {
+        onConflict: 'test_id,staff_id',
+        ignoreDuplicates: true,
       })
+    if (error) return json({ error: error.message }, 500)
+
+    // Notify only the newly assigned (don't re-ping people already assigned).
+    if (fresh.length) {
+      await admin.from('notifications').insert(
+        fresh.map((sid) => ({ staff_id: sid, kind: 'test_assigned', text: `${test.title} has been assigned to you by ${role.name}.` })),
+      )
     }
-    return json({ ok: true })
+    return json({ ok: true, assigned: fresh.length })
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : 'Assignment failed.' }, 500)
   }

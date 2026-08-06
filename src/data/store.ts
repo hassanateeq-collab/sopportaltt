@@ -1660,6 +1660,35 @@ export const api = {
     commit()
   },
 
+  /** Assign a test to many staff at once (e.g. everyone, for an all-branch test). */
+  async assignMany(actor: Actor, testId: string, staffIds: string[]): Promise<number> {
+    const ids = [...new Set(staffIds)].filter(Boolean)
+    if (ids.length === 0) return 0
+
+    if (isSupabaseEnabled) {
+      const j = await callAdminFn('assign-test', { test_id: testId, staff_ids: ids, action: 'assign' })
+      await hydrateFromSupabase()
+      return Number(j.assigned) || 0
+    }
+
+    const test = read.test(testId)
+    if (!test) throw new ApiError('That test no longer exists.')
+    if (actor.kind === 'manager' && test.department_id !== actor.manager.department_id) {
+      throw new ApiError('You can only assign tests you created in your own department.')
+    }
+    let added = 0
+    for (const staffId of ids) {
+      const staff = db.staff.find((s) => s.id === staffId)
+      if (!staff || !staff.active) continue
+      if (db.assignments.some((a) => a.test_id === testId && a.staff_id === staffId)) continue
+      db.assignments.push({ id: id('asg'), test_id: testId, staff_id: staffId, assigned_by: actorName(actor), assigned_at: nowIso() })
+      notify(staffId, 'test_assigned', `${test.title} has been assigned to you by ${actorName(actor)}.`)
+      added++
+    }
+    commit()
+    return added
+  },
+
   /* ---- SOP publishing ---- */
 
   async publishSop(
