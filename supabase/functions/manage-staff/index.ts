@@ -66,7 +66,7 @@ Deno.serve(async (req) => {
       let code: string
       if (action === 'set') {
         code = String(body.code ?? '').trim()
-        if (!/^\d{4,8}$/.test(code)) return json({ error: 'A code must be 4 to 8 digits.' }, 400)
+        if (!/^\d{1,8}$/.test(code)) return json({ error: 'A code is 1 to 8 digits (e.g. 01).' }, 400)
       } else {
         code = generateEmployeeCode()
       }

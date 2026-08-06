@@ -1275,7 +1275,7 @@ function StaffCodes({ actor, dept, branch }: { actor: Actor; dept: Department; b
 function StaffCodeEditor({ actor, staff }: { actor: Actor; staff: Staff }) {
   const [code, setCode] = useState('')
   const [reveal, setReveal] = useState<string | null>(null)
-  const valid = /^\d{4,8}$/.test(code)
+  const valid = /^\d{1,8}$/.test(code)
 
   return (
     <div style={{ marginTop: 6 }}>
@@ -1284,7 +1284,7 @@ function StaffCodeEditor({ actor, staff }: { actor: Actor; staff: Staff }) {
           inputMode="numeric"
           value={code}
           onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
-          placeholder="set a code (4–8 digits)"
+          placeholder="type any code, e.g. 01"
           style={{ maxWidth: 190, padding: '7px 10px', border: '1px solid var(--line-strong)', borderRadius: 'var(--r-sm)', fontSize: 13 }}
         />
         <button

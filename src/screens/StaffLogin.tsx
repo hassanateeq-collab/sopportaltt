@@ -211,7 +211,7 @@ export function StaffLogin({ onLoggedIn }: { onLoggedIn: (staff: Staff, token: s
                 className="code-input"
                 type="password"
                 inputMode="numeric"
-                maxLength={6}
+                maxLength={8}
                 placeholder="••••"
                 autoComplete="off"
                 value={code}

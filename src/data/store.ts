@@ -2092,7 +2092,7 @@ export const api = {
    */
   async setStaffCode(actor: Actor, staffId: string, code: string): Promise<string> {
     const trimmed = code.trim()
-    if (!/^\d{4,8}$/.test(trimmed)) throw new ApiError('A code must be 4 to 8 digits.')
+    if (!/^\d{1,8}$/.test(trimmed)) throw new ApiError('A code is 1 to 8 digits (e.g. 01).')
     if (isSupabaseEnabled) {
       const j = await callAdminFn('manage-staff', { action: 'set', staff_id: staffId, code: trimmed })
       await hydrateFromSupabase()
