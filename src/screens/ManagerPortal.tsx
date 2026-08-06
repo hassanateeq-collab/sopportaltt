@@ -1249,26 +1249,30 @@ function ManagerRoster({ actor, dept, branch }: { actor: Actor; dept: Department
 function ManagerRow({ actor, manager }: { actor: Actor; manager: Manager }) {
   const [deptId, setDeptId] = useState(manager.department_id)
   const [branchId, setBranchId] = useState(manager.branch_id)
-  const dirty = deptId !== manager.department_id || branchId !== manager.branch_id
+  const [email, setEmail] = useState(manager.email)
+  const [password, setPassword] = useState('')
+  const postingDirty = deptId !== manager.department_id || branchId !== manager.branch_id
+  const loginDirty = email.trim().toLowerCase() !== manager.email || password.trim() !== ''
 
   return (
     <div className="brow">
       <div className="brow-top">
         <span className="brow-title">
-          {manager.name} <span className="ver mono">{manager.email}</span>
+          {manager.name}
           {!manager.active && <span className="vidchip" style={{ marginLeft: 6 }}>DISABLED</span>}
         </span>
       </div>
+
       <div className="fieldrow" style={{ marginTop: 6 }}>
         <div className="field"><label>Department</label>
           <select value={deptId} onChange={(e) => setDeptId(e.target.value)}>{read.departments().map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
-        <div className="field"><label>Branch</label>
+        <div className="field"><label>Branch (home)</label>
           <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{read.branches().map((b) => <option key={b.id} value={b.id}>{b.code}</option>)}</select></div>
       </div>
-      <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
         <button
           className="btn sm primary"
-          disabled={!dirty}
+          disabled={!postingDirty}
           onClick={() => run(() => api.updateManager(actor, manager.id, { department_id: deptId, branch_id: branchId }), `${manager.name} reassigned`)}
         >
           Save posting
@@ -1288,6 +1292,31 @@ function ManagerRow({ actor, manager }: { actor: Actor; manager: Manager }) {
         >
           ✕ Delete
         </button>
+      </div>
+
+      <div className="fieldrow" style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)' }}>
+        <div className="field"><label>Sign-in email</label>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+        <div className="field"><label>New password — blank keeps current</label>
+          <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="set a new password" /></div>
+      </div>
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+        <button
+          className="btn sm primary"
+          disabled={!loginDirty}
+          onClick={() =>
+            run(async () => {
+              await api.updateManagerLogin(actor, manager.id, {
+                email: email.trim().toLowerCase() !== manager.email ? email : undefined,
+                password: password.trim() || undefined,
+              })
+              setPassword('')
+            }, `${manager.name}'s login updated`)
+          }
+        >
+          Save login
+        </button>
+        <span className="demo-hint" style={{ alignSelf: 'center' }}>They sign in on Manager · Admin with this email + password.</span>
       </div>
     </div>
   )

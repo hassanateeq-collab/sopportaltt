@@ -80,6 +80,42 @@ Deno.serve(async (req) => {
       return json({ manager, password: supplied.length >= 8 ? null : password })
     }
 
+    if (action === 'update') {
+      const managerId = String(body.manager_id ?? '')
+      if (!managerId) return json({ error: 'Which manager?' }, 400)
+      const email = body.email !== undefined ? String(body.email).trim().toLowerCase() : undefined
+      const password = body.password !== undefined ? String(body.password) : undefined
+      if (email !== undefined && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+        return json({ error: 'That email does not look right.' }, 400)
+      }
+      if (password !== undefined && password.length < 6) {
+        return json({ error: 'Password must be at least 6 characters.' }, 400)
+      }
+      if (email === undefined && password === undefined) return json({ ok: true })
+
+      const { data: mgr } = await admin.from('managers').select('id, auth_user_id').eq('id', managerId).maybeSingle()
+      if (!mgr) return json({ error: 'That manager no longer exists.' }, 404)
+      if (!mgr.auth_user_id) return json({ error: 'This manager has no login yet — delete and re-add them.' }, 400)
+
+      // Reject a duplicate email held by a different manager.
+      if (email !== undefined) {
+        const { data: clash } = await admin.from('managers').select('id').eq('email', email).neq('id', managerId).maybeSingle()
+        if (clash) return json({ error: 'Another manager already uses that email.' }, 409)
+      }
+
+      const attrs: Record<string, unknown> = {}
+      if (email !== undefined) { attrs.email = email; attrs.email_confirm = true }
+      if (password !== undefined) attrs.password = password
+      const { error: authErr } = await admin.auth.admin.updateUserById(mgr.auth_user_id as string, attrs)
+      if (authErr) return json({ error: authErr.message }, 500)
+
+      if (email !== undefined) {
+        const { error: rowErr } = await admin.from('managers').update({ email }).eq('id', managerId)
+        if (rowErr) return json({ error: rowErr.message }, 500)
+      }
+      return json({ ok: true })
+    }
+
     if (action === 'delete') {
       const managerId = String(body.manager_id ?? '')
       if (!managerId) return json({ error: 'Which manager?' }, 400)

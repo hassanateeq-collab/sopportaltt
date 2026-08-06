@@ -2138,6 +2138,33 @@ export const api = {
     commit()
   },
 
+  /**
+   * Change a manager's sign-in email and/or reset their password. Blank fields
+   * are left unchanged. Touches the Supabase Auth user, so it goes through the
+   * manage-managers function.
+   */
+  async updateManagerLogin(
+    actor: Actor,
+    managerId: string,
+    changes: { email?: string; password?: string },
+  ): Promise<void> {
+    const payload: Record<string, unknown> = { action: 'update', manager_id: managerId }
+    if (changes.email !== undefined) payload.email = changes.email
+    if (changes.password !== undefined && changes.password !== '') payload.password = changes.password
+    if (payload.email === undefined && payload.password === undefined) return
+
+    if (isSupabaseEnabled) {
+      await callAdminFn('manage-managers', payload)
+      await hydrateFromSupabase()
+      return
+    }
+    requireAdmin(actor)
+    const manager = db.managers.find((m) => m.id === managerId)
+    if (!manager) throw new ApiError('That manager no longer exists.')
+    if (typeof payload.email === 'string') manager.email = (payload.email as string).trim().toLowerCase()
+    commit()
+  },
+
   /* ---- tests ---- */
 
   async createTest(
