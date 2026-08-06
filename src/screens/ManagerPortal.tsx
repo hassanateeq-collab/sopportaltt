@@ -1048,7 +1048,7 @@ function CreateTestForm({
       const res = await api.generateTestDraft(actor, {
         sopId: genSop,
         difficulty: level,
-        count: Math.min(6, Math.max(3, parseInt(count) || 5)),
+        count: Math.min(20, Math.max(3, parseInt(count) || 5)),
         language: genLang,
       })
       if (res.questions.length === 0) { toast('The generator returned nothing usable — add questions by hand'); setWarnings(res.warnings) }
@@ -1129,7 +1129,7 @@ function CreateTestForm({
                 <option value="medium">Medium — apply to a scenario</option>
                 <option value="high">High — exceptions &amp; judgment</option>
               </select></div>
-            <div className="field"><label htmlFor="g-count">Questions (3–6)</label>
+            <div className="field"><label htmlFor="g-count">Questions (3–20)</label>
               <input id="g-count" inputMode="numeric" value={count} onChange={(e) => setCount(e.target.value)} /></div>
           </div>
           <div className="fieldrow">

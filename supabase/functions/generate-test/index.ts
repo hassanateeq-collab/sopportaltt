@@ -136,7 +136,7 @@ Deno.serve(async (req) => {
     const body = await req.json()
     const sopId = String(body.sopId ?? '')
     const difficulty = ['low', 'medium', 'high'].includes(body.difficulty) ? body.difficulty : 'medium'
-    const count = Math.min(6, Math.max(3, Number(body.count) || 5))
+    const count = Math.min(20, Math.max(3, Number(body.count) || 5))
     const language = ['en', 'ur', 'ps'].includes(body.language) ? body.language : 'en'
 
     const { data: sop } = await admin
@@ -186,7 +186,8 @@ Deno.serve(async (req) => {
           responseMimeType: 'application/json',
           responseSchema: RESPONSE_SCHEMA,
           temperature: 0.6,
-          maxOutputTokens: 8192,
+          // Enough headroom for up to 20 questions, incl. token-heavy Urdu/Pashto.
+          maxOutputTokens: 16384,
           // Newer flash models spend output tokens on internal "thinking", which
           // was truncating the JSON. We don't need reasoning to draft questions.
           thinkingConfig: { thinkingBudget: 0 },
