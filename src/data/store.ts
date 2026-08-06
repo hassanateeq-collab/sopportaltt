@@ -538,7 +538,12 @@ export async function downloadTestReport(
     }
     blob = pdf.output('blob')
   } catch (e) {
-    throw new ApiError(`Could not build the PDF in this browser: ${e instanceof Error ? e.message : String(e)}`)
+    const msg = e instanceof Error ? e.message : String(e)
+    // A failed dynamic import means the tab pre-dates the current deploy.
+    if (/dynamically imported module|module script failed|Failed to fetch/i.test(msg)) {
+      throw new ApiError('The app was just updated — please refresh the page and try again.')
+    }
+    throw new ApiError(`Could not build the PDF in this browser: ${msg}`)
   } finally {
     el.remove()
   }
