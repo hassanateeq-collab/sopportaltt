@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { api, read, translateQuestion, ApiError } from '../data/store'
+import { api, read, translateQuestion, downloadTestReport, ApiError } from '../data/store'
 import type { Attempt, Certification, Language, Question, Test } from '../types'
 import { LANGUAGE_NAMES, RTL_LANGUAGES } from '../types'
 import { fmtD } from '../lib/format'
@@ -93,6 +93,7 @@ export function TestRunner({
           )}
           <div className="backlink">
             <button className="btn primary" onClick={onDone}>Back to my scores</button>
+            <MyReportButton testId={test.id} staffId={r.staff_id} />
           </div>
         </div>
       </>
@@ -120,15 +121,12 @@ export function TestRunner({
     }
   }
 
+  // Selecting an option only marks the answer — the staff member moves on with
+  // the Next button, and can't advance until they've chosen an option.
   function choose(i: number) {
     const next = [...answers]
     next[qi] = i
     setAnswers(next)
-    if (qi < questions.length - 1) {
-      setQi(qi + 1)
-    } else {
-      void submit(next)
-    }
   }
 
   async function submit(finalAnswers: Array<number | null>) {
@@ -178,15 +176,60 @@ export function TestRunner({
         </div>
         <div className="qtext" dir={rtlNow ? 'rtl' : 'ltr'}>{shown.text}</div>
         {shown.options.map((o, i) => (
-          <button key={i} className="opt" dir={rtlNow ? 'rtl' : 'ltr'} disabled={busy} onClick={() => choose(i)}>
+          <button
+            key={i}
+            className={`opt ${answers[qi] === i ? 'on' : ''}`}
+            dir={rtlNow ? 'rtl' : 'ltr'}
+            disabled={busy}
+            onClick={() => choose(i)}
+          >
             {o}
           </button>
         ))}
+
+        <div className="run-nav">
+          <button className="btn" disabled={qi === 0 || busy} onClick={() => setQi(qi - 1)}>← Previous</button>
+          {qi < questions.length - 1 ? (
+            <button className="btn primary" disabled={answers[qi] === null || busy} onClick={() => setQi(qi + 1)}>
+              Next →
+            </button>
+          ) : (
+            <button className="btn primary" disabled={answers[qi] === null || busy} onClick={() => void submit(answers)}>
+              {busy ? <span className="spinner" /> : 'Submit test'}
+            </button>
+          )}
+        </div>
+        {answers[qi] === null && <div className="run-hint">Select an option to continue.</div>}
+
         <div className="backlink">
           <button className="btn" onClick={onDone}>Cancel test</button>
         </div>
       </div>
     </>
+  )
+}
+
+/** Staff download their own PDF report of a completed attempt. */
+function MyReportButton({ testId, staffId }: { testId: string; staffId: string }) {
+  const [busy, setBusy] = useState(false)
+  return (
+    <button
+      className="btn"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true)
+        try {
+          await downloadTestReport(testId, staffId, '')
+          toast('Your report has been downloaded')
+        } catch (e) {
+          toast(e instanceof ApiError ? e.message : 'Could not build your report.')
+        } finally {
+          setBusy(false)
+        }
+      }}
+    >
+      {busy ? <span className="spinner" /> : '⬇ Download my report'}
+    </button>
   )
 }
 

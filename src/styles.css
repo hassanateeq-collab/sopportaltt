@@ -1120,6 +1120,28 @@ h2.section {
 .opt.on {
   border-color: var(--pine);
   background: var(--pine-tint);
+  box-shadow: inset 0 0 0 1.5px var(--pine);
+  font-weight: 600;
+}
+
+/* Test navigation: Previous on the left, Next / Submit on the right. */
+.run-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+
+.run-nav .btn {
+  min-width: 130px;
+}
+
+.run-hint {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  text-align: center;
 }
 
 .score {
