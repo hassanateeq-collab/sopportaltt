@@ -1,15 +1,17 @@
 /**
  * manage-staff Edge Function (admin only).
  *
- * The two staff writes that need the service_role because they touch the bcrypt
+ * The staff writes that need the service_role because they touch the bcrypt
  * hash the browser can never see:
  *   - create:     add a staff member; the numeric code is generated here, hashed
  *                 in Postgres (create_staff), and returned ONCE for the admin to
- *                 share privately. The plaintext is never stored.
- *   - regenerate: issue a fresh code for an existing member and clear any lockout.
+ *                 share privately. The plaintext is never stored. (Admin only.)
+ *   - regenerate: issue a fresh random code for an existing member, clear lockout.
+ *   - set:        set a specific chosen code (4–8 digits) for an existing member.
  *
- * Deactivating a staff member and reading the roster don't need this function —
- * an admin does those directly against PostgREST under RLS.
+ * create is admin-only. A manager may regenerate/set a code, but only for staff
+ * in her own department; an admin for anyone. Deactivating a staff member and
+ * reading the roster don't need this function — done directly under RLS.
  */
 
 import { serviceClient, callerRole, bearer, generateEmployeeCode, STAFF_COLUMNS } from '../_shared/auth.ts'
@@ -22,13 +24,13 @@ Deno.serve(async (req) => {
   try {
     const admin = serviceClient()
     const role = await callerRole(admin, bearer(req))
-    if (!role) return json({ error: 'Sign in as an admin first.' }, 401)
-    if (role.kind !== 'admin') return json({ error: 'Only an admin can manage staff.' }, 403)
+    if (!role) return json({ error: 'Sign in as a manager or admin first.' }, 401)
 
     const body = await req.json().catch(() => ({}))
     const action = String(body.action ?? '')
 
     if (action === 'create') {
+      if (role.kind !== 'admin') return json({ error: 'Only an admin can add staff.' }, 403)
       const name = String(body.name ?? '').trim()
       const departmentId = String(body.department_id ?? '')
       const branchId = String(body.branch_id ?? '')
@@ -51,13 +53,23 @@ Deno.serve(async (req) => {
       return json({ staff: safe, code })
     }
 
-    if (action === 'regenerate') {
+    if (action === 'regenerate' || action === 'set') {
       const staffId = String(body.staff_id ?? '')
       if (!staffId) return json({ error: 'Which staff member?' }, 400)
-      const { data: staff } = await admin.from('staff').select('id').eq('id', staffId).maybeSingle()
+      const { data: staff } = await admin.from('staff').select('id, department_id').eq('id', staffId).maybeSingle()
       if (!staff) return json({ error: 'That staff record no longer exists.' }, 404)
+      // A manager may only change codes for staff in her own department.
+      if (role.kind === 'manager' && staff.department_id !== role.department_id) {
+        return json({ error: 'You can only change codes for staff in your own department.' }, 403)
+      }
 
-      const code = generateEmployeeCode()
+      let code: string
+      if (action === 'set') {
+        code = String(body.code ?? '').trim()
+        if (!/^\d{4,8}$/.test(code)) return json({ error: 'A code must be 4 to 8 digits.' }, 400)
+      } else {
+        code = generateEmployeeCode()
+      }
       const { error } = await admin.rpc('set_staff_code', { p_staff: staffId, p_code: code })
       if (error) return json({ error: error.message }, 500)
       await admin.from('staff_lockouts').delete().eq('staff_id', staffId)

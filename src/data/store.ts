@@ -2086,6 +2086,29 @@ export const api = {
   },
 
   /**
+   * Set a specific numeric sign-in code for a staff member (4–8 digits). An admin
+   * may do this for anyone; a manager only for staff in her own department. The
+   * plaintext is hashed in Postgres and any lockout is cleared.
+   */
+  async setStaffCode(actor: Actor, staffId: string, code: string): Promise<string> {
+    const trimmed = code.trim()
+    if (!/^\d{4,8}$/.test(trimmed)) throw new ApiError('A code must be 4 to 8 digits.')
+    if (isSupabaseEnabled) {
+      const j = await callAdminFn('manage-staff', { action: 'set', staff_id: staffId, code: trimmed })
+      await hydrateFromSupabase()
+      return j.code as string
+    }
+    const staff = db.staff.find((s) => s.id === staffId)
+    if (!staff) throw new ApiError('That staff record no longer exists.')
+    assertCanTouchStaff(actor, staff)
+    staff.employee_code_hash = await hashEmployeeCode(trimmed)
+    staff.employee_code = trimmed
+    delete db.lockouts[staffId]
+    commit()
+    return trimmed
+  },
+
+  /**
    * Create a department manager. In Supabase mode this creates their Supabase
    * Auth login (via the manage-managers function) and returns a generated
    * password to share once, unless one was supplied.

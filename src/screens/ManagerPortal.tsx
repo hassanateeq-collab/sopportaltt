@@ -67,10 +67,14 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
 
   const staffCount = read.staff().filter((s) => s.department_id === dept.id && s.branch_id === branch.id).length
   const mgrCount = read.managers().filter((m) => m.department_id === dept.id && m.branch_id === branch.id).length
+  // A manager runs one department across every branch, so her SOP/test counts
+  // are department-wide; an admin's counts are for the branch she is viewing.
+  const sopCount = isAdmin ? sopsOf(dept.id, branch.code).length : deptSopsAll(dept.id).length
+  const testCount = isAdmin ? testsOf(dept.id, branch.code).length : deptTestsAll(dept.id).length
   const tiles: Array<{ key: Page; icon: ReactNode; title: string; sub: string }> = [
-    { key: 'sops', icon: <SopSectionIcon />, title: 'SOPs', sub: `${sopsOf(dept.id, branch.code).length} here · sign-off & publish` },
-    { key: 'tests', icon: <TestSectionIcon />, title: 'Tests & scores', sub: `${testsOf(dept.id, branch.code).length} here · assign & create` },
-    { key: 'staff', icon: <StaffSectionIcon />, title: 'Staff', sub: isAdmin ? `${staffCount} here · add & codes` : `${staffCount} here · view codes` },
+    { key: 'sops', icon: <SopSectionIcon />, title: 'SOPs', sub: isAdmin ? `${sopCount} here · sign-off & publish` : `${sopCount} · every branch · sign-off` },
+    { key: 'tests', icon: <TestSectionIcon />, title: 'Tests & scores', sub: isAdmin ? `${testCount} here · assign & create` : `${testCount} · every branch · assign & score` },
+    { key: 'staff', icon: <StaffSectionIcon />, title: 'Staff', sub: isAdmin ? `${staffCount} here · add & codes` : `${staffCount} here · codes` },
   ]
   if (isAdmin) {
     tiles.push(
@@ -151,20 +155,22 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
         </>
       ) : (
         <>
-          {!isAdmin && branchSelect}
+          {/* Staff belong to a branch, so the code roster keeps the branch picker.
+              SOPs and tests are one-per-department across every branch — no branch. */}
+          {!isAdmin && page === 'staff' && branchSelect}
           <button className="btn backbtn" onClick={() => setPage('home')}>← Menu</button>
 
           {page === 'sops' && (
             <>
-              <SopBoard dept={dept} branch={branch} actor={actor} onOpen={(sop, kind) => setViewer({ sop, kind })} />
-              <AddSopForm dept={dept} branch={branch} actor={actor} lockBranch={false} />
+              <SopBoard dept={dept} branch={branch} actor={actor} orgWide={!isAdmin} onOpen={(sop, kind) => setViewer({ sop, kind })} />
+              <AddSopForm dept={dept} branch={branch} actor={actor} lockBranch={false} forceAllBranches={!isAdmin} />
             </>
           )}
 
           {page === 'tests' && (
             <>
-              <TestBoard dept={dept} branch={branch} actor={actor} />
-              <CreateTestForm dept={dept} branch={branch} actor={actor} lockBranch={false} />
+              <TestBoard dept={dept} branch={branch} actor={actor} orgWide={!isAdmin} />
+              <CreateTestForm dept={dept} branch={branch} actor={actor} lockBranch={false} forceAllBranches={!isAdmin} />
             </>
           )}
 
@@ -175,7 +181,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
                 <AddStaff actor={actor} dept={dept} branch={branch} />
               </>
             ) : (
-              <StaffCodes dept={dept} branch={branch} />
+              <StaffCodes actor={actor} dept={dept} branch={branch} />
             ))}
 
           {page === 'managers' && isAdmin && (
@@ -220,6 +226,28 @@ function testsOf(deptId: string, branchCode: string): Test[] {
     .sort((a, b) => a.title.localeCompare(b.title))
 }
 
+/* A manager runs one department across every branch: these ignore branch. */
+function deptSopsAll(deptId: string): Sop[] {
+  return read
+    .sops()
+    .filter((s) => s.department_id === deptId)
+    .sort((a, b) => a.code.localeCompare(b.code))
+}
+
+function deptTestsAll(deptId: string): Test[] {
+  return read
+    .tests()
+    .filter((t) => t.department_id === deptId)
+    .sort((a, b) => a.title.localeCompare(b.title))
+}
+
+function deptStaffAll(deptId: string): Staff[] {
+  return read
+    .staff()
+    .filter((s) => s.department_id === deptId && s.active)
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
 async function run(fn: () => Promise<unknown>, ok?: string) {
   try {
     await fn()
@@ -235,23 +263,26 @@ function SopBoard({
   dept,
   branch,
   actor,
+  orgWide,
   onOpen,
 }: {
   dept: Department
   branch: Branch
   actor: Actor
+  /** Manager view: one department across every branch — ignore the branch. */
+  orgWide: boolean
   onOpen: (sop: Sop, kind: 'doc' | 'video') => void
 }) {
-  const people = staffOf(dept.id, branch.id)
-  const sops = sopsOf(dept.id, branch.code)
+  const people = orgWide ? deptStaffAll(dept.id) : staffOf(dept.id, branch.id)
+  const sops = orgWide ? deptSopsAll(dept.id) : sopsOf(dept.id, branch.code)
   return (
     <details className="board" open>
-      <summary><SopSectionIcon />SOP sign-off — {dept.name} · {branch.code}<span className="hint">{people.length} staff</span></summary>
+      <summary><SopSectionIcon />SOP sign-off — {orgWide ? dept.name : `${dept.name} · ${branch.code}`}<span className="hint">{people.length} staff{orgWide ? ' · all branches' : ''}</span></summary>
       {sops.length === 0 ? (
         <div className="empty-row">No SOPs here yet — add one below.</div>
       ) : (
         sops.map((s) => {
-          const eligible = eligibleStaffFor(s).filter((p) => p.branch_id === branch.id)
+          const eligible = orgWide ? eligibleStaffFor(s) : eligibleStaffFor(s).filter((p) => p.branch_id === branch.id)
           const signed = eligible.filter((p) => hasSigned(p.id, s)).length
           const full = eligible.length > 0 && signed === eligible.length
           return (
@@ -386,7 +417,7 @@ function SopVideoControl({ sop }: { sop: Sop }) {
 
 /* ------------------------------------------------------------- Test board -- */
 
-function TestBoard({ dept, branch, actor }: { dept: Department; branch: Branch; actor: Actor }) {
+function TestBoard({ dept, branch, actor, orgWide }: { dept: Department; branch: Branch; actor: Actor; orgWide: boolean }) {
   // Every active staff member across all departments/branches — a test can be
   // assigned beyond its own department, so the board and picker work over the
   // whole org, not just this department's people.
@@ -396,12 +427,12 @@ function TestBoard({ dept, branch, actor }: { dept: Department; branch: Branch; 
     orgStaffDirectory().then((list) => { if (active) setEveryone(list) })
     return () => { active = false }
   }, [])
-  const tests = testsOf(dept.id, branch.code)
+  const tests = orgWide ? deptTestsAll(dept.id) : testsOf(dept.id, branch.code)
   return (
     <details className="board" open>
-      <summary><TestSectionIcon />Tests &amp; scores — {dept.name} · {branch.code}<span className="hint">Assign anyone · latest score shown</span></summary>
+      <summary><TestSectionIcon />Tests &amp; scores — {orgWide ? dept.name : `${dept.name} · ${branch.code}`}<span className="hint">Assign anyone · latest score shown</span></summary>
       {tests.length === 0 ? (
-        <div className="empty-row">No tests for this department at this branch — create one below.</div>
+        <div className="empty-row">No tests for this department{orgWide ? '' : ' at this branch'} — create one below.</div>
       ) : (
         tests.map((t) => <TestRow key={t.id} test={t} people={everyone} actor={actor} />)
       )}
@@ -774,11 +805,14 @@ function AddSopForm({
   branch,
   actor,
   lockBranch,
+  forceAllBranches = false,
 }: {
   dept: Department
   branch: Branch
   actor: Actor
   lockBranch: boolean
+  /** Manager view: always publish to every branch — no scope choice. */
+  forceAllBranches?: boolean
 }) {
   const [folders, setFolders] = useState<Array<{ id: string; name: string }>>(DRIVE_DEPARTMENT_FOLDERS)
   const defaultFolder =
@@ -842,7 +876,8 @@ function AddSopForm({
     if (!title.trim()) { toast('Give the SOP a title first'); return }
     if (!pdf) { toast('Upload the SOP document (PDF) first'); return }
     setBusy(true)
-    const scope: BranchScope = lockBranch || !allBranches ? { kind: 'LIST', branch_codes: [branch.code] } : { kind: 'ALL' }
+    const scope: BranchScope =
+      forceAllBranches ? { kind: 'ALL' } : lockBranch || !allBranches ? { kind: 'LIST', branch_codes: [branch.code] } : { kind: 'ALL' }
     const folderName = DRIVE_DEPARTMENT_FOLDERS.find((f) => f.id === folderId)?.name ?? 'the folder'
     try {
       if (isSupabaseEnabled) {
@@ -875,7 +910,7 @@ function AddSopForm({
 
   return (
     <details className="board">
-      <summary><SopSectionIcon />Add SOP<span className="hint">upload document + video · to {dept.name}{lockBranch ? ` · ${branch.code} only` : ''}</span></summary>
+      <summary><SopSectionIcon />Add SOP<span className="hint">upload document + video · to {dept.name}{lockBranch ? ` · ${branch.code} only` : forceAllBranches ? ' · all branches' : ''}</span></summary>
       <div className="card-body">
         {isSupabaseEnabled && (
           <div className="notice info" style={{ marginBottom: 14 }}>
@@ -944,7 +979,10 @@ function AddSopForm({
           <div className="demo-hint">Files land here view-only inside the Hamsun_SOP folder. The viewer streams them; no downloads.</div>
         </div>
 
-        {lockBranch ? (
+        {forceAllBranches ? (
+          <div className="field"><label>Scope</label>
+            <div style={{ fontSize: 13.5 }}>All branches — one {dept.name} SOP that every branch follows.</div></div>
+        ) : lockBranch ? (
           <div className="field"><label>Scope</label>
             <div style={{ fontSize: 13.5 }}>{dept.name} · {branch.code} only — managers publish to their own department at their branch.</div></div>
         ) : (
@@ -969,13 +1007,19 @@ function CreateTestForm({
   branch,
   actor,
   lockBranch,
+  forceAllBranches = false,
 }: {
   dept: Department
   branch: Branch
   actor: Actor
   lockBranch: boolean
+  /** Manager view: the test is conducted at every branch — no scope choice. */
+  forceAllBranches?: boolean
 }) {
-  const deptSops = useMemo(() => sopsOf(dept.id, branch.code), [dept.id, branch.code, read.sops()])
+  const deptSops = useMemo(
+    () => (forceAllBranches ? deptSopsAll(dept.id) : sopsOf(dept.id, branch.code)),
+    [dept.id, branch.code, forceAllBranches, read.sops()],
+  )
   const [genSop, setGenSop] = useState('')
   const [level, setLevel] = useState<Difficulty>('medium')
   const [count, setCount] = useState('5')
@@ -1032,7 +1076,8 @@ function CreateTestForm({
     if (!title.trim()) { toast('Give the test a title'); return }
     if (draft.length < 3) { toast('Add at least 3 questions first'); return }
     setPubBusy(true)
-    const scope: BranchScope = lockBranch || !allBranches ? { kind: 'LIST', branch_codes: [branch.code] } : { kind: 'ALL' }
+    const scope: BranchScope =
+      forceAllBranches ? { kind: 'ALL' } : lockBranch || !allBranches ? { kind: 'LIST', branch_codes: [branch.code] } : { kind: 'ALL' }
     const wanted: Language[] = (['ur', 'ps'] as const).filter((l) => langs[l])
     // The generation language leads; any extra checked languages are added too.
     const languages: Language[] = Array.from(new Set<Language>([genLang, ...wanted]))
@@ -1061,7 +1106,7 @@ function CreateTestForm({
 
   return (
     <details className="board" open={draft.length > 0}>
-      <summary><TestSectionIcon />Create a test<span className="hint">for {dept.name}{lockBranch ? ` · ${branch.code} only` : ''}</span></summary>
+      <summary><TestSectionIcon />Create a test<span className="hint">for {dept.name}{lockBranch ? ` · ${branch.code} only` : forceAllBranches ? ' · all branches' : ''}</span></summary>
       <div className="card-body">
         <div className="genblock">
           <div className="gh">✦ Generate the test from an SOP</div>
@@ -1125,13 +1170,16 @@ function CreateTestForm({
             <option value="">— none —</option>
             {deptSops.map((s) => <option key={s.id} value={s.id}>{s.code} · {s.title}</option>)}
           </select></div>
-        {!lockBranch && (
+        {forceAllBranches ? (
+          <div className="field"><label>Scope</label>
+            <div style={{ fontSize: 13.5 }}>All branches — one {dept.name} test conducted at every branch.</div></div>
+        ) : !lockBranch ? (
           <div className="field"><label>Scope</label>
             <div className="radio-row">
               <label><input type="radio" name="t-scope" checked={!allBranches} onChange={() => setAllBranches(false)} /> {branch.code} only</label>
               <label><input type="radio" name="t-scope" checked={allBranches} onChange={() => setAllBranches(true)} /> All branches</label>
             </div></div>
-        )}
+        ) : null}
         <div className="field"><label>Test languages</label>
           <div className="radio-row">
             <label><input type="checkbox" checked disabled /> {LANGUAGE_NAMES[genLang]} — generated above</label>
@@ -1183,7 +1231,7 @@ function CreateTestForm({
 
 /* ---- staff codes: read-only roster a manager can look codes up in ---- */
 
-function StaffCodes({ dept, branch }: { dept: Department; branch: Branch }) {
+function StaffCodes({ actor, dept, branch }: { actor: Actor; dept: Department; branch: Branch }) {
   const people = read
     .staff()
     .filter((s) => s.department_id === dept.id && s.branch_id === branch.id)
@@ -1191,7 +1239,7 @@ function StaffCodes({ dept, branch }: { dept: Department; branch: Branch }) {
 
   return (
     <details className="board">
-      <summary><StaffSectionIcon />Staff codes — {dept.name} · {branch.code}<span className="hint">{people.length} on file</span></summary>
+      <summary><StaffSectionIcon />Staff codes — {dept.name} · {branch.code}<span className="hint">{people.length} on file · set or reissue</span></summary>
       <div className="card-body">
         {people.length === 0 ? (
           <div className="empty-row">No staff here yet — an admin adds them.</div>
@@ -1207,14 +1255,71 @@ function StaffCodes({ dept, branch }: { dept: Department; branch: Branch }) {
                   {s.employee_code ?? '— no code yet'}
                 </span>
               </div>
+              <StaffCodeEditor actor={actor} staff={s} />
             </div>
           ))
         )}
         <p className="demo-hint" style={{ marginTop: 8 }}>
-          Codes let staff sign in to see their SOPs and tests. Only an admin can issue or re-issue a code.
+          Codes let staff sign in to see their SOPs and tests. Set a specific code or issue a random one — share it privately.
         </p>
       </div>
     </details>
+  )
+}
+
+/**
+ * Change a staff member's sign-in code — set a specific 4–8 digit code, or issue
+ * a fresh random one. Available to both admins (anyone) and managers (their own
+ * department). The new code is revealed once for the manager to share privately.
+ */
+function StaffCodeEditor({ actor, staff }: { actor: Actor; staff: Staff }) {
+  const [code, setCode] = useState('')
+  const [reveal, setReveal] = useState<string | null>(null)
+  const valid = /^\d{4,8}$/.test(code)
+
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          inputMode="numeric"
+          value={code}
+          onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
+          placeholder="set a code (4–8 digits)"
+          style={{ maxWidth: 190, padding: '7px 10px', border: '1px solid var(--line-strong)', borderRadius: 'var(--r-sm)', fontSize: 13 }}
+        />
+        <button
+          className="btn sm primary"
+          disabled={!valid}
+          onClick={() =>
+            run(async () => {
+              const c = await api.setStaffCode(actor, staff.id, code)
+              setReveal(c)
+              setCode('')
+            })
+          }
+        >
+          Save code
+        </button>
+        <button
+          className="btn sm"
+          onClick={() =>
+            run(async () => {
+              const c = await api.regenerateStaffCode(actor, staff.id)
+              setReveal(c)
+            })
+          }
+        >
+          {staff.employee_code ? '↻ Random code' : '＋ Issue code'}
+        </button>
+      </div>
+      {reveal && (
+        <div className="notice info" style={{ marginTop: 8 }}>
+          Code for <strong>{staff.name}</strong> is now <span className="mono">{reveal}</span> — share it privately; it
+          replaces any previous code.{' '}
+          <button className="btn sm" style={{ marginLeft: 6 }} onClick={() => setReveal(null)}>Done</button>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -1225,7 +1330,6 @@ function StaffRoster({ actor, dept, branch }: { actor: Actor; dept: Department; 
     .staff()
     .filter((s) => s.department_id === dept.id && s.branch_id === branch.id)
     .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name))
-  const [reveal, setReveal] = useState<{ id: string; code: string } | null>(null)
 
   return (
     <details className="board">
@@ -1245,18 +1349,8 @@ function StaffRoster({ actor, dept, branch }: { actor: Actor; dept: Department; 
                   {s.employee_code ?? '— no code yet'}
                 </span>
               </div>
+              <StaffCodeEditor actor={actor} staff={s} />
               <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
-                <button
-                  className="btn sm"
-                  onClick={() =>
-                    run(async () => {
-                      const code = await api.regenerateStaffCode(actor, s.id)
-                      setReveal({ id: s.id, code })
-                    })
-                  }
-                >
-                  {s.employee_code ? '↻ New code' : '＋ Issue code'}
-                </button>
                 <button
                   className="btn sm"
                   onClick={() =>
@@ -1269,13 +1363,6 @@ function StaffRoster({ actor, dept, branch }: { actor: Actor; dept: Department; 
                   {s.active ? 'Deactivate' : 'Reactivate'}
                 </button>
               </div>
-              {reveal?.id === s.id && (
-                <div className="notice info" style={{ marginTop: 8 }}>
-                  New employee code for <strong>{s.name}</strong>: <span className="mono">{reveal.code}</span> — share it
-                  privately. It won't be shown again.{' '}
-                  <button className="btn sm" style={{ marginLeft: 6 }} onClick={() => setReveal(null)}>Done</button>
-                </div>
-              )}
             </div>
           ))
         )}
