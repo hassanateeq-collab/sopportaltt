@@ -554,6 +554,13 @@ function SopVideoControl({ sop }: { sop: Sop }) {
 
 /* ------------------------------------------------------------- Test board -- */
 
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+/** "Fri · 08 Aug 2026" — the day + date a test was set up. */
+function dayDate(iso: string): string {
+  const d = new Date(iso)
+  return `${WEEKDAYS[d.getDay()]} · ${fmtD(d)}`
+}
+
 function TestBoard({ dept, branch, actor, orgWide }: { dept: Department; branch: Branch; actor: Actor; orgWide: boolean }) {
   // Every active staff member across all departments/branches — a test can be
   // assigned beyond its own department, so the board and picker work over the
@@ -574,7 +581,7 @@ function TestBoard({ dept, branch, actor, orgWide }: { dept: Department; branch:
       {tests.length === 0 ? (
         <div className="empty-row">No tests for this department{orgWide ? '' : ' at this branch'} — create one below.</div>
       ) : (
-        tests.map((t) => <TestRow key={t.id} test={t} people={everyone} actor={actor} branchId={branchId} />)
+        tests.map((t, i) => <TestRow key={t.id} test={t} index={i + 1} people={everyone} actor={actor} branchId={branchId} />)
       )}
     </details>
   )
@@ -582,11 +589,14 @@ function TestBoard({ dept, branch, actor, orgWide }: { dept: Department; branch:
 
 function TestRow({
   test,
+  index,
   people,
   actor,
   branchId,
 }: {
   test: Test
+  /** 1-based position in the board, shown as "1.", "2." … */
+  index: number
   people: OrgStaff[]
   actor: Actor
   /** When set (admin viewing one branch), show only that branch's scores. */
@@ -610,7 +620,8 @@ function TestRow({
     <div className="brow">
       <div className="brow-top">
         <span className="brow-title">
-          {test.title} <span className="ver">{qCount} Qs · pass {test.pass_mark}%</span>
+          <span className="tnum">{index}.</span> {test.title} <span className="ver">{qCount} Qs · pass {test.pass_mark}%</span>
+          <span className="datechip" title="When this test was set up">🗓 {dayDate(test.created_at)}</span>
           {test.status === 'draft' && <span className="vidchip" style={{ marginLeft: 6 }}>DRAFT</span>}
         </span>
         <span className={`brow-frac ${valid === assigned.length && assigned.length > 0 ? 'full' : 'gap'}`}>
@@ -654,60 +665,64 @@ function TestRow({
         </div>
       )}
 
-      {test.status === 'draft' ? (
+      <div className="subtree">
+        <div className="subtree-path">📁 {index}. {test.title}</div>
+
+        {test.status === 'draft' ? (
+          <details className="inline">
+            <summary><span className="tree-b">├─</span> Review &amp; publish this draft</summary>
+            <div style={{ marginTop: 8 }}>
+              <p className="demo-hint" style={{ marginTop: 0 }}>{qCount} question(s) in this draft.</p>
+              <button className="btn sm primary" onClick={() => run(() => api.publishTest(actor, test.id), 'Test published')}>
+                Publish test
+              </button>
+            </div>
+          </details>
+        ) : (
+          <AssignPanel test={test} people={people} actor={actor} assignedIds={assignedIds} />
+        )}
+
+        {attemptedPeople.length > 0 && (
+          <details className="inline">
+            <summary><span className="tree-b">├─</span> Download reports</summary>
+            <div style={{ marginTop: 8 }}>
+              {attemptedPeople.map((p) => {
+                const last = attemptsFor(p.id, test.id)[0]
+                return (
+                  <div key={p.id} className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
+                    <span style={{ minWidth: 150 }}>
+                      {p.name} <span className="ver">{last.score}/{last.total} · {last.passed ? 'PASS' : 'FAIL'}</span>
+                    </span>
+                    <ReportBtn testId={test.id} staffId={p.id} deptId={test.department_id} name={p.name} />
+                  </div>
+                )
+              })}
+              <p className="demo-hint" style={{ marginTop: 6 }}>
+                A PDF is downloaded and a copy is filed in the department's Drive folder, named by SOP, date and person.
+              </p>
+            </div>
+          </details>
+        )}
+
         <details className="inline">
-          <summary>Review &amp; publish this draft</summary>
+          <summary><span className="tree-b">└─</span> Manage this test</summary>
           <div style={{ marginTop: 8 }}>
-            <p className="demo-hint" style={{ marginTop: 0 }}>{qCount} question(s) in this draft.</p>
-            <button className="btn sm primary" onClick={() => run(() => api.publishTest(actor, test.id), 'Test published')}>
-              Publish test
+            <p className="demo-hint" style={{ marginTop: 0 }}>
+              Deleting removes this test and everything tied to it — its questions, assignments, attempts,
+              certifications and retest approvals. This can't be undone.
+            </p>
+            <button
+              className="btn sm danger"
+              onClick={() => {
+                if (!confirm(`Delete the test "${test.title}"?\n\nThis also removes every assignment, attempt and certificate for it. It can't be undone.`)) return
+                run(() => api.deleteTest(actor, test.id), `"${test.title}" deleted`)
+              }}
+            >
+              ✕ Delete test
             </button>
           </div>
         </details>
-      ) : (
-        <AssignPanel test={test} people={people} actor={actor} assignedIds={assignedIds} />
-      )}
-
-      {attemptedPeople.length > 0 && (
-        <details className="inline">
-          <summary>Download reports</summary>
-          <div style={{ marginTop: 8 }}>
-            {attemptedPeople.map((p) => {
-              const last = attemptsFor(p.id, test.id)[0]
-              return (
-                <div key={p.id} className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
-                  <span style={{ minWidth: 150 }}>
-                    {p.name} <span className="ver">{last.score}/{last.total} · {last.passed ? 'PASS' : 'FAIL'}</span>
-                  </span>
-                  <ReportBtn testId={test.id} staffId={p.id} deptId={test.department_id} name={p.name} />
-                </div>
-              )
-            })}
-            <p className="demo-hint" style={{ marginTop: 6 }}>
-              A PDF is downloaded and a copy is filed in the department's Drive folder, named by SOP, date and person.
-            </p>
-          </div>
-        </details>
-      )}
-
-      <details className="inline">
-        <summary>Manage this test</summary>
-        <div style={{ marginTop: 8 }}>
-          <p className="demo-hint" style={{ marginTop: 0 }}>
-            Deleting removes this test and everything tied to it — its questions, assignments, attempts,
-            certifications and retest approvals. This can't be undone.
-          </p>
-          <button
-            className="btn sm danger"
-            onClick={() => {
-              if (!confirm(`Delete the test "${test.title}"?\n\nThis also removes every assignment, attempt and certificate for it. It can't be undone.`)) return
-              run(() => api.deleteTest(actor, test.id), `"${test.title}" deleted`)
-            }}
-          >
-            ✕ Delete test
-          </button>
-        </div>
-      </details>
+      </div>
     </div>
   )
 }
@@ -775,7 +790,7 @@ function AssignPanel({
   return (
     <details className="inline">
       <summary>
-        Assign staff by name <span style={{ color: 'var(--ink-faint)', fontWeight: 500 }}>· {assignedIds.size} assigned</span>
+        <span className="tree-b">├─</span> Assign staff by name <span style={{ color: 'var(--ink-faint)', fontWeight: 500 }}>· {assignedIds.size} assigned</span>
       </summary>
       <div style={{ marginTop: 8 }}>
         <p className="demo-hint" style={{ marginTop: 0 }}>
