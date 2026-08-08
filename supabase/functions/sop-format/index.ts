@@ -17,19 +17,13 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { getUserAccessToken, findOrCreateFolder, uploadToDrive, deleteFromDrive, listFiles, shareReadable } from '../_shared/google.ts'
+// The shared CORS allows the `apikey` header the get/clear calls send through
+// callAdminFn — an inline CORS without it fails the browser preflight.
+import { cors, json } from '../_shared/http.ts'
 
 // The Hamsun_SOP root storage folder (same id the folder picker uses).
 const STORAGE_FOLDER_ID = '1ERAgtoCpbhCEzFYq0gxhfbXc_rM6l9LQ'
 const FORMAT_FOLDER = 'SOP Format'
-
-const cors = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-}
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
-}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
