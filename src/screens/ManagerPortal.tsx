@@ -70,25 +70,49 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
 
   if (!branch || !dept) return <div className="allclear">No branches or departments yet.</div>
 
+  // SOPs and managers are one-per-department across every branch (branch-
+  // independent); staff belong to a branch. So SOP/manager counts are
+  // department-wide, staff counts are for the branch being viewed.
   const staffCount = read.staff().filter((s) => s.department_id === dept.id && s.branch_id === branch.id).length
-  const mgrCount = read.managers().filter((m) => m.department_id === dept.id && m.branch_id === branch.id).length
-  // A manager runs one department across every branch, so her SOP/test counts
-  // are department-wide; an admin's counts are for the branch she is viewing.
-  const sopCount = isAdmin ? sopsOf(dept.id, branch.code).length : deptSopsAll(dept.id).length
+  const mgrCount = read.managers().filter((m) => m.department_id === dept.id).length
+  const sopCount = deptSopsAll(dept.id).length
   const testCount = isAdmin ? testsOf(dept.id, branch.code).length : deptTestsAll(dept.id).length
-  const tiles: Array<{ key: Page; icon: ReactNode; title: string; sub: string }> = [
-    { key: 'sops', icon: <SopSectionIcon />, title: 'SOPs', sub: isAdmin ? `${sopCount} here · sign-off & publish` : `${sopCount} · every branch · sign-off` },
-    { key: 'tests', icon: <TestSectionIcon />, title: 'Tests & scores', sub: isAdmin ? `${testCount} here · assign & create` : `${testCount} · every branch · assign & score` },
-    { key: 'staff', icon: <StaffSectionIcon />, title: 'Staff', sub: isAdmin ? `${staffCount} here · add & codes` : `${staffCount} here · codes` },
-  ]
-  if (isAdmin) {
-    tiles.push(
-      { key: 'managers', icon: <ManagerSectionIcon />, title: 'Managers', sub: `${mgrCount} here · access & postings` },
-      { key: 'branches', icon: <BranchSectionIcon />, title: 'Branches', sub: `${branches.length} · add, rename, status` },
-      { key: 'departments', icon: <DepartmentSectionIcon />, title: 'Departments', sub: `${departments.length} · add, rename, delete` },
-    )
-  }
 
+  type TileDef = { key: Page; icon: ReactNode; title: string; sub: string }
+  const sopTile: TileDef = { key: 'sops', icon: <SopSectionIcon />, title: 'SOPs', sub: `${sopCount} · every branch · sign-off` }
+  const testTile: TileDef = { key: 'tests', icon: <TestSectionIcon />, title: 'Tests & scores', sub: isAdmin ? `${testCount} · assign & score` : `${testCount} · every branch · assign & score` }
+  const staffTile: TileDef = { key: 'staff', icon: <StaffSectionIcon />, title: 'Staff', sub: isAdmin ? `${staffCount} here · add & codes` : `${staffCount} here · codes` }
+  const managerTile: TileDef = { key: 'managers', icon: <ManagerSectionIcon />, title: 'Managers', sub: `${mgrCount} · every branch · access` }
+  const branchTile: TileDef = { key: 'branches', icon: <BranchSectionIcon />, title: 'Branches', sub: `${branches.length} · add, rename, status` }
+  const deptTile: TileDef = { key: 'departments', icon: <DepartmentSectionIcon />, title: 'Departments', sub: `${departments.length} · add, rename, delete` }
+
+  const renderTile = (t: TileDef) => (
+    <button key={t.key} className="mtile" onClick={() => setPage(t.key)}>
+      <span className="mtile-ico">{t.icon}</span>
+      <span className="mtile-body">
+        <span className="mtile-title">{t.title}</span>
+        <span className="mtile-sub">{t.sub}</span>
+      </span>
+      <span className="mtile-go" aria-hidden>›</span>
+    </button>
+  )
+
+  // Not a page — opens a popup. The one SOP format template is the same for
+  // every branch, so it sits with the branch-independent tiles.
+  const formatTile = (
+    <button className="mtile" onClick={() => setFormatOpen(true)}>
+      <span className="mtile-ico"><SopSectionIcon /></span>
+      <span className="mtile-body">
+        <span className="mtile-title">SOP format</span>
+        <span className="mtile-sub">{isAdmin ? 'upload the template managers write in' : 'the template to write your SOPs in'}</span>
+      </span>
+      <span className="mtile-go" aria-hidden>⤢</span>
+    </button>
+  )
+
+  // The "Viewing branch" picker only matters for branch-dependent views: the
+  // staff roster (staff belong to a branch) and, for an admin, test scores.
+  const showBranchOnPage = page !== 'home' && (page === 'staff' || (isAdmin && page === 'tests'))
   const branchSelect = (
     <div className="filters">
       <div className="field">
@@ -106,14 +130,6 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
     <>
       {isAdmin ? (
         <div className="filters">
-          <div className="field">
-            <label htmlFor="a-branch">Branch</label>
-            <select id="a-branch" value={aBranch} onChange={(e) => setABranch(e.target.value)}>
-              {branches.map((b) => (
-                <option key={b.id} value={b.code}>{b.code} — {b.name}</option>
-              ))}
-            </select>
-          </div>
           <div className="field">
             <label htmlFor="a-dept">Department</label>
             <select id="a-dept" value={aDept} onChange={(e) => setADept(e.target.value)}>
@@ -138,47 +154,39 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
       )}
 
       {page === 'home' ? (
-        <>
-          <div className="mtiles">
-            {tiles.map((t) => (
-              <button key={t.key} className="mtile" onClick={() => setPage(t.key)}>
-                <span className="mtile-ico">{t.icon}</span>
-                <span className="mtile-body">
-                  <span className="mtile-title">{t.title}</span>
-                  <span className="mtile-sub">{t.sub}</span>
-                </span>
-                <span className="mtile-go" aria-hidden>›</span>
-              </button>
-            ))}
-            {/* Not a page — opens a popup where the admin manages the one SOP
-                format template, and a manager can view/download it. */}
-            <button className="mtile" onClick={() => setFormatOpen(true)}>
-              <span className="mtile-ico"><SopSectionIcon /></span>
-              <span className="mtile-body">
-                <span className="mtile-title">SOP format</span>
-                <span className="mtile-sub">{isAdmin ? 'upload the template managers write in' : 'the template to write your SOPs in'}</span>
-              </span>
-              <span className="mtile-go" aria-hidden>⤢</span>
-            </button>
-          </div>
-          {!isAdmin && (
-            <>
-              {branchSelect}
-              <EmployeeResults dept={dept} branch={branch} />
-            </>
-          )}
-        </>
+        isAdmin ? (
+          <>
+            {/* Branch-independent: one SOP, one format and the managers are the
+                same for every branch, so they sit above the branch picker. */}
+            <div className="mtiles">
+              {[sopTile, managerTile].map(renderTile)}
+              {formatTile}
+            </div>
+            {branchSelect}
+            {/* Branch-dependent: staff, test scores and org setup. */}
+            <div className="mtiles">
+              {[testTile, staffTile, branchTile, deptTile].map(renderTile)}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="mtiles">
+              {[sopTile, testTile, staffTile].map(renderTile)}
+              {formatTile}
+            </div>
+            {branchSelect}
+            <EmployeeResults dept={dept} branch={branch} />
+          </>
+        )
       ) : (
         <>
-          {/* Staff belong to a branch, so the code roster keeps the branch picker.
-              SOPs and tests are one-per-department across every branch — no branch. */}
-          {!isAdmin && page === 'staff' && branchSelect}
+          {showBranchOnPage && branchSelect}
           <button className="btn backbtn" onClick={() => setPage('home')}>← Menu</button>
 
           {page === 'sops' && (
             <>
-              <SopBoard dept={dept} branch={branch} actor={actor} orgWide={!isAdmin} onOpen={(sop, kind) => setViewer({ sop, kind })} />
-              <AddSopForm dept={dept} branch={branch} actor={actor} lockBranch={false} forceAllBranches={!isAdmin} />
+              <SopBoard dept={dept} branch={branch} actor={actor} orgWide onOpen={(sop, kind) => setViewer({ sop, kind })} />
+              <AddSopForm dept={dept} branch={branch} actor={actor} lockBranch={false} forceAllBranches />
             </>
           )}
 
@@ -201,7 +209,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
 
           {page === 'managers' && isAdmin && (
             <>
-              <ManagerRoster actor={actor} dept={dept} branch={branch} />
+              <ManagerRoster actor={actor} dept={dept} />
               <AddManager actor={actor} dept={dept} branch={branch} />
             </>
           )}
@@ -1552,18 +1560,20 @@ function AddStaff({ actor, dept, branch }: { actor: Actor; dept: Department; bra
 
 /* ---- manager roster: reassign posting, disable / enable, delete ---- */
 
-function ManagerRoster({ actor, dept, branch }: { actor: Actor; dept: Department; branch: Branch }) {
+function ManagerRoster({ actor, dept }: { actor: Actor; dept: Department }) {
+  // A manager runs her whole department across every branch, so the roster is
+  // department-wide — not filtered to a single branch.
   const managers = read
     .managers()
-    .filter((m) => m.department_id === dept.id && m.branch_id === branch.id)
+    .filter((m) => m.department_id === dept.id)
     .sort((a, b) => a.name.localeCompare(b.name))
 
   return (
     <details className="board">
-      <summary><ManagerSectionIcon />Managers — {dept.name} · {branch.code}<span className="hint">{managers.length} with access</span></summary>
+      <summary><ManagerSectionIcon />Managers — {dept.name}<span className="hint">{managers.length} with access · all branches</span></summary>
       <div className="card-body">
         {managers.length === 0 ? (
-          <div className="empty-row">No manager has access here yet — add one below.</div>
+          <div className="empty-row">No manager has access to this department yet — add one below.</div>
         ) : (
           managers.map((m) => <ManagerRow key={m.id} actor={actor} manager={m} />)
         )}
