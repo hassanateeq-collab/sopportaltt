@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   api,
   read,
@@ -9,6 +9,8 @@ import {
   attemptPermission,
   openGrant,
   assignedTestsFor,
+  notificationsFor,
+  refreshStaffData,
   ApiError,
 } from '../data/store'
 import type { Attempt, Certification, Sop, Staff, Test } from '../types'
@@ -16,6 +18,7 @@ import { sopsForStaff } from '../lib/scope'
 import { certStatus, daysUntil } from '../lib/certs'
 import { fmt, fmtD } from '../lib/format'
 import { toast } from '../lib/toast'
+import { playChime, showBanner, unlockAudio, ensureNotifyPermission, notifyEnabled, notifyBlocked } from '../lib/notify'
 import { DocIcon, TestIcon } from '../components/icons'
 import { Viewer } from '../components/Viewer'
 import { TestRunner } from './TestRunner'
@@ -31,6 +34,40 @@ export function StaffPortal({ staff, token, onLogout }: { staff: Staff; token: s
   const [view, setView] = useState<{ sop: Sop; kind: 'doc' | 'video'; justSigned?: boolean } | null>(null)
   const [testView, setTestView] = useState<string | null>(null)
   const [taking, setTaking] = useState<Test | null>(null)
+
+  // Poll for new department alerts (a new SOP or an assigned test). Each new
+  // one plays a soft bell, shows an OS notification banner and an in-app toast.
+  // The notification rows themselves are created server-side for the relevant
+  // department/assignees only, so this simply surfaces what's meant for me.
+  useEffect(() => {
+    const seen = new Set(notificationsFor(staff.id).map((n) => n.id))
+    const unlock = () => unlockAudio()
+    window.addEventListener('pointerdown', unlock, { once: true })
+    let stop = false
+
+    const tick = async () => {
+      try {
+        const notes = await refreshStaffData(token)
+        if (stop) return
+        const fresh = notes.filter((n) => n.staff_id === staff.id && !seen.has(n.id))
+        if (!fresh.length) return
+        fresh.forEach((n) => seen.add(n.id))
+        playChime()
+        const many = fresh.length > 1
+        showBanner(many ? `${fresh.length} new updates` : 'Hamsun SOP Portal', many ? 'New SOPs / tests for you' : fresh[0].text)
+        toast(many ? `${fresh.length} new updates for you` : fresh[0].text)
+      } catch {
+        /* ignore transient poll errors */
+      }
+    }
+
+    const id = window.setInterval(tick, 45000)
+    return () => {
+      stop = true
+      window.clearInterval(id)
+      window.removeEventListener('pointerdown', unlock)
+    }
+  }, [staff.id, token])
 
   const sops = useMemo(() => sopsForStaff(read.sops(), staff, branch.code), [staff, branch.code, read.sops()])
   const tests = useMemo(() => assignedTestsFor(staff), [staff, read.assignments(), read.tests()])
@@ -133,12 +170,33 @@ export function StaffPortal({ staff, token, onLogout }: { staff: Staff; token: s
 function Crumbs({ staff, onLogout }: { staff: Staff; onLogout: () => void }) {
   const branch = read.branch(staff.branch_id)
   const dept = read.department(staff.department_id)
+  const [alertsOn, setAlertsOn] = useState(notifyEnabled())
+
+  async function turnOnAlerts() {
+    unlockAudio()
+    const ok = await ensureNotifyPermission()
+    setAlertsOn(ok || notifyEnabled())
+    if (ok) {
+      playChime()
+      toast('Alerts on — you’ll hear a bell for new SOPs and tests')
+    } else {
+      toast(notifyBlocked() ? 'Notifications are blocked — allow them in your browser settings' : 'Allow notifications to get alerts')
+    }
+  }
+
   return (
     <div className="crumbs">
       <span className="here">{branch?.code}</span>
       <span className="sep">/</span>
       <span className="here">{dept?.name}</span>
       <span className="who">
+        {alertsOn ? (
+          <span title="Alerts are on" style={{ marginRight: 10 }}>🔔</span>
+        ) : (
+          <button onClick={() => void turnOnAlerts()} style={{ color: 'var(--brass-deep)', fontWeight: 600, marginRight: 10 }}>
+            🔔 Turn on alerts
+          </button>
+        )}
         {staff.name} ·{' '}
         <button onClick={onLogout} style={{ color: 'var(--pine)', fontWeight: 600 }}>Sign out</button>
       </span>

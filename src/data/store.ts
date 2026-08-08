@@ -991,6 +991,19 @@ async function activateStaffSession(token: string): Promise<Staff | null> {
   return applyStaffData(payload)
 }
 
+/**
+ * Re-fetch the signed-in staff member's portal (used by the alert poller) and
+ * return their notifications so the caller can detect newly-arrived ones. The
+ * cache is refreshed as a side effect, so new SOP/test tiles appear too.
+ */
+export async function refreshStaffData(token: string): Promise<Notification[]> {
+  if (!isSupabaseEnabled) return db.notifications.slice()
+  const payload = await fetchStaffData(token)
+  if (!payload || payload.error) return db.notifications.slice()
+  applyStaffData(payload)
+  return db.notifications.slice()
+}
+
 /** On boot, resume a still-valid staff token and hydrate the cache. */
 async function resumeSupabaseStaffSession(): Promise<void> {
   if (resumedActor) return // a manager/admin owns this tab
