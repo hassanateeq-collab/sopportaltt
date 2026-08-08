@@ -156,16 +156,18 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
       {page === 'home' ? (
         isAdmin ? (
           <>
-            {/* Branch-independent: one SOP, one format and the managers are the
-                same for every branch, so they sit above the branch picker. */}
+            {/* Branch-independent: one SOP, one format, the managers, and the
+                branch/department setup are the same regardless of which branch
+                you're viewing, so they sit above the branch picker. */}
             <div className="mtiles">
               {[sopTile, managerTile].map(renderTile)}
               {formatTile}
+              {[branchTile, deptTile].map(renderTile)}
             </div>
             {branchSelect}
-            {/* Branch-dependent: staff, test scores and org setup. */}
+            {/* Branch-dependent: staff and test scores for the selected branch. */}
             <div className="mtiles">
-              {[testTile, staffTile, branchTile, deptTile].map(renderTile)}
+              {[testTile, staffTile].map(renderTile)}
             </div>
           </>
         ) : (
@@ -563,13 +565,16 @@ function TestBoard({ dept, branch, actor, orgWide }: { dept: Department; branch:
     return () => { active = false }
   }, [])
   const tests = orgWide ? deptTestsAll(dept.id) : testsOf(dept.id, branch.code)
+  // The manager sees scores for all branches; the admin sees just the branch
+  // she has selected, so the score rows filter to that branch.
+  const branchId = orgWide ? undefined : branch.id
   return (
     <details className="board" open>
-      <summary><TestSectionIcon />Tests &amp; scores — {orgWide ? dept.name : `${dept.name} · ${branch.code}`}<span className="hint">Assign anyone · latest score shown</span></summary>
+      <summary><TestSectionIcon />Tests &amp; scores — {orgWide ? dept.name : `${dept.name} · ${branch.code}`}<span className="hint">{orgWide ? 'Assign anyone · latest score shown' : `scores for ${branch.code}`}</span></summary>
       {tests.length === 0 ? (
         <div className="empty-row">No tests for this department{orgWide ? '' : ' at this branch'} — create one below.</div>
       ) : (
-        tests.map((t) => <TestRow key={t.id} test={t} people={everyone} actor={actor} />)
+        tests.map((t) => <TestRow key={t.id} test={t} people={everyone} actor={actor} branchId={branchId} />)
       )}
     </details>
   )
@@ -579,13 +584,17 @@ function TestRow({
   test,
   people,
   actor,
+  branchId,
 }: {
   test: Test
   people: OrgStaff[]
   actor: Actor
+  /** When set (admin viewing one branch), show only that branch's scores. */
+  branchId?: string
 }) {
   const assignedIds = new Set(read.assignments().filter((a) => a.test_id === test.id).map((a) => a.staff_id))
-  const assigned = people.filter((p) => assignedIds.has(p.id))
+  const assignedAll = people.filter((p) => assignedIds.has(p.id))
+  const assigned = branchId ? assignedAll.filter((p) => p.branch_id === branchId) : assignedAll
   const valid = assigned.filter((p) => {
     const c = latestCertification(p.id, test.id)
     return c && certStatus(c) === 'valid'
@@ -610,7 +619,7 @@ function TestRow({
       </div>
 
       {assigned.length === 0 ? (
-        <div className="names"><span className="nm">Nobody assigned yet</span></div>
+        <div className="names"><span className="nm">{branchId && assignedAll.length ? 'No one at this branch assigned' : 'Nobody assigned yet'}</span></div>
       ) : (
         <div className="names">
           {assigned.map((p) => {
