@@ -212,6 +212,19 @@ deletes the old Drive file. Deploy it (reuses the `GOOGLE_*` secrets):
 supabase functions deploy attach-video
 ```
 
+### Optional: the SOP format template (the **SOP format** tile)
+
+The home **SOP format** tile opens a popup where an admin uploads a single
+org-wide template document (Word or PDF) that managers write their SOPs in.
+Drive is the source of truth — the file lives in a `SOP Format` folder created
+under the Hamsun_SOP root; there is no database table. Managers (and admins) can
+view/download it; only an admin can upload, replace or remove it. Deploy it
+(reuses the `GOOGLE_*` secrets):
+
+```bash
+supabase functions deploy sop-format
+```
+
 ## Stage 5 — AI test generation (Gemini)
 
 `generate-test` reads an SOP's PDF from Drive and drafts questions with the

@@ -1699,6 +1699,46 @@ details.board > summary .hint {
   transform: translateX(-50%) translateY(0);
 }
 
+/* ---- centred popup (SOP format) ---- */
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 40, 32, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 85;
+}
+
+.modal-card {
+  background: var(--card);
+  border-radius: var(--r);
+  width: 100%;
+  max-width: 460px;
+  max-height: 88vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 50px rgba(20, 40, 32, 0.35);
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--disp);
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.modal-head > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .foot {
   margin-top: 34px;
   font-family: var(--mono);

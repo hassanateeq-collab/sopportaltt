@@ -58,6 +58,31 @@ export async function uploadToDrive(
   return json.id as string
 }
 
+/** List the (non-folder) files inside a Drive folder, newest first. */
+export async function listFiles(token: string, parentId: string): Promise<Array<{ id: string; name: string }>> {
+  const q = encodeURIComponent(
+    `'${parentId}' in parents and mimeType!='application/vnd.google-apps.folder' and trashed=false`,
+  )
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&orderBy=createdTime desc&pageSize=25&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!res.ok) throw new Error(`Drive file list failed: ${await res.text()}`)
+  const json = await res.json()
+  return (json.files ?? []).map((f: { id: string; name: string }) => ({ id: f.id, name: f.name }))
+}
+
+/** Share a file as reader for anyone with the link — viewable AND downloadable
+ * (unlike makeViewOnly, which blocks copy/download). Used for the SOP format
+ * template a manager needs to download and write their SOP into. */
+export async function shareReadable(token: string, fileId: string): Promise<void> {
+  await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions?supportsAllDrives=true`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role: 'reader', type: 'anyone' }),
+  })
+}
+
 /** List the sub-folders of a Drive folder. */
 export async function listFolders(token: string, parentId: string): Promise<Array<{ id: string; name: string }>> {
   const q = encodeURIComponent(

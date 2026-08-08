@@ -401,6 +401,57 @@ export async function uploadSopViaFunction(
   await hydrateFromSupabase()
 }
 
+/* ------------------------------------------------------------ SOP format ---- */
+
+export interface SopFormat {
+  id: string
+  name: string
+}
+
+/** A Drive link to view/download a file shared as reader-for-anyone. */
+export function driveFileViewLink(fileId: string): string {
+  return `https://drive.google.com/file/d/${fileId}/view`
+}
+
+/** The current org-wide SOP format template a manager writes SOPs in, or null. */
+export async function getSopFormat(): Promise<SopFormat | null> {
+  if (!isSupabaseEnabled) return null
+  const j = await callAdminFn('sop-format', { action: 'get' })
+  return (j.format as SopFormat | null) ?? null
+}
+
+/** Admin only: replace the SOP format template with an uploaded document. */
+export async function setSopFormat(file: File): Promise<SopFormat> {
+  if (!isSupabaseEnabled) throw new ApiError('Uploading the SOP format works in the live app.')
+  if (!supabase) throw new ApiError('Not connected to the database.')
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) throw new ApiError('Please sign in again.')
+
+  const fd = new FormData()
+  fd.set('action', 'set')
+  fd.set('file', file)
+
+  let res: Response
+  try {
+    res = await fetch(`${functionsBase}/sop-format`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+      body: fd,
+    })
+  } catch {
+    throw new ApiError('Could not reach the SOP format function.')
+  }
+  if (res.status === 404) throw new ApiError('The sop-format function isn’t deployed yet — see supabase/SETUP.md.')
+  const j = await res.json().catch(() => ({}))
+  if (!res.ok) throw new ApiError((j as { error?: string }).error ?? 'Upload failed.')
+  return (j as { format: SopFormat }).format
+}
+
+/** Admin only: remove the SOP format template. */
+export async function clearSopFormat(): Promise<void> {
+  await callAdminFn('sop-format', { action: 'clear' })
+}
+
 /**
  * Add or replace the training video on an EXISTING SOP, without bumping the
  * version (a video change is not a new revision, so it doesn't reopen sign-off).
