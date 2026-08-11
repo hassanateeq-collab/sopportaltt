@@ -122,6 +122,23 @@ export type ApprovalStatus =
   | 'authorized'
   | 'rejected'
 
+/** One entry in an SOP's sign-off record for the current review round. */
+export interface ApprovalEvent {
+  /** Who acted: a review role, 'admin', or 'manager' (the submitter). */
+  role: ManagerRole | 'admin'
+  name: string
+  action: 'submitted' | 'approved' | 'authorized' | 'rejected'
+  note?: string | null
+  at: Iso
+}
+
+export const APPROVAL_ACTION_LABELS: Record<ApprovalEvent['action'], string> = {
+  submitted: 'Submitted',
+  approved: 'Approved',
+  authorized: 'Authorised',
+  rejected: 'Sent back',
+}
+
 export const APPROVAL_STATUS_LABELS: Record<ApprovalStatus, string> = {
   draft: 'Draft',
   branch_review: 'With Branch Manager',
@@ -165,6 +182,8 @@ export interface Sop {
   approval_note?: string | null
   /** Name of the manager who last submitted this SOP for review. */
   submitted_by?: string | null
+  /** Ordered sign-off record for the current review round (submit → … → authorise). */
+  approval_trail?: ApprovalEvent[] | null
   updated_at: Iso
   published_by: string
 }

@@ -115,9 +115,12 @@ Deno.serve(async (req) => {
       if (status !== 'draft' && status !== 'rejected' && status !== 'authorized') {
         return json({ error: 'This SOP is already in review.' }, 409)
       }
+      const trailRole = role.kind === 'admin' ? 'admin' : role.role
+      // A fresh submission starts a new sign-off round, so the trail resets.
+      const trail = [{ role: trailRole, name: role.name, action: 'submitted', note: null, at: new Date().toISOString() }]
       const { error } = await admin
         .from('sops')
-        .update({ approval_status: 'branch_review', submitted_by: role.name, approval_note: null, updated_at: new Date().toISOString() })
+        .update({ approval_status: 'branch_review', submitted_by: role.name, approval_note: null, approval_trail: trail, updated_at: new Date().toISOString() })
         .eq('id', sopId)
       if (error) return json({ error: error.message }, 500)
       return json({ ok: true })
@@ -136,11 +139,15 @@ Deno.serve(async (req) => {
       }
 
       const note = String(body.note ?? '').trim() || null
+      const trailRole = role.kind === 'admin' ? 'admin' : role.role
+      const priorTrail = Array.isArray(sop.approval_trail) ? sop.approval_trail : []
+      const now = new Date().toISOString()
 
       if (action === 'reject') {
+        const trail = [...priorTrail, { role: trailRole, name: role.name, action: 'rejected', note, at: now }]
         const { error } = await admin
           .from('sops')
-          .update({ approval_status: 'rejected', approval_note: note, updated_at: new Date().toISOString() })
+          .update({ approval_status: 'rejected', approval_note: note, approval_trail: trail, updated_at: now })
           .eq('id', sopId)
         if (error) return json({ error: error.message }, 500)
         return json({ ok: true })
@@ -148,9 +155,10 @@ Deno.serve(async (req) => {
 
       const next = nextStatusOnApprove(status, String(body.target ?? ''))
       if (!next) return json({ error: 'There is nothing to approve at this stage.' }, 409)
+      const trail = [...priorTrail, { role: trailRole, name: role.name, action: next === 'authorized' ? 'authorized' : 'approved', note, at: now }]
       const { error } = await admin
         .from('sops')
-        .update({ approval_status: next, approval_note: note, updated_at: new Date().toISOString() })
+        .update({ approval_status: next, approval_note: note, approval_trail: trail, updated_at: now })
         .eq('id', sopId)
       if (error) return json({ error: error.message }, 500)
 

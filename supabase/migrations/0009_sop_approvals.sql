@@ -23,6 +23,11 @@ alter table public.sops
   check (approval_status in ('draft', 'branch_review', 'admin_review', 'hr_review', 'ceo_review', 'authorized', 'rejected'));
 alter table public.sops add column if not exists approval_note text;
 alter table public.sops add column if not exists submitted_by text;
+-- The sign-off record for the current review round: an ordered list of
+-- { role, name, action, note, at } — who submitted, who approved, who
+-- authorised. Reset when the SOP is (re)submitted so "approved by all" reflects
+-- the round that made it live.
+alter table public.sops add column if not exists approval_trail jsonb not null default '[]'::jsonb;
 
 -- The manager_* helpers must ignore the review roles, so a Branch Manager / HR /
 -- CEO never inherits a department manager's SOP/test read+write access.

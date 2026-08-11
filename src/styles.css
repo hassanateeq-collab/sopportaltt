@@ -506,6 +506,78 @@ textarea {
   padding-left: 12px;
 }
 
+/* The sign-off record shown at the bottom of an SOP / in a review card. */
+.sop-approvals {
+  margin-top: 22px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+.sop-approvals-head {
+  font-family: var(--disp);
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--ink-soft);
+  margin-bottom: 10px;
+}
+.sop-approvals-head.done {
+  color: var(--pine);
+}
+.approval-trail {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.atr {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+}
+.atr-mark {
+  color: var(--pine);
+  font-weight: 700;
+}
+.atr-role {
+  font-weight: 700;
+  color: var(--pine-deep);
+}
+.atr-action {
+  color: var(--ink-faint);
+}
+.atr-by {
+  font-weight: 600;
+}
+.atr-at {
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 11px;
+  margin-left: auto;
+}
+.atr-note {
+  flex-basis: 100%;
+  color: var(--ink-soft);
+  font-style: italic;
+}
+.atr-authorized {
+  border-color: var(--pine-tint);
+  background: var(--pine-tint);
+}
+.atr-rejected {
+  border-color: var(--exp-line);
+  background: var(--exp-bg);
+}
+.atr-rejected .atr-mark {
+  color: var(--exp);
+}
+
 /* ------------------------------------------------------------- sections -- */
 
 .duty-note {

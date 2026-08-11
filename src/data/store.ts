@@ -2002,6 +2002,8 @@ export const api = {
     sop.approval_status = 'branch_review'
     sop.submitted_by = actorName(actor)
     sop.approval_note = null
+    // A fresh submission starts a new sign-off round, so the trail resets.
+    sop.approval_trail = [{ role: actor.kind === 'admin' ? 'admin' : actor.manager.role, name: actorName(actor), action: 'submitted', note: null, at: nowIso() }]
     sop.updated_at = nowIso()
     commit()
   },
@@ -2033,14 +2035,20 @@ export const api = {
     const callerRoleName = actor.kind === 'admin' ? 'admin' : actor.manager.role
     if (callerRoleName !== reviewer) throw new ApiError('This SOP is waiting on a different reviewer.')
 
+    const trailRole = actor.kind === 'admin' ? 'admin' : actor.manager.role
+    const prior = Array.isArray(sop.approval_trail) ? sop.approval_trail : []
+    const note = input.note?.trim() || null
+
     if (input.decision === 'reject') {
       sop.approval_status = 'rejected'
-      sop.approval_note = input.note?.trim() || null
+      sop.approval_note = note
+      sop.approval_trail = [...prior, { role: trailRole, name: actorName(actor), action: 'rejected', note, at: nowIso() }]
     } else {
       const next = nextStatusOnApprove(sop.approval_status, input.target)
       if (!next) throw new ApiError('There is nothing to approve at this stage.')
       sop.approval_status = next
-      sop.approval_note = input.note?.trim() || null
+      sop.approval_note = note
+      sop.approval_trail = [...prior, { role: trailRole, name: actorName(actor), action: next === 'authorized' ? 'authorized' : 'approved', note, at: nowIso() }]
       if (next === 'authorized') {
         for (const staff of eligibleStaffFor(sop)) {
           notify(staff.id, 'sop_published', `New SOP ${sop.code} — ${sop.title} — has been published for your department.`)

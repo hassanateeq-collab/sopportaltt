@@ -30,8 +30,8 @@ import { generateSopDocx, sopContentHtml, sopNumber, SOP_DOCX_MIME } from '../li
 import { SopEditor } from '../components/SopEditor'
 import type { Editor } from '@tiptap/react'
 import type { Branch, BranchScope, Department, Difficulty, Language, Manager, Sop, Staff, Test } from '../types'
-import { LANGUAGE_NAMES, APPROVAL_STATUS_LABELS, MANAGER_ROLE_LABELS } from '../types'
-import type { ApprovalStatus, ManagerRole } from '../types'
+import { LANGUAGE_NAMES, APPROVAL_STATUS_LABELS, APPROVAL_ACTION_LABELS, MANAGER_ROLE_LABELS } from '../types'
+import type { ApprovalStatus, ManagerRole, ApprovalEvent } from '../types'
 import { isReviewerRole, isInReview } from '../lib/approval'
 import { scopeIncludes } from '../lib/scope'
 import { certStatus, daysUntil } from '../lib/certs'
@@ -412,6 +412,7 @@ function ApprovalsBoard({ actor }: { actor: Actor }) {
 function ReviewCard({ actor, sop, isAdminStep, onDone }: { actor: Actor; sop: Sop; isAdminStep: boolean; onDone: () => void }) {
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
+  const [showVideo, setShowVideo] = useState(false)
   const html = useMemo(() => recomposeSopHtml(sop), [sop])
   const deptName = read.department(sop.department_id)?.name ?? '—'
 
@@ -439,6 +440,12 @@ function ReviewCard({ actor, sop, isAdminStep, onDone }: { actor: Actor; sop: So
         <span className="demo-hint" style={{ margin: 0 }}>{deptName}{sop.submitted_by ? ` · submitted by ${sop.submitted_by}` : ''}</span>
       </div>
 
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+        {sop.video_file_id && (
+          <button className="btn sm" onClick={() => setShowVideo(true)}>▶ Watch training video</button>
+        )}
+      </div>
+
       <details className="inline" style={{ marginTop: 6 }}>
         <summary>Read the SOP</summary>
         {html ? (
@@ -452,6 +459,8 @@ function ReviewCard({ actor, sop, isAdminStep, onDone }: { actor: Actor; sop: So
           </div>
         )}
       </details>
+
+      {sop.approval_trail && sop.approval_trail.length > 0 && <ApprovalTrail sop={sop} />}
 
       <div className="field" style={{ marginTop: 8 }}>
         <label>Note to the author {isAdminStep ? '' : '(required to send back)'}</label>
@@ -471,7 +480,42 @@ function ReviewCard({ actor, sop, isAdminStep, onDone }: { actor: Actor; sop: So
         )}
         <button className="btn sm danger" disabled={busy} onClick={() => void act('reject')}>✕ Send back</button>
       </div>
+
+      {showVideo && (
+        <Viewer sop={sop} initialKind="video" showViewOnly={false} onClose={() => setShowVideo(false)} />
+      )}
     </div>
+  )
+}
+
+/**
+ * The sign-off record for an SOP's current review round — who submitted, who
+ * approved, who authorised, and any notes. Shown at the bottom of the SOP page
+ * and in each reviewer's card, and headed "approved by all" once it is live.
+ */
+function ApprovalTrail({ sop }: { sop: Sop }) {
+  const trail = sop.approval_trail ?? []
+  if (!trail.length) return null
+  const authorised = sop.approval_status === 'authorized'
+  const roleLabel = (r: ApprovalEvent['role']) => (r === 'admin' ? 'Admin' : MANAGER_ROLE_LABELS[r])
+  return (
+    <section className="sop-approvals">
+      <div className={`sop-approvals-head ${authorised ? 'done' : ''}`}>
+        {authorised ? '✓ Authorised — approved by all' : 'Approval progress'}
+      </div>
+      <ol className="approval-trail">
+        {trail.map((e, i) => (
+          <li key={i} className={`atr atr-${e.action}`}>
+            <span className="atr-mark" aria-hidden>{e.action === 'rejected' ? '✕' : e.action === 'submitted' ? '↑' : '✓'}</span>
+            <span className="atr-role">{roleLabel(e.role)}</span>
+            <span className="atr-action">{APPROVAL_ACTION_LABELS[e.action]}</span>
+            <span className="atr-by">{e.name}</span>
+            <span className="atr-at">{fmtD(e.at)}</span>
+            {e.note && <span className="atr-note">“{e.note}”</span>}
+          </li>
+        ))}
+      </ol>
+    </section>
   )
 }
 
@@ -508,6 +552,7 @@ function SopReader({ sop, onBack, onEdit }: { sop: Sop; onBack: () => void; onEd
           )}
         </div>
       )}
+      <ApprovalTrail sop={sop} />
     </>
   )
 }
