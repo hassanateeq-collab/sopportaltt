@@ -191,7 +191,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
 
           {page === 'sops' && (
             <>
-              <SopBoard dept={dept} branch={branch} actor={actor} orgWide onOpen={(sop, kind) => setViewer({ sop, kind })} />
+              <SopBoard dept={dept} branch={branch} actor={actor} orgWide onOpen={(sop, kind) => setViewer({ sop, kind })} onEditSop={setEditing} />
               <AddSopForm dept={dept} branch={branch} actor={actor} lockBranch={false} forceAllBranches />
             </>
           )}
@@ -502,6 +502,7 @@ function SopBoard({
   actor,
   orgWide,
   onOpen,
+  onEditSop,
 }: {
   dept: Department
   branch: Branch
@@ -509,6 +510,8 @@ function SopBoard({
   /** Manager view: one department across every branch — ignore the branch. */
   orgWide: boolean
   onOpen: (sop: Sop, kind: 'doc' | 'video') => void
+  /** Open the SOP in the live in-portal editor (managers/admins). */
+  onEditSop: (sop: Sop) => void
 }) {
   const people = orgWide ? deptStaffAll(dept.id) : staffOf(dept.id, branch.id)
   const sops = orgWide ? deptSopsAll(dept.id) : sopsOf(dept.id, branch.code)
@@ -530,7 +533,7 @@ function SopBoard({
                   {s.document_file_id && <span className="livechip">LIVE · DRIVE</span>}{' '}
                   {s.video_file_id && <span className="vidchip">▶ VIDEO</span>}
                 </span>
-                <button className="btn sm" onClick={() => onOpen(s, 'doc')}>Doc</button>
+                <button className="btn sm primary" onClick={() => onEditSop(s)}>📄 Open &amp; edit</button>
                 <button className="btn sm" onClick={() => onOpen(s, 'video')}>▶ Video</button>
                 <span className={`brow-frac ${full ? 'full' : 'gap'}`}>{signed}/{eligible.length} signed</span>
               </div>
