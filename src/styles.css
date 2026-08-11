@@ -2025,6 +2025,61 @@ details.board > summary .hint {
   pointer-events: none;
 }
 
+/* Shared rich-content styling for the editor and the read views. */
+.sopeditor-area .ProseMirror a,
+.sopview a,
+.soppage a {
+  color: var(--pine);
+  text-decoration: underline;
+}
+
+.sopeditor-area .ProseMirror mark,
+.sopview mark,
+.soppage mark {
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.sopeditor-area .ProseMirror img,
+.sopview img,
+.soppage img {
+  max-width: 100%;
+  height: auto;
+}
+
+.sopeditor-area .ProseMirror img.ProseMirror-selectednode {
+  outline: 2px solid var(--pine);
+}
+
+.sopeditor-area .ProseMirror ul[data-type='taskList'],
+.sopview ul[data-type='taskList'],
+.soppage ul[data-type='taskList'] {
+  list-style: none;
+  padding-left: 0.2em;
+}
+
+.sopeditor-area .ProseMirror ul[data-type='taskList'] li,
+.sopview ul[data-type='taskList'] li,
+.soppage ul[data-type='taskList'] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0.2em 0;
+}
+
+.sopeditor-area .ProseMirror ul[data-type='taskList'] li > label,
+.sopview ul[data-type='taskList'] li > label,
+.soppage ul[data-type='taskList'] li > label {
+  margin-top: 3px;
+  flex: 0 0 auto;
+}
+
+.sopeditor-area .ProseMirror ul[data-type='taskList'] li > div,
+.sopview ul[data-type='taskList'] li > div,
+.soppage ul[data-type='taskList'] li > div {
+  flex: 1 1 auto;
+}
+
 /* -------------------------------------------------------------- spinner -- */
 
 .spinner {
