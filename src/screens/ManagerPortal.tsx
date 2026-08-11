@@ -70,7 +70,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
 
   // A manager runs her whole department across every branch, so she gets a
   // branch selector too (department locked to hers); an admin picks both.
-  const managerHomeBranchCode = actor.kind === 'manager' ? read.branch(actor.manager.branch_id)?.code ?? '' : ''
+  const managerHomeBranchCode = actor.kind === 'manager' && actor.manager.branch_id ? read.branch(actor.manager.branch_id)?.code ?? '' : ''
   const [aBranch, setABranch] = useState(isAdmin ? branches[0]?.code ?? '' : managerHomeBranchCode || branches[0]?.code || '')
   const [aDept, setADept] = useState(departments[0]?.id ?? '')
   const [viewer, setViewer] = useState<{ sop: Sop; kind: 'doc' | 'video' } | null>(null)
@@ -80,7 +80,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
   const [formatOpen, setFormatOpen] = useState(false)
 
   const branch = read.branchByCode(aBranch)
-  const dept = isAdmin ? read.department(aDept) : read.department(actor.manager.department_id)
+  const dept = isAdmin ? read.department(aDept) : read.department(actor.manager.department_id ?? '')
 
   if (!branch || !dept) return <div className="allclear">No branches or departments yet.</div>
 
@@ -1987,12 +1987,16 @@ function ManagerRoster({ actor, dept }: { actor: Actor; dept: Department }) {
 }
 
 function ManagerRow({ actor, manager }: { actor: Actor; manager: Manager }) {
-  const [deptId, setDeptId] = useState(manager.department_id)
-  const [branchId, setBranchId] = useState(manager.branch_id)
+  const [deptId, setDeptId] = useState(manager.department_id ?? read.departments()[0]?.id ?? '')
+  const [branchId, setBranchId] = useState(manager.branch_id ?? read.branches()[0]?.id ?? '')
   const [role, setRole] = useState<ManagerRole>(manager.role ?? 'manager')
   const [email, setEmail] = useState(manager.email)
   const [password, setPassword] = useState('')
-  const postingDirty = deptId !== manager.department_id || branchId !== manager.branch_id || role !== (manager.role ?? 'manager')
+  // Only a department manager carries a department; a Branch Manager carries a
+  // branch but no department; HR / CEO are org-wide (both null).
+  const effDept = role === 'manager' ? deptId : null
+  const effBranch = role === 'manager' || role === 'branch_manager' ? branchId : null
+  const postingDirty = effDept !== manager.department_id || effBranch !== manager.branch_id || role !== (manager.role ?? 'manager')
   const loginDirty = email.trim().toLowerCase() !== manager.email || password.trim() !== ''
 
   return (
@@ -2002,7 +2006,7 @@ function ManagerRow({ actor, manager }: { actor: Actor; manager: Manager }) {
           {manager.name}
           <span className="rolechip">{MANAGER_ROLE_LABELS[manager.role ?? 'manager']}</span>
           {manager.role === 'branch_manager' && (
-            <span className="ver" style={{ marginLeft: 6 }}>{read.branch(manager.branch_id)?.code ?? '—'}</span>
+            <span className="ver" style={{ marginLeft: 6 }}>{manager.branch_id ? read.branch(manager.branch_id)?.code ?? '—' : '—'}</span>
           )}
           {!manager.active && <span className="vidchip" style={{ marginLeft: 6 }}>DISABLED</span>}
         </span>
@@ -2013,16 +2017,23 @@ function ManagerRow({ actor, manager }: { actor: Actor; manager: Manager }) {
           <select value={role} onChange={(e) => setRole(e.target.value as ManagerRole)}>
             {(Object.keys(MANAGER_ROLE_LABELS) as ManagerRole[]).map((r) => <option key={r} value={r}>{MANAGER_ROLE_LABELS[r]}</option>)}
           </select></div>
-        <div className="field"><label>{role === 'manager' ? 'Department' : 'Department (home)'}</label>
-          <select value={deptId} onChange={(e) => setDeptId(e.target.value)}>{read.departments().map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
-        <div className="field"><label>Branch (home)</label>
-          <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{read.branches().map((b) => <option key={b.id} value={b.id}>{b.code}</option>)}</select></div>
+        {role === 'manager' && (
+          <div className="field"><label>Department</label>
+            <select value={deptId} onChange={(e) => setDeptId(e.target.value)}>{read.departments().map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
+        )}
+        {(role === 'manager' || role === 'branch_manager') && (
+          <div className="field"><label>{role === 'branch_manager' ? 'Branch (reviews)' : 'Branch (home)'}</label>
+            <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{read.branches().map((b) => <option key={b.id} value={b.id}>{b.code}</option>)}</select></div>
+        )}
+        {(role === 'hr' || role === 'ceo') && (
+          <div className="field" style={{ alignSelf: 'flex-end' }}><span className="demo-hint" style={{ margin: 0 }}>Org-wide — no department or branch.</span></div>
+        )}
       </div>
       <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
         <button
           className="btn sm primary"
           disabled={!postingDirty}
-          onClick={() => run(() => api.updateManager(actor, manager.id, { department_id: deptId, branch_id: branchId, role }), `${manager.name} updated`)}
+          onClick={() => run(() => api.updateManager(actor, manager.id, { department_id: effDept, branch_id: effBranch, role }), `${manager.name} updated`)}
         >
           Save posting
         </button>
@@ -2093,7 +2104,6 @@ function AddManager({
   const [branchId, setBranchId] = useState(branch.id)
   const [busy, setBusy] = useState(false)
   const [issued, setIssued] = useState<{ name: string; email: string; password: string | null; role: ManagerRole } | null>(null)
-  const isReviewer = role !== 'manager'
 
   return (
     <details className="board">
@@ -2116,14 +2126,21 @@ function AddManager({
         <div className="field"><label>Email (their Supabase Auth login)</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@hamsun.example" /></div>
         <div className="field"><label>Temporary password — blank = auto-generate</label>
           <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="at least 8 characters, or leave blank" /></div>
-        <div className="fieldrow">
-          <div className="field"><label>{isReviewer ? 'Department (home — access is org-wide)' : 'Department'}</label>
-            <select value={deptId} onChange={(e) => setDeptId(e.target.value)}>{read.departments().map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
-          <div className="field"><label>{role === 'branch_manager' ? 'Branch this manager reviews' : isReviewer ? 'Branch (home)' : 'Branch'}</label>
-            <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{read.branches().map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}</select>
-            {role === 'branch_manager' && <span className="demo-hint">They only see SOPs whose branch scope includes {read.branch(branchId)?.code ?? 'this branch'}.</span>}
+        {(role === 'manager' || role === 'branch_manager') && (
+          <div className="fieldrow">
+            {role === 'manager' && (
+              <div className="field"><label>Department</label>
+                <select value={deptId} onChange={(e) => setDeptId(e.target.value)}>{read.departments().map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
+            )}
+            <div className="field"><label>{role === 'branch_manager' ? 'Branch this manager reviews' : 'Branch'}</label>
+              <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{read.branches().map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}</select>
+              {role === 'branch_manager' && <span className="demo-hint">They only see SOPs whose branch scope includes {read.branch(branchId)?.code ?? 'this branch'}.</span>}
+            </div>
           </div>
-        </div>
+        )}
+        {(role === 'hr' || role === 'ceo') && (
+          <div className="field"><span className="demo-hint" style={{ margin: 0 }}>{MANAGER_ROLE_LABELS[role]} is org-wide — no department or branch.</span></div>
+        )}
         <button
           className="btn primary block"
           disabled={busy}

@@ -39,14 +39,17 @@ Deno.serve(async (req) => {
     if (action === 'create') {
       const name = String(body.name ?? '').trim()
       const email = String(body.email ?? '').trim().toLowerCase()
-      const departmentId = String(body.department_id ?? '')
-      const branchId = String(body.branch_id ?? '')
       const supplied = String(body.password ?? '')
       const ROLES = ['manager', 'branch_manager', 'hr', 'ceo']
       const role = ROLES.includes(String(body.role ?? '')) ? String(body.role) : 'manager'
+      // Only a department manager is tied to a department; a Branch Manager keeps
+      // a branch but no department; HR and the CEO are org-wide (both null).
+      const departmentId = role === 'manager' ? String(body.department_id ?? '') || null : null
+      const branchId = role === 'manager' || role === 'branch_manager' ? String(body.branch_id ?? '') || null : null
       if (!name) return json({ error: 'A manager needs a name.' }, 400)
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: 'That email does not look right.' }, 400)
-      if (!departmentId || !branchId) return json({ error: 'Choose a department and branch.' }, 400)
+      if (role === 'manager' && !departmentId) return json({ error: 'Choose a department.' }, 400)
+      if ((role === 'manager' || role === 'branch_manager') && !branchId) return json({ error: 'Choose a branch.' }, 400)
 
       const { data: existing } = await admin.from('managers').select('id').eq('email', email).maybeSingle()
       if (existing) return json({ error: 'A manager with that email already exists.' }, 409)

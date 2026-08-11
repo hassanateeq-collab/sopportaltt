@@ -74,9 +74,13 @@ export interface Manager {
   id: Uuid
   name: string
   email: string
-  /** A department manager owns exactly one department at exactly one branch. */
-  department_id: Uuid
-  branch_id: Uuid
+  /**
+   * A department manager owns exactly one department at exactly one branch. The
+   * review roles carry less: a Branch Manager has a branch but no department;
+   * HR and the CEO are org-wide (both null).
+   */
+  department_id: Uuid | null
+  branch_id: Uuid | null
   active: boolean
   /** Review role. Defaults to 'manager' for rows created before this existed. */
   role: ManagerRole

@@ -7,6 +7,12 @@ alter table public.managers
   add column if not exists role text not null default 'manager'
   check (role in ('manager', 'branch_manager', 'hr', 'ceo'));
 
+-- Review roles are not tied to a department: a Branch Manager has a branch but
+-- no department; HR and the CEO are org-wide (no department, no branch). Only a
+-- department 'manager' carries both, so these columns can no longer be NOT NULL.
+alter table public.managers alter column department_id drop not null;
+alter table public.managers alter column branch_id drop not null;
+
 -- Approval workflow on each SOP:
 --   draft -> branch_review -> admin_review -> (hr_review) -> ceo_review -> authorized
 -- 'rejected' bounces it back to the author to fix and resubmit. Existing SOPs

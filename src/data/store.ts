@@ -418,7 +418,7 @@ export async function approvalQueue(actor: Actor): Promise<Sop[]> {
     let list = read.sops().filter((s) => s.approval_status === stage)
     // A Branch Manager reviews only SOPs whose branch scope includes their branch.
     if (actor.kind === 'manager' && actor.manager.role === 'branch_manager') {
-      const code = read.branch(actor.manager.branch_id)?.code
+      const code = actor.manager.branch_id ? read.branch(actor.manager.branch_id)?.code : undefined
       list = code ? list.filter((s) => scopeIncludes(s.branch_scope, code)) : []
     }
     return list
@@ -2339,13 +2339,18 @@ export const api = {
     input: { name: string; email: string; department_id: string; branch_id: string; password?: string; role?: Manager['role'] },
   ): Promise<{ manager: Manager; password: string | null }> {
     const role = input.role ?? 'manager'
+    // Only a department manager is tied to a department; a Branch Manager keeps
+    // a branch but no department; HR and the CEO are org-wide (both null).
+    const departmentId = role === 'manager' ? input.department_id : null
+    const branchId = role === 'manager' || role === 'branch_manager' ? input.branch_id : null
+
     if (isSupabaseEnabled) {
       const j = await callAdminFn('manage-managers', {
         action: 'create',
         name: input.name,
         email: input.email,
-        department_id: input.department_id,
-        branch_id: input.branch_id,
+        department_id: departmentId,
+        branch_id: branchId,
         password: input.password ?? '',
         role,
       })
@@ -2358,13 +2363,14 @@ export const api = {
     if (!input.name.trim()) throw new ApiError('A manager needs a name.')
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new ApiError('That email does not look right.')
     if (db.managers.some((m) => m.email === email)) throw new ApiError('That manager already exists.')
+    if ((role === 'manager' || role === 'branch_manager') && !branchId) throw new ApiError('Choose a branch.')
 
     const manager: Manager = {
       id: id('mg'),
       name: input.name.trim(),
       email,
-      department_id: input.department_id,
-      branch_id: input.branch_id,
+      department_id: departmentId,
+      branch_id: branchId,
       active: true,
       role,
     }
@@ -2380,7 +2386,7 @@ export const api = {
   async updateManager(
     actor: Actor,
     managerId: string,
-    changes: { name?: string; department_id?: string; branch_id?: string; active?: boolean; role?: Manager['role'] },
+    changes: { name?: string; department_id?: string | null; branch_id?: string | null; active?: boolean; role?: Manager['role'] },
   ): Promise<void> {
     const patch: Record<string, unknown> = {}
     if (changes.name !== undefined) patch.name = changes.name.trim()
