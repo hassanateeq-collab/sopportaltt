@@ -1914,7 +1914,9 @@ details.board > summary .hint {
   color: var(--pine);
 }
 
-.se-sel {
+/* Prefixed with .sopeditor to beat the app's `.field select/input { width:100% }`. */
+.sopeditor .se-sel {
+  width: auto;
   height: 30px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -1923,6 +1925,10 @@ details.board > summary .hint {
   padding: 0 6px;
   color: var(--ink);
 }
+
+.sopeditor .se-sel.se-style { width: 118px; }
+.sopeditor .se-sel.se-font { width: 96px; }
+.sopeditor .se-sel.se-size { width: 66px; }
 
 .se-color {
   display: inline-flex;
@@ -1937,13 +1943,14 @@ details.board > summary .hint {
   cursor: pointer;
 }
 
-.se-color input[type='color'] {
-  width: 18px;
-  height: 18px;
+.sopeditor .se-color input[type='color'] {
+  width: 20px;
+  height: 20px;
   padding: 0;
   border: none;
   background: none;
   cursor: pointer;
+  flex: 0 0 auto;
 }
 
 .se-div {

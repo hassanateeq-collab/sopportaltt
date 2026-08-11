@@ -106,7 +106,7 @@ function Toolbar({ editor }: { editor: Editor }) {
       <span className="se-div" />
 
       <select
-        className="se-sel"
+        className="se-sel se-style"
         title="Paragraph style"
         value={headingValue}
         onChange={(e) => {
@@ -122,7 +122,7 @@ function Toolbar({ editor }: { editor: Editor }) {
       </select>
 
       <select
-        className="se-sel"
+        className="se-sel se-font"
         title="Font"
         value=""
         onChange={(e) => {
@@ -136,7 +136,7 @@ function Toolbar({ editor }: { editor: Editor }) {
       </select>
 
       <select
-        className="se-sel"
+        className="se-sel se-size"
         title="Font size"
         value=""
         onChange={(e) => { if (e.target.value) editor.chain().focus().setFontSize(`${e.target.value}px`).run() }}
