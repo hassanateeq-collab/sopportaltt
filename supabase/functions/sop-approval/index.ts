@@ -20,8 +20,17 @@
 
 import { serviceClient, callerRole, bearer, type CallerRole } from '../_shared/auth.ts'
 import { cors, json } from '../_shared/http.ts'
+import { scopeIncludes } from '../_shared/scope.ts'
+import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 type Status = 'draft' | 'branch_review' | 'admin_review' | 'hr_review' | 'ceo_review' | 'authorized' | 'rejected'
+
+/** The branch code for a branch id (a Branch Manager reviews only their branch). */
+async function branchCodeFor(admin: SupabaseClient, branchId: string | null): Promise<string | null> {
+  if (!branchId) return null
+  const { data } = await admin.from('branches').select('code').eq('id', branchId).maybeSingle()
+  return (data?.code as string) ?? null
+}
 
 /** Which single actor may clear a given stage. */
 function reviewerForStage(status: Status): 'branch_manager' | 'admin' | 'hr' | 'ceo' | null {
@@ -79,7 +88,14 @@ Deno.serve(async (req) => {
         .eq('approval_status', stage)
         .order('updated_at', { ascending: true })
       if (error) return json({ error: error.message }, 500)
-      return json({ sops: data ?? [] })
+      let sops = data ?? []
+      // A Branch Manager reviews only SOPs whose branch scope includes THEIR
+      // branch; HR and the CEO are org-wide and see every SOP at their stage.
+      if (role.kind === 'manager' && role.role === 'branch_manager') {
+        const code = await branchCodeFor(admin, role.branch_id)
+        sops = sops.filter((s) => scopeIncludes(s.branch_scope, code))
+      }
+      return json({ sops })
     }
 
     const sopId = String(body.sop_id ?? '')
@@ -111,6 +127,11 @@ Deno.serve(async (req) => {
       if (!owner) return json({ error: 'This SOP isn’t awaiting review.' }, 409)
       const callerKind = role.kind === 'admin' ? 'admin' : role.role
       if (callerKind !== owner) return json({ error: 'This SOP is waiting on a different reviewer.' }, 403)
+      // A Branch Manager may only act on SOPs that include their own branch.
+      if (role.kind === 'manager' && role.role === 'branch_manager') {
+        const code = await branchCodeFor(admin, role.branch_id)
+        if (!scopeIncludes(sop.branch_scope, code)) return json({ error: 'This SOP is for a different branch.' }, 403)
+      }
 
       const note = String(body.note ?? '').trim() || null
 

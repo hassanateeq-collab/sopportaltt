@@ -99,7 +99,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
   const managerTile: TileDef = { key: 'managers', icon: <ManagerSectionIcon />, title: 'Managers', sub: `${mgrCount} · every branch · access` }
   const branchTile: TileDef = { key: 'branches', icon: <BranchSectionIcon />, title: 'Branches', sub: `${branches.length} · add, rename, status` }
   const deptTile: TileDef = { key: 'departments', icon: <DepartmentSectionIcon />, title: 'Departments', sub: `${departments.length} · add, rename, delete` }
-  const settingsTile: TileDef = { key: 'settings', icon: <span style={{ fontSize: 26, lineHeight: 1 }}>⚙️</span>, title: 'Settings', sub: 'Drive folders · SOP & test routing' }
+  const settingsTile: TileDef = { key: 'settings', icon: <span style={{ fontSize: 26, lineHeight: 1 }}>⚙️</span>, title: 'Settings', sub: 'Approval access · Drive folders · routing' }
   const pendingApprovals = read.sops().filter((s) => s.approval_status === 'admin_review').length
   const approvalsTile: TileDef = { key: 'approvals', icon: <span style={{ fontSize: 26, lineHeight: 1 }}>✅</span>, title: 'SOP approvals', sub: pendingApprovals ? `${pendingApprovals} awaiting your review` : 'review the SOP chain' }
 
@@ -235,13 +235,18 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
           {page === 'managers' && isAdmin && (
             <>
               <ManagerRoster actor={actor} dept={dept} />
-              <AddManager actor={actor} dept={dept} branch={branch} />
+              <AddManager actor={actor} dept={dept} branch={branch} roles={['manager']} title="Add department manager" />
             </>
           )}
 
           {page === 'branches' && isAdmin && <BranchAdmin actor={actor} />}
           {page === 'departments' && isAdmin && <DepartmentAdmin actor={actor} />}
-          {page === 'settings' && isAdmin && <DriveSettings actor={actor} />}
+          {page === 'settings' && isAdmin && (
+            <>
+              <ApprovalAccessBoard actor={actor} />
+              <DriveSettings actor={actor} />
+            </>
+          )}
           {page === 'approvals' && isAdmin && <ApprovalsBoard actor={actor} />}
         </>
       )}
@@ -1958,33 +1963,24 @@ function AddStaff({ actor, dept, branch }: { actor: Actor; dept: Department; bra
 function ManagerRoster({ actor, dept }: { actor: Actor; dept: Department }) {
   // A department manager runs her whole department across every branch, so the
   // roster is department-wide (not filtered to a branch). The approval-chain
-  // roles (Branch Manager · HR · CEO) are org-wide, so they show regardless of
-  // which department is selected.
-  const all = read.managers().slice().sort((a, b) => a.name.localeCompare(b.name))
-  const deptManagers = all.filter((m) => (m.role ?? 'manager') === 'manager' && m.department_id === dept.id)
-  const reviewers = all.filter((m) => (m.role ?? 'manager') !== 'manager')
+  // roles (Branch Manager · HR · CEO) are managed by the admin under Settings.
+  const managers = read
+    .managers()
+    .filter((m) => (m.role ?? 'manager') === 'manager' && m.department_id === dept.id)
+    .sort((a, b) => a.name.localeCompare(b.name))
 
   return (
-    <details className="board" open>
-      <summary><ManagerSectionIcon />Managers &amp; approval access<span className="hint">{deptManagers.length} in {dept.name} · {reviewers.length} approval</span></summary>
+    <details className="board">
+      <summary><ManagerSectionIcon />Managers — {dept.name}<span className="hint">{managers.length} with access · all branches</span></summary>
       <div className="card-body">
-        <div className="subhead">Department managers — {dept.name}</div>
-        {deptManagers.length === 0 ? (
+        {managers.length === 0 ? (
           <div className="empty-row">No manager has access to this department yet — add one below.</div>
         ) : (
-          deptManagers.map((m) => <ManagerRow key={m.id} actor={actor} manager={m} />)
+          managers.map((m) => <ManagerRow key={m.id} actor={actor} manager={m} />)
         )}
-
-        <div className="subhead" style={{ marginTop: 14 }}>Approval chain — Branch Manager · HR · CEO (org-wide)</div>
-        <p className="demo-hint" style={{ marginTop: 0 }}>
-          These accounts review SOPs. A manager submits an SOP → the Branch Manager reviews it → you (Admin) review it →
-          HR (optional) → the CEO authorises it, which makes it live to staff.
+        <p className="demo-hint" style={{ marginTop: 8 }}>
+          Branch Manager, HR and CEO approval access is managed under <strong>Settings → Approval access</strong>.
         </p>
-        {reviewers.length === 0 ? (
-          <div className="empty-row">No approval access created yet — add a Branch Manager, HR or CEO below.</div>
-        ) : (
-          reviewers.map((m) => <ManagerRow key={m.id} actor={actor} manager={m} />)
-        )}
       </div>
     </details>
   )
@@ -2005,6 +2001,9 @@ function ManagerRow({ actor, manager }: { actor: Actor; manager: Manager }) {
         <span className="brow-title">
           {manager.name}
           <span className="rolechip">{MANAGER_ROLE_LABELS[manager.role ?? 'manager']}</span>
+          {manager.role === 'branch_manager' && (
+            <span className="ver" style={{ marginLeft: 6 }}>{read.branch(manager.branch_id)?.code ?? '—'}</span>
+          )}
           {!manager.active && <span className="vidchip" style={{ marginLeft: 6 }}>DISABLED</span>}
         </span>
       </div>
@@ -2072,11 +2071,24 @@ function ManagerRow({ actor, manager }: { actor: Actor; manager: Manager }) {
   )
 }
 
-function AddManager({ actor, dept, branch }: { actor: Actor; dept: Department; branch: Branch }) {
+function AddManager({
+  actor,
+  dept,
+  branch,
+  roles = ['manager', 'branch_manager', 'hr', 'ceo'],
+  title = 'Add manager or approval access',
+}: {
+  actor: Actor
+  dept: Department
+  branch: Branch
+  /** Which roles this form can create. */
+  roles?: ManagerRole[]
+  title?: string
+}) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [role, setRole] = useState<ManagerRole>('manager')
+  const [role, setRole] = useState<ManagerRole>(roles[0])
   const [deptId, setDeptId] = useState(dept.id)
   const [branchId, setBranchId] = useState(branch.id)
   const [busy, setBusy] = useState(false)
@@ -2085,19 +2097,21 @@ function AddManager({ actor, dept, branch }: { actor: Actor; dept: Department; b
 
   return (
     <details className="board">
-      <summary><AddSectionIcon />Add manager or approval access<span className="hint">creates their sign-in</span></summary>
+      <summary><AddSectionIcon />{title}<span className="hint">creates their sign-in</span></summary>
       <div className="card-body">
-        <div className="field"><label>Access role</label>
-          <select value={role} onChange={(e) => setRole(e.target.value as ManagerRole)}>
-            {(Object.keys(MANAGER_ROLE_LABELS) as ManagerRole[]).map((r) => <option key={r} value={r}>{MANAGER_ROLE_LABELS[r]}</option>)}
-          </select>
-          <span className="demo-hint">
-            {role === 'manager' && 'Creates and runs SOPs & tests for one department.'}
-            {role === 'branch_manager' && 'Reviews a submitted SOP first, before it reaches the Admin.'}
-            {role === 'hr' && 'An optional review step the Admin may route an SOP through.'}
-            {role === 'ceo' && 'Gives the final authorisation that makes an SOP live to staff.'}
-          </span>
-        </div>
+        {roles.length > 1 && (
+          <div className="field"><label>Access role</label>
+            <select value={role} onChange={(e) => setRole(e.target.value as ManagerRole)}>
+              {roles.map((r) => <option key={r} value={r}>{MANAGER_ROLE_LABELS[r]}</option>)}
+            </select>
+            <span className="demo-hint">
+              {role === 'manager' && 'Creates and runs SOPs & tests for one department.'}
+              {role === 'branch_manager' && 'Reviews a submitted SOP first, before it reaches the Admin.'}
+              {role === 'hr' && 'An optional review step the Admin may route an SOP through.'}
+              {role === 'ceo' && 'Gives the final authorisation that makes an SOP live to staff.'}
+            </span>
+          </div>
+        )}
         <div className="field"><label>Name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Faisal" /></div>
         <div className="field"><label>Email (their Supabase Auth login)</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@hamsun.example" /></div>
         <div className="field"><label>Temporary password — blank = auto-generate</label>
@@ -2105,8 +2119,10 @@ function AddManager({ actor, dept, branch }: { actor: Actor; dept: Department; b
         <div className="fieldrow">
           <div className="field"><label>{isReviewer ? 'Department (home — access is org-wide)' : 'Department'}</label>
             <select value={deptId} onChange={(e) => setDeptId(e.target.value)}>{read.departments().map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
-          <div className="field"><label>{isReviewer ? 'Branch (home)' : 'Branch'}</label>
-            <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{read.branches().map((b) => <option key={b.id} value={b.id}>{b.code}</option>)}</select></div>
+          <div className="field"><label>{role === 'branch_manager' ? 'Branch this manager reviews' : isReviewer ? 'Branch (home)' : 'Branch'}</label>
+            <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{read.branches().map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}</select>
+            {role === 'branch_manager' && <span className="demo-hint">They only see SOPs whose branch scope includes {read.branch(branchId)?.code ?? 'this branch'}.</span>}
+          </div>
         </div>
         <button
           className="btn primary block"
@@ -2368,6 +2384,53 @@ function NewDepartment({ actor }: { actor: Actor }) {
         {busy ? <span className="spinner" /> : '＋ Add department'}
       </button>
     </div>
+  )
+}
+
+/* ---- settings: approval access — the SOP review chain (admin) ---- */
+
+/**
+ * Admin-only management of the SOP review chain accounts, shown under Settings:
+ * a Branch Manager per branch, HR, and the CEO — see, edit, add and remove.
+ * (Department managers are managed on the Managers page.)
+ */
+function ApprovalAccessBoard({ actor }: { actor: Actor }) {
+  const all = read.managers().slice().sort((a, b) => a.name.localeCompare(b.name))
+  const branchManagers = all.filter((m) => m.role === 'branch_manager')
+  const hr = all.filter((m) => m.role === 'hr')
+  const ceo = all.filter((m) => m.role === 'ceo')
+  const dept = read.departments()[0]
+  const branch = read.branches()[0]
+
+  const group = (label: string, list: Manager[], empty: string) => (
+    <>
+      <div className="subhead" style={{ marginTop: 12 }}>{label}</div>
+      {list.length === 0 ? (
+        <div className="empty-row">{empty}</div>
+      ) : (
+        list.map((m) => <ManagerRow key={m.id} actor={actor} manager={m} />)
+      )}
+    </>
+  )
+
+  return (
+    <>
+      <details className="board" open>
+        <summary><ManagerSectionIcon />Approval access — SOP review chain<span className="hint">{branchManagers.length + hr.length + ceo.length} accounts</span></summary>
+        <div className="card-body">
+          <p className="demo-hint" style={{ marginTop: 0 }}>
+            A manager submits an SOP → the <strong>Branch Manager</strong> for that branch reviews it → you (Admin) →
+            <strong> HR</strong> (optional) → the <strong>CEO</strong> authorises it, which makes it live to staff.
+          </p>
+          {group('Branch Managers — one per branch', branchManagers, 'No Branch Manager yet — add one below.')}
+          {group('HR', hr, 'No HR access yet — add one below.')}
+          {group('CEO', ceo, 'No CEO access yet — add one below.')}
+        </div>
+      </details>
+      {dept && branch && (
+        <AddManager actor={actor} dept={dept} branch={branch} roles={['branch_manager', 'hr', 'ceo']} title="Add approval access" />
+      )}
+    </>
   )
 }
 

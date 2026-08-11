@@ -413,15 +413,23 @@ export async function uploadSopViaFunction(
  */
 export async function approvalQueue(actor: Actor): Promise<Sop[]> {
   const stage = stageForReviewer(actor.kind === 'admin' ? 'admin' : actor.manager.role)
-  if (!isSupabaseEnabled) {
-    return stage ? read.sops().filter((s) => s.approval_status === stage) : []
+  const localQueue = (): Sop[] => {
+    if (!stage) return []
+    let list = read.sops().filter((s) => s.approval_status === stage)
+    // A Branch Manager reviews only SOPs whose branch scope includes their branch.
+    if (actor.kind === 'manager' && actor.manager.role === 'branch_manager') {
+      const code = read.branch(actor.manager.branch_id)?.code
+      list = code ? list.filter((s) => scopeIncludes(s.branch_scope, code)) : []
+    }
+    return list
   }
+  if (!isSupabaseEnabled) return localQueue()
   try {
     const j = await callAdminFn('sop-approval', { action: 'queue' })
     return (Array.isArray(j.sops) ? j.sops : []) as Sop[]
   } catch {
     // If the function isn't deployed, fall back to whatever the cache holds.
-    return read.sops().filter((s) => s.approval_status === stage)
+    return localQueue()
   }
 }
 

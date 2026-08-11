@@ -150,8 +150,11 @@ default to `authorized` (already live). The migration also makes the
 `manager_*()` helpers ignore the review roles, so a Branch Manager / HR / CEO
 never inherits a department manager's read/write access.
 
-Admins create these accounts in **Managers & approval access**; each reviewer
-signs in on Manager · Admin and gets a focused **review inbox**.
+Admins see, edit and create these accounts under **Settings → Approval access**
+(a **Branch Manager per branch**, HR, and the CEO). A Branch Manager only
+reviews SOPs whose branch scope includes their own branch; HR and the CEO are
+org-wide. Each reviewer signs in on Manager · Admin and gets a focused **review
+inbox**.
 
 ```bash
 supabase db push
