@@ -361,7 +361,7 @@ async function resolveSupabaseActor(): Promise<Actor | null> {
  * Used in Supabase mode instead of the gated api.publishSop.
  */
 export async function uploadSopViaFunction(
-  input: { sop_id?: string; title: string; code?: string; department_id: string; branch_scope: BranchScope; folder_id: string; sop_doc?: SopDoc },
+  input: { title: string; code?: string; department_id: string; branch_scope: BranchScope; folder_id: string },
   pdf: File,
   video: File | null,
 ): Promise<void> {
@@ -370,14 +370,12 @@ export async function uploadSopViaFunction(
   if (!session) throw new ApiError('Please sign in again.')
 
   const fd = new FormData()
-  if (input.sop_id) fd.set('sop_id', input.sop_id)
   fd.set('title', input.title)
   fd.set('code', input.code ?? '')
   fd.set('department_id', input.department_id)
   fd.set('branch_scope', JSON.stringify(input.branch_scope))
   fd.set('folder_id', input.folder_id)
   fd.set('document', pdf)
-  if (input.sop_doc) fd.set('sop_doc', JSON.stringify(input.sop_doc))
   if (video) fd.set('video', video)
 
   let res: Response
@@ -1827,18 +1825,27 @@ export const api = {
    * Nothing is deleted — the old signatures stay as the trail of what was agreed
    * when.
    */
-  /** Demo-mode edit of an SOP's content (Supabase mode goes via upload-sop). */
-  async editSopContent(
-    actor: Actor,
-    sopId: string,
-    changes: { title: string; sop_doc: SopDoc; document_file_id?: string | null },
-  ): Promise<void> {
+  /**
+   * Write an SOP's editable content (body + purpose + applies-to) so it renders
+   * natively in the portal and can be reopened for editing. Runs client-side
+   * under RLS (a manager on her department, an admin on any), so it needs only
+   * the `sop_doc` column — no Edge Function redeploy. Used right after creating
+   * an SOP and whenever one is edited.
+   */
+  async setSopContent(actor: Actor, sopId: string, changes: { title?: string; sop_doc: SopDoc }): Promise<void> {
+    if (isSupabaseEnabled) {
+      const patch: Record<string, unknown> = { sop_doc: changes.sop_doc, updated_at: new Date().toISOString() }
+      if (changes.title !== undefined && changes.title.trim()) patch.title = changes.title.trim()
+      const { error } = await supabase!.from('sops').update(patch).eq('id', sopId)
+      if (error) throw new ApiError(error.message)
+      await hydrateFromSupabase()
+      return
+    }
     const sop = db.sops.find((s) => s.id === sopId)
     if (!sop) throw new ApiError('That SOP no longer exists.')
     assertCanTouchScope(actor, sop.department_id, sop.branch_scope)
-    sop.title = changes.title.trim()
+    if (changes.title !== undefined && changes.title.trim()) sop.title = changes.title.trim()
     sop.sop_doc = changes.sop_doc
-    if (changes.document_file_id !== undefined) sop.document_file_id = changes.document_file_id
     sop.updated_at = nowIso()
     commit()
   },

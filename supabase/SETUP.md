@@ -100,17 +100,17 @@ folder (view-only), inserts the SOP and notifies staff. The browser never holds
 Drive credentials. (Re-deploy `upload-sop` after this change — it now files a
 `.docx` as well as legacy PDFs, and stores the SOP's rendered HTML.)
 
-Apply the SOP-content migrations first — `0006_sop_html.sql` and
+Apply the SOP-content migrations — `0006_sop_html.sql` and
 `0007_sop_editable.sql` add `document_html` and `sop_doc` to `sops`. `sop_doc`
-holds the editor body + Purpose + Who-This-Applies-To, so editor-authored SOPs
-display **natively in the portal** (the portal's own document view, not the
-Google Drive preview) AND can be **reopened for editing** by a manager/admin
-(the ✎ Edit button in the viewer regenerates the .docx and replaces the Drive
-file):
+holds the editor body + Purpose + Who-This-Applies-To, so an editor-authored SOP
+**opens as a themed page inside the portal** (not the Google Drive preview) and
+can be **reopened for editing** with the ✎ Edit button (managers/admins). The
+content is written **client-side under RLS**, so this needs only the migration —
+no Edge Function redeploy for the native view/edit:
 
 ```bash
 supabase db push        # or: supabase migration up
-supabase functions deploy upload-sop
+# upload-sop only needs redeploying for the .docx naming change (Stage 3a).
 ```
 
 **Why not a service account?** A service account owns no Drive storage, so it

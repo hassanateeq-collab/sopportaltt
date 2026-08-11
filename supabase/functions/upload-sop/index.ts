@@ -166,8 +166,6 @@ Deno.serve(async (req) => {
         version: 1,
         document_file_id: docId,
         video_file_id: videoId,
-        document_html: documentHtml,
-        sop_doc: sopDoc,
         updated_at: new Date().toISOString(),
         published_by: actorName,
       })

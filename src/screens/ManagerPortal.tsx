@@ -191,7 +191,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
 
           {page === 'sops' && (
             <>
-              <SopBoard dept={dept} branch={branch} actor={actor} orgWide onOpen={(sop, kind) => setViewer({ sop, kind })} onEditSop={setEditing} />
+              <SopBoard dept={dept} branch={branch} actor={actor} orgWide onOpen={(sop, kind) => setViewer({ sop, kind })} />
               <AddSopForm dept={dept} branch={branch} actor={actor} lockBranch={false} forceAllBranches />
             </>
           )}
@@ -250,7 +250,6 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
  * Drive file, and updates the stored editable content.
  */
 function EditSopForm({ actor, sop, onClose, onSaved }: { actor: Actor; sop: Sop; onClose: () => void; onSaved: () => void }) {
-  const dept = read.department(sop.department_id)
   const [title, setTitle] = useState(sop.title)
   const [purpose, setPurpose] = useState(sop.sop_doc?.purpose ?? '')
   const [appliesTo, setAppliesTo] = useState(sop.sop_doc?.appliesTo ?? '')
@@ -268,28 +267,9 @@ function EditSopForm({ actor, sop, onClose, onSaved }: { actor: Actor; sop: Sop;
     if (!editor || editor.getText().trim().length === 0) { toast('Write the SOP body'); return }
     const body = editor.getHTML()
     setBusy(true)
-    const meta = {
-      title: title.trim(),
-      code: sop.code,
-      version: sop.version,
-      department: dept?.name ?? '',
-      effectiveDate: fmtD(new Date()),
-      purpose: purpose.trim(),
-      appliesTo: appliesTo.trim(),
-    }
     const sopDoc = { body, purpose: purpose.trim(), appliesTo: appliesTo.trim() }
     try {
-      const blob = await generateSopDocx(meta, body)
-      const docFile = new File([blob], `${sop.code.replace(/[\\/:*?"<>|]/g, '-')}.docx`, { type: SOP_DOCX_MIME })
-      if (isSupabaseEnabled) {
-        await uploadSopViaFunction(
-          { sop_id: sop.id, title: title.trim(), code: sop.code, department_id: sop.department_id, branch_scope: sop.branch_scope, folder_id: '', sop_doc: sopDoc },
-          docFile,
-          null,
-        )
-      } else {
-        await api.editSopContent(actor, sop.id, { title: title.trim(), sop_doc: sopDoc, document_file_id: URL.createObjectURL(blob) })
-      }
+      await api.setSopContent(actor, sop.id, { title: title.trim(), sop_doc: sopDoc })
       toast(`${sop.code} updated`)
       onSaved()
     } catch (e) {
@@ -502,7 +482,6 @@ function SopBoard({
   actor,
   orgWide,
   onOpen,
-  onEditSop,
 }: {
   dept: Department
   branch: Branch
@@ -510,8 +489,6 @@ function SopBoard({
   /** Manager view: one department across every branch — ignore the branch. */
   orgWide: boolean
   onOpen: (sop: Sop, kind: 'doc' | 'video') => void
-  /** Open the SOP in the live in-portal editor (managers/admins). */
-  onEditSop: (sop: Sop) => void
 }) {
   const people = orgWide ? deptStaffAll(dept.id) : staffOf(dept.id, branch.id)
   const sops = orgWide ? deptSopsAll(dept.id) : sopsOf(dept.id, branch.code)
@@ -533,7 +510,7 @@ function SopBoard({
                   {s.document_file_id && <span className="livechip">LIVE · DRIVE</span>}{' '}
                   {s.video_file_id && <span className="vidchip">▶ VIDEO</span>}
                 </span>
-                <button className="btn sm primary" onClick={() => onEditSop(s)}>📄 Open &amp; edit</button>
+                <button className="btn sm" onClick={() => onOpen(s, 'doc')}>📄 Open</button>
                 <button className="btn sm" onClick={() => onOpen(s, 'video')}>▶ Video</button>
                 <span className={`brow-frac ${full ? 'full' : 'gap'}`}>{signed}/{eligible.length} signed</span>
               </div>
@@ -1159,10 +1136,13 @@ function AddSopForm({
 
       if (isSupabaseEnabled) {
         await uploadSopViaFunction(
-          { title: title.trim(), code: codeVal, department_id: dept.id, branch_scope: scope, folder_id: folderId, sop_doc: sopDoc },
+          { title: title.trim(), code: codeVal, department_id: dept.id, branch_scope: scope, folder_id: folderId },
           docFile,
           video?.file ?? null,
         )
+        // Store the editable content so the SOP renders natively in the portal.
+        const created = read.sops().find((s) => s.code === codeVal)
+        if (created) await api.setSopContent(actor, created.id, { sop_doc: sopDoc })
         toast(`Saved as ${codeVal} to ${folderName} — matching ${dept.name} staff notified`)
       } else {
         const s = await api.publishSop(actor, {
