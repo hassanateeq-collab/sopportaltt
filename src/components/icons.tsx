@@ -115,3 +115,21 @@ export function BranchSectionIcon() {
     </svg>
   )
 }
+
+export function ApprovalSectionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="sec-ico" aria-hidden>
+      <path d="M12 2.6l7 2.6v6.1c0 4.6-3 7.7-7 9.5-4-1.8-7-4.9-7-9.5V5.2z" fill={BRASS_SOFT} stroke={PINE} strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M8.4 12.1l2.6 2.6 4.7-5.1" fill="none" stroke={BRASS} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function SettingsSectionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="sec-ico" aria-hidden>
+      <path d="M12 3.2l1.5 1.2 1.9-.3.8 1.7 1.7.9-.3 1.9 1.2 1.5-1.2 1.5.3 1.9-1.7.8-.8 1.8-1.9-.3-1.5 1.2-1.5-1.2-1.9.3-.8-1.8-1.7-.8.3-1.9L4 12l1.2-1.5-.3-1.9 1.7-.9.8-1.7 1.9.3z" fill={BRASS_SOFT} stroke={PINE} strokeWidth="1.5" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="2.6" fill="#fff" stroke={BRASS} strokeWidth="1.6" />
+    </svg>
+  )
+}

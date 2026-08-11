@@ -48,6 +48,8 @@ import {
   AddSectionIcon,
   BranchSectionIcon,
   DepartmentSectionIcon,
+  ApprovalSectionIcon,
+  SettingsSectionIcon,
 } from '../components/icons'
 
 /**
@@ -99,9 +101,9 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
   const managerTile: TileDef = { key: 'managers', icon: <ManagerSectionIcon />, title: 'Managers', sub: `${mgrCount} · every branch · access` }
   const branchTile: TileDef = { key: 'branches', icon: <BranchSectionIcon />, title: 'Branches', sub: `${branches.length} · add, rename, status` }
   const deptTile: TileDef = { key: 'departments', icon: <DepartmentSectionIcon />, title: 'Departments', sub: `${departments.length} · add, rename, delete` }
-  const settingsTile: TileDef = { key: 'settings', icon: <span style={{ fontSize: 26, lineHeight: 1 }}>⚙️</span>, title: 'Settings', sub: 'Approval access · Drive folders · routing' }
+  const settingsTile: TileDef = { key: 'settings', icon: <SettingsSectionIcon />, title: 'Settings', sub: 'Approval access · Drive folders · routing' }
   const pendingApprovals = read.sops().filter((s) => s.approval_status === 'admin_review').length
-  const approvalsTile: TileDef = { key: 'approvals', icon: <span style={{ fontSize: 26, lineHeight: 1 }}>✅</span>, title: 'SOP approvals', sub: pendingApprovals ? `${pendingApprovals} awaiting your review` : 'review the SOP chain' }
+  const approvalsTile: TileDef = { key: 'approvals', icon: <ApprovalSectionIcon />, title: 'SOP approvals', sub: pendingApprovals ? `${pendingApprovals} awaiting your review` : 'review the SOP chain' }
 
   const renderTile = (t: TileDef) => (
     <button key={t.key} className="mtile" onClick={() => setPage(t.key)}>
