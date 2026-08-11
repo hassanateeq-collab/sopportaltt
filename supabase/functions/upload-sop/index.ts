@@ -14,7 +14,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { getUserAccessToken, uploadToDrive, makeViewOnly } from '../_shared/google.ts'
+import { getUserAccessToken, uploadToDrive, makeViewOnly, getFileParent, deleteFromDrive } from '../_shared/google.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -60,6 +60,7 @@ Deno.serve(async (req) => {
 
     // ---- inputs ----
     const form = await req.formData()
+    const sopId = String(form.get('sop_id') ?? '').trim() // present = edit an existing SOP
     const title = String(form.get('title') ?? '').trim()
     const providedCode = String(form.get('code') ?? '').trim().toUpperCase()
     const departmentId = String(form.get('department_id') ?? '')
@@ -68,17 +69,60 @@ Deno.serve(async (req) => {
     const document = form.get('document')
     const video = form.get('video')
     const documentHtml = form.get('document_html') ? String(form.get('document_html')) : null
+    const sopDocRaw = form.get('sop_doc') ? String(form.get('sop_doc')) : null
+    const sopDoc = sopDocRaw ? JSON.parse(sopDocRaw) : null
 
     if (!title) return json({ error: 'Give the SOP a title.' }, 400)
     if (!(document instanceof File)) return json({ error: 'Provide the SOP document.' }, 400)
-    if (!folderId) return json({ error: 'Choose a destination folder.' }, 400)
     if (!G_CLIENT_ID || !G_CLIENT_SECRET || !G_REFRESH) {
       return json({ error: 'Drive is not configured — set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REFRESH_TOKEN.' }, 500)
     }
 
-    // ---- authorisation: a manager runs her whole department across all
-    // branches, so she may publish to any branch scope (a single branch or all
-    // branches) — only the department has to be hers. ----
+    // A manager-authored Word file (in-app editor) or a PDF — name/type it by
+    // what was actually uploaded.
+    const token = await getUserAccessToken(G_CLIENT_ID, G_CLIENT_SECRET, G_REFRESH)
+    const isDocx = (document.type || '').includes('word') || document.name.toLowerCase().endsWith('.docx')
+    const ext = isDocx ? 'docx' : 'pdf'
+    const mime = isDocx ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'application/pdf'
+
+    // ===== EDIT an existing SOP: replace the Drive doc + update the row =====
+    if (sopId) {
+      const { data: cur } = await admin
+        .from('sops')
+        .select('id, code, title, department_id, document_file_id')
+        .eq('id', sopId)
+        .maybeSingle()
+      if (!cur) return json({ error: 'That SOP no longer exists.' }, 404)
+      if (!isAdmin && cur.department_id !== mgrRow!.department_id) {
+        return json({ error: 'You can only edit your own department’s SOPs.' }, 403)
+      }
+      const parent = (cur.document_file_id ? await getFileParent(token, cur.document_file_id) : null) ?? folderId
+      if (!parent) return json({ error: 'Could not locate the SOP’s Drive folder.' }, 500)
+
+      const newDocId = await uploadToDrive(token, parent, `${cur.code} — ${title}.${ext}`, mime, await document.arrayBuffer())
+      await makeViewOnly(token, newDocId)
+
+      const patch: Record<string, unknown> = {
+        title,
+        document_file_id: newDocId,
+        sop_doc: sopDoc,
+        updated_at: new Date().toISOString(),
+      }
+      if (video instanceof File && video.size > 0) {
+        const vId = await uploadToDrive(token, parent, `${cur.code} — ${title} (video)`, video.type || 'video/mp4', await video.arrayBuffer())
+        await makeViewOnly(token, vId)
+        patch.video_file_id = vId
+      }
+      const { data: updated, error: updErr } = await admin.from('sops').update(patch).eq('id', sopId).select('*').single()
+      if (updErr) return json({ error: `Could not update the SOP: ${updErr.message}` }, 500)
+      if (cur.document_file_id && cur.document_file_id !== newDocId) await deleteFromDrive(token, cur.document_file_id).catch(() => {})
+      return json({ sop: updated })
+    }
+
+    // ===== INSERT a new SOP =====
+    if (!folderId) return json({ error: 'Choose a destination folder.' }, 400)
+    // A manager runs her whole department across all branches, so she may publish
+    // to any branch scope — only the department has to be hers.
     if (!isAdmin) {
       if (departmentId !== mgrRow!.department_id) return json({ error: 'You can only publish for your own department.' }, 403)
     }
@@ -101,12 +145,6 @@ Deno.serve(async (req) => {
     if (codes.some((c) => c.toUpperCase() === code)) return json({ error: `Code ${code} is already in use.` }, 400)
 
     // ---- push files to Drive (view-only), as the Hamsun Google account ----
-    const token = await getUserAccessToken(G_CLIENT_ID, G_CLIENT_SECRET, G_REFRESH)
-    // The SOP document may be a manager-authored Word file (from the in-app
-    // editor) or a PDF — name and type it by what was actually uploaded.
-    const isDocx = (document.type || '').includes('word') || document.name.toLowerCase().endsWith('.docx')
-    const ext = isDocx ? 'docx' : 'pdf'
-    const mime = isDocx ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'application/pdf'
     const docId = await uploadToDrive(token, folderId, `${code} — ${title}.${ext}`, mime, await document.arrayBuffer())
     await makeViewOnly(token, docId)
 
@@ -129,6 +167,7 @@ Deno.serve(async (req) => {
         document_file_id: docId,
         video_file_id: videoId,
         document_html: documentHtml,
+        sop_doc: sopDoc,
         updated_at: new Date().toISOString(),
         published_by: actorName,
       })

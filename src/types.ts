@@ -101,12 +101,21 @@ export interface Sop {
   /** Google Drive file id for the training video that belongs to this same SOP. */
   video_file_id: string | null
   /**
-   * Rendered HTML of an editor-authored SOP (header + body), shown natively in
-   * the portal viewer. Null for legacy PDF SOPs, which embed the Drive preview.
+   * Editable content of an editor-authored SOP — the body HTML plus the Purpose
+   * and Who-This-Applies-To text. Lets the portal render the SOP natively AND
+   * reopen it for editing. Null for legacy PDF SOPs, which embed the Drive
+   * preview. (`document_html` is a superseded earlier field, kept for fallback.)
    */
+  sop_doc?: SopDoc | null
   document_html?: string | null
   updated_at: Iso
   published_by: string
+}
+
+export interface SopDoc {
+  body: string
+  purpose: string
+  appliesTo: string
 }
 
 export interface Acknowledgment {

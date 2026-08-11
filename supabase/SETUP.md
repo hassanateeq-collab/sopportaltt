@@ -100,9 +100,13 @@ folder (view-only), inserts the SOP and notifies staff. The browser never holds
 Drive credentials. (Re-deploy `upload-sop` after this change — it now files a
 `.docx` as well as legacy PDFs, and stores the SOP's rendered HTML.)
 
-Apply migration `0006_sop_html.sql` first — it adds a `document_html` column to
-`sops` so editor-authored SOPs display **natively in the portal** (the portal's
-own document view) instead of embedding the Google Drive preview:
+Apply the SOP-content migrations first — `0006_sop_html.sql` and
+`0007_sop_editable.sql` add `document_html` and `sop_doc` to `sops`. `sop_doc`
+holds the editor body + Purpose + Who-This-Applies-To, so editor-authored SOPs
+display **natively in the portal** (the portal's own document view, not the
+Google Drive preview) AND can be **reopened for editing** by a manager/admin
+(the ✎ Edit button in the viewer regenerates the .docx and replaces the Drive
+file):
 
 ```bash
 supabase db push        # or: supabase migration up

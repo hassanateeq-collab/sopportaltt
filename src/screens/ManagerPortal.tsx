@@ -24,7 +24,7 @@ import {
   ApiError,
 } from '../data/store'
 import type { Actor, DraftQuestion, OrgStaff, SopFormat } from '../data/store'
-import { generateSopDocx, sopContentHtml, sopNumber, SOP_DOCX_MIME } from '../lib/sopdoc'
+import { generateSopDocx, sopNumber, SOP_DOCX_MIME } from '../lib/sopdoc'
 import { SopEditor } from '../components/SopEditor'
 import type { Editor } from '@tiptap/react'
 import type { Branch, BranchScope, Department, Difficulty, Language, Manager, Sop, Staff, Test } from '../types'
@@ -65,6 +65,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
   const [aBranch, setABranch] = useState(isAdmin ? branches[0]?.code ?? '' : managerHomeBranchCode || branches[0]?.code || '')
   const [aDept, setADept] = useState(departments[0]?.id ?? '')
   const [viewer, setViewer] = useState<{ sop: Sop; kind: 'doc' | 'video' } | null>(null)
+  const [editing, setEditing] = useState<Sop | null>(null)
   const [page, setPage] = useState<Page>('home')
   const [formatOpen, setFormatOpen] = useState(false)
 
@@ -225,10 +226,106 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
       )}
 
       {viewer && (
-        <Viewer sop={viewer.sop} initialKind={viewer.kind} showViewOnly={false} onClose={() => setViewer(null)} />
+        <Viewer
+          sop={viewer.sop}
+          initialKind={viewer.kind}
+          showViewOnly={false}
+          onClose={() => setViewer(null)}
+          onEdit={() => { setEditing(viewer.sop); setViewer(null) }}
+        />
+      )}
+      {editing && (
+        <EditSopForm actor={actor} sop={editing} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />
       )}
       {formatOpen && <SopFormatModal actor={actor} onClose={() => setFormatOpen(false)} />}
     </>
+  )
+}
+
+/* -------------------------------------------------------------- edit SOP -- */
+
+/**
+ * Reopen an editor-authored SOP for editing (managers/admins). Prefills the
+ * title, purpose, applies-to and body, regenerates the .docx and replaces the
+ * Drive file, and updates the stored editable content.
+ */
+function EditSopForm({ actor, sop, onClose, onSaved }: { actor: Actor; sop: Sop; onClose: () => void; onSaved: () => void }) {
+  const dept = read.department(sop.department_id)
+  const [title, setTitle] = useState(sop.title)
+  const [purpose, setPurpose] = useState(sop.sop_doc?.purpose ?? '')
+  const [appliesTo, setAppliesTo] = useState(sop.sop_doc?.appliesTo ?? '')
+  const [editor, setEditor] = useState<Editor | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  // Load the existing body into the editor once it's ready.
+  useEffect(() => {
+    if (editor && sop.sop_doc?.body) editor.commands.setContent(sop.sop_doc.body)
+  }, [editor, sop.sop_doc?.body])
+
+  async function save() {
+    if (!title.trim()) { toast('Enter the SOP title'); return }
+    if (!purpose.trim() || !appliesTo.trim()) { toast('Fill in purpose and who it applies to'); return }
+    if (!editor || editor.getText().trim().length === 0) { toast('Write the SOP body'); return }
+    const body = editor.getHTML()
+    setBusy(true)
+    const meta = {
+      title: title.trim(),
+      code: sop.code,
+      version: sop.version,
+      department: dept?.name ?? '',
+      effectiveDate: fmtD(new Date()),
+      purpose: purpose.trim(),
+      appliesTo: appliesTo.trim(),
+    }
+    const sopDoc = { body, purpose: purpose.trim(), appliesTo: appliesTo.trim() }
+    try {
+      const blob = await generateSopDocx(meta, body)
+      const docFile = new File([blob], `${sop.code.replace(/[\\/:*?"<>|]/g, '-')}.docx`, { type: SOP_DOCX_MIME })
+      if (isSupabaseEnabled) {
+        await uploadSopViaFunction(
+          { sop_id: sop.id, title: title.trim(), code: sop.code, department_id: sop.department_id, branch_scope: sop.branch_scope, folder_id: '', sop_doc: sopDoc },
+          docFile,
+          null,
+        )
+      } else {
+        await api.editSopContent(actor, sop.id, { title: title.trim(), sop_doc: sopDoc, document_file_id: URL.createObjectURL(blob) })
+      }
+      toast(`${sop.code} updated`)
+      onSaved()
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Could not update the SOP.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal-card" style={{ maxWidth: 920 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <span><SopSectionIcon /> Edit SOP — {sop.code}</span>
+          <button className="v-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="card-body">
+          {!sop.sop_doc && (
+            <div className="notice" style={{ marginBottom: 12 }}>
+              This SOP was created before in-portal editing, so its original body isn't stored — you're starting from a
+              blank body. Title, purpose and applies-to can still be edited.
+            </div>
+          )}
+          <div className="field"><label>SOP title</label>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} /></div>
+          <div className="field"><label>Purpose</label>
+            <textarea value={purpose} onChange={(e) => setPurpose(e.target.value)} rows={2} style={{ width: '100%', resize: 'vertical' }} /></div>
+          <div className="field"><label>Who this applies to</label>
+            <textarea value={appliesTo} onChange={(e) => setAppliesTo(e.target.value)} rows={2} style={{ width: '100%', resize: 'vertical' }} /></div>
+          <div className="field"><label>SOP document</label><SopEditor onEditor={setEditor} /></div>
+          <button className="btn primary block" disabled={busy} onClick={() => void save()}>
+            {busy ? <><span className="spinner" /> Saving…</> : `Save changes to ${sop.code}`}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -1051,15 +1148,15 @@ function AddSopForm({
       purpose: purpose.trim(),
       appliesTo: appliesTo.trim(),
     }
-    // The same composed HTML backs both the .docx and the in-portal view.
-    const contentHtml = sopContentHtml(meta, body)
+    // The editable content backs both the .docx and the in-portal view.
+    const sopDoc = { body, purpose: purpose.trim(), appliesTo: appliesTo.trim() }
     try {
       const blob = await generateSopDocx(meta, body)
       const docFile = new File([blob], `${codeVal.replace(/[\\/:*?"<>|]/g, '-')}.docx`, { type: SOP_DOCX_MIME })
 
       if (isSupabaseEnabled) {
         await uploadSopViaFunction(
-          { title: title.trim(), code: codeVal, department_id: dept.id, branch_scope: scope, folder_id: folderId, document_html: contentHtml },
+          { title: title.trim(), code: codeVal, department_id: dept.id, branch_scope: scope, folder_id: folderId, sop_doc: sopDoc },
           docFile,
           video?.file ?? null,
         )
@@ -1073,7 +1170,7 @@ function AddSopForm({
           code: codeVal,
           document_file_id: URL.createObjectURL(blob),
           video_file_id: video?.src ?? null,
-          document_html: contentHtml,
+          sop_doc: sopDoc,
         })
         toast(`Published as ${s.code} into ${folderName}`)
       }

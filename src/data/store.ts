@@ -45,6 +45,7 @@ import type {
   Question,
   RetestGrant,
   Sop,
+  SopDoc,
   Staff,
   StaffSession,
   Test,
@@ -360,7 +361,7 @@ async function resolveSupabaseActor(): Promise<Actor | null> {
  * Used in Supabase mode instead of the gated api.publishSop.
  */
 export async function uploadSopViaFunction(
-  input: { title: string; code?: string; department_id: string; branch_scope: BranchScope; folder_id: string; document_html?: string },
+  input: { sop_id?: string; title: string; code?: string; department_id: string; branch_scope: BranchScope; folder_id: string; sop_doc?: SopDoc },
   pdf: File,
   video: File | null,
 ): Promise<void> {
@@ -369,13 +370,14 @@ export async function uploadSopViaFunction(
   if (!session) throw new ApiError('Please sign in again.')
 
   const fd = new FormData()
+  if (input.sop_id) fd.set('sop_id', input.sop_id)
   fd.set('title', input.title)
   fd.set('code', input.code ?? '')
   fd.set('department_id', input.department_id)
   fd.set('branch_scope', JSON.stringify(input.branch_scope))
   fd.set('folder_id', input.folder_id)
   fd.set('document', pdf)
-  if (input.document_html) fd.set('document_html', input.document_html)
+  if (input.sop_doc) fd.set('sop_doc', JSON.stringify(input.sop_doc))
   if (video) fd.set('video', video)
 
   let res: Response
@@ -1775,7 +1777,7 @@ export const api = {
       code?: string
       document_file_id?: string | null
       video_file_id?: string | null
-      document_html?: string | null
+      sop_doc?: SopDoc | null
     },
   ): Promise<Sop> {
     assertCanTouchScope(actor, input.department_id, input.branch_scope)
@@ -1806,7 +1808,7 @@ export const api = {
       version: 1,
       document_file_id: input.document_file_id ?? null,
       video_file_id: input.video_file_id ?? null,
-      document_html: input.document_html ?? null,
+      sop_doc: input.sop_doc ?? null,
       updated_at: nowIso(),
       published_by: actorName(actor),
     }
@@ -1825,6 +1827,22 @@ export const api = {
    * Nothing is deleted — the old signatures stay as the trail of what was agreed
    * when.
    */
+  /** Demo-mode edit of an SOP's content (Supabase mode goes via upload-sop). */
+  async editSopContent(
+    actor: Actor,
+    sopId: string,
+    changes: { title: string; sop_doc: SopDoc; document_file_id?: string | null },
+  ): Promise<void> {
+    const sop = db.sops.find((s) => s.id === sopId)
+    if (!sop) throw new ApiError('That SOP no longer exists.')
+    assertCanTouchScope(actor, sop.department_id, sop.branch_scope)
+    sop.title = changes.title.trim()
+    sop.sop_doc = changes.sop_doc
+    if (changes.document_file_id !== undefined) sop.document_file_id = changes.document_file_id
+    sop.updated_at = nowIso()
+    commit()
+  },
+
   async reviseSop(
     actor: Actor,
     sopId: string,

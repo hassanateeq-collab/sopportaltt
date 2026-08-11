@@ -5,6 +5,7 @@ import type { Sop } from '../types'
 import { scopeLabel } from '../lib/scope'
 import { read } from '../data/store'
 import { documentEmbedUrl, videoEmbedUrl, VIEWER_SANDBOX, isInlineSource } from '../lib/drive'
+import { sopContentHtml } from '../lib/sopdoc'
 import { fmtD } from '../lib/format'
 
 /**
@@ -21,21 +22,42 @@ export function Viewer({
   showViewOnly = true,
   onClose,
   footer,
+  onEdit,
 }: {
   sop: Sop
   initialKind?: 'doc' | 'video'
   showViewOnly?: boolean
   onClose: () => void
   footer?: ReactNode
+  /** When provided (manager/admin), shows an Edit button for editor-authored SOPs. */
+  onEdit?: () => void
 }) {
   const [kind, setKind] = useState<'doc' | 'video'>(initialKind)
   const hasVideo = !!sop.video_file_id
   const fileId = kind === 'doc' ? sop.document_file_id : sop.video_file_id
   const dept = read.department(sop.department_id)?.name ?? ''
   const scope = scopeLabel(sop.branch_scope)
-  // An editor-authored SOP is shown natively in the portal (its rendered HTML),
-  // not the Google Drive file preview. Sanitised before it's injected.
-  const safeDoc = useMemo(() => (sop.document_html ? DOMPurify.sanitize(sop.document_html) : ''), [sop.document_html])
+  // An editor-authored SOP is shown natively in the portal — recomposed from its
+  // stored editable content (so the header is always current), sanitised before
+  // it's injected. Falls back to any legacy stored HTML.
+  const safeDoc = useMemo(() => {
+    if (sop.sop_doc) {
+      const html = sopContentHtml(
+        {
+          title: sop.title,
+          code: sop.code,
+          version: sop.version,
+          department: read.department(sop.department_id)?.name ?? '',
+          effectiveDate: fmtD(sop.updated_at),
+          purpose: sop.sop_doc.purpose,
+          appliesTo: sop.sop_doc.appliesTo,
+        },
+        sop.sop_doc.body,
+      )
+      return DOMPurify.sanitize(html)
+    }
+    return sop.document_html ? DOMPurify.sanitize(sop.document_html) : ''
+  }, [sop])
 
   return (
     <div className="viewer">
@@ -49,6 +71,7 @@ export function Viewer({
           <button aria-pressed={kind === 'video'} onClick={() => setKind('video')} disabled={!hasVideo}>▶ Video</button>
         </div>
         {showViewOnly && <span className="vo">VIEW ONLY</span>}
+        {onEdit && <button className="btn sm" style={{ marginRight: 6 }} onClick={onEdit}>✎ Edit</button>}
         <button className="v-close" onClick={onClose} aria-label="Close">✕</button>
       </div>
 
