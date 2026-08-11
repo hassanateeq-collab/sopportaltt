@@ -42,6 +42,8 @@ Deno.serve(async (req) => {
       const departmentId = String(body.department_id ?? '')
       const branchId = String(body.branch_id ?? '')
       const supplied = String(body.password ?? '')
+      const ROLES = ['manager', 'branch_manager', 'hr', 'ceo']
+      const role = ROLES.includes(String(body.role ?? '')) ? String(body.role) : 'manager'
       if (!name) return json({ error: 'A manager needs a name.' }, 400)
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: 'That email does not look right.' }, 400)
       if (!departmentId || !branchId) return json({ error: 'Choose a department and branch.' }, 400)
@@ -68,6 +70,7 @@ Deno.serve(async (req) => {
           department_id: departmentId,
           branch_id: branchId,
           active: true,
+          role,
         })
         .select('*')
         .single()

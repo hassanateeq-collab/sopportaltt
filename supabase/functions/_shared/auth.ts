@@ -87,9 +87,11 @@ export async function staffFromToken(admin: SupabaseClient, token: string): Prom
   return (staff as StaffRow | null) ?? null
 }
 
+export type ManagerRole = 'manager' | 'branch_manager' | 'hr' | 'ceo'
+
 export type CallerRole =
   | { kind: 'admin'; id: string; name: string }
-  | { kind: 'manager'; id: string; name: string; department_id: string; branch_id: string }
+  | { kind: 'manager'; id: string; name: string; department_id: string; branch_id: string; role: ManagerRole }
   | null
 
 /** Resolve a manager/admin's Supabase Auth JWT to their directory row, or null. */
@@ -109,7 +111,7 @@ export async function callerRole(admin: SupabaseClient, jwt: string): Promise<Ca
 
   const { data: m } = await admin
     .from('managers')
-    .select('id, name, department_id, branch_id')
+    .select('id, name, department_id, branch_id, role')
     .eq('auth_user_id', user.id)
     .eq('active', true)
     .maybeSingle()
@@ -120,6 +122,7 @@ export async function callerRole(admin: SupabaseClient, jwt: string): Promise<Ca
       name: m.name as string,
       department_id: m.department_id as string,
       branch_id: m.branch_id as string,
+      role: ((m.role as string) ?? 'manager') as ManagerRole,
     }
   }
   return null

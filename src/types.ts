@@ -53,14 +53,33 @@ export interface Staff {
   created_at: Iso
 }
 
+/**
+ * Sign-in roles that live in the managers table. 'manager' is a department
+ * manager (creates SOPs, runs tests). The other three only review SOPs on the
+ * approval chain and get no department read/write access:
+ *   - branch_manager reviews a submitted SOP first,
+ *   - hr is an optional review step the admin may route to,
+ *   - ceo gives the final authorisation that makes an SOP live to staff.
+ */
+export type ManagerRole = 'manager' | 'branch_manager' | 'hr' | 'ceo'
+
+export const MANAGER_ROLE_LABELS: Record<ManagerRole, string> = {
+  manager: 'Department Manager',
+  branch_manager: 'Branch Manager',
+  hr: 'HR',
+  ceo: 'CEO',
+}
+
 export interface Manager {
   id: Uuid
   name: string
   email: string
-  /** A manager owns exactly one department at exactly one branch. */
+  /** A department manager owns exactly one department at exactly one branch. */
   department_id: Uuid
   branch_id: Uuid
   active: boolean
+  /** Review role. Defaults to 'manager' for rows created before this existed. */
+  role: ManagerRole
 }
 
 export interface Admin {
@@ -82,6 +101,32 @@ export interface Admin {
  * copy per branch. See lib/scope.ts for the derivation.
  */
 export type BranchScope = { kind: 'ALL' } | { kind: 'LIST'; branch_codes: string[] }
+
+/**
+ * Where an SOP sits on the approval chain:
+ *   draft → branch_review → admin_review → (hr_review) → ceo_review → authorized
+ * 'rejected' bounces it back to its author to fix and resubmit. Only an
+ * 'authorized' SOP is ever served to staff. SOPs that pre-date the workflow
+ * default to 'authorized' (already live).
+ */
+export type ApprovalStatus =
+  | 'draft'
+  | 'branch_review'
+  | 'admin_review'
+  | 'hr_review'
+  | 'ceo_review'
+  | 'authorized'
+  | 'rejected'
+
+export const APPROVAL_STATUS_LABELS: Record<ApprovalStatus, string> = {
+  draft: 'Draft',
+  branch_review: 'With Branch Manager',
+  admin_review: 'With Admin',
+  hr_review: 'With HR',
+  ceo_review: 'With CEO',
+  authorized: 'Authorised · live',
+  rejected: 'Sent back',
+}
 
 /* ------------------------------------------------------------------ sops ---- */
 
@@ -110,6 +155,12 @@ export interface Sop {
    */
   sop_doc?: SopDoc | null
   document_html?: string | null
+  /** Where this SOP sits on the review chain. Only 'authorized' reaches staff. */
+  approval_status: ApprovalStatus
+  /** The most recent reviewer note — a rejection reason, or an approval remark. */
+  approval_note?: string | null
+  /** Name of the manager who last submitted this SOP for review. */
+  submitted_by?: string | null
   updated_at: Iso
   published_by: string
 }

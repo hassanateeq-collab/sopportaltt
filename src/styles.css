@@ -427,6 +427,85 @@ textarea {
   color: var(--ink-faint);
 }
 
+/* --------------------------------------------------- SOP approval chain -- */
+
+/* A pill naming where an SOP sits on the review chain. */
+.apchip {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  border-radius: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--line-strong);
+  background: #eef1ec;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+.apchip.ap-branch_review,
+.apchip.ap-admin_review,
+.apchip.ap-hr_review,
+.apchip.ap-ceo_review {
+  color: var(--brass-deep);
+  border-color: var(--brass-line);
+  background: var(--brass-soft);
+}
+.apchip.ap-rejected {
+  color: var(--exp);
+  border-color: var(--exp-line);
+  background: var(--exp-bg);
+}
+.apchip.ap-authorized {
+  color: var(--pine);
+  border-color: var(--pine-tint);
+  background: var(--pine-tint);
+}
+
+/* A pill naming a person's access role in the roster. */
+.rolechip {
+  margin-left: 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 1px 9px;
+  color: var(--pine-deep);
+  background: var(--pine-tint);
+  border: 1px solid #c5dbd6;
+  vertical-align: middle;
+}
+
+/* The author's submit / rejection strip under an SOP row. */
+.approw {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 2px;
+}
+.approw .notice {
+  margin: 0;
+  flex: 1 1 260px;
+}
+.notice.reject {
+  background: var(--exp-bg);
+  border-color: var(--exp-line);
+  color: var(--exp);
+}
+
+/* Sub-heading inside a board (e.g. roster groups). */
+.subhead {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 6px 0 8px;
+}
+
+/* A queued SOP awaiting a reviewer's decision. */
+.reviewcard {
+  border-left: 3px solid var(--brass-line);
+  padding-left: 12px;
+}
+
 /* ------------------------------------------------------------- sections -- */
 
 .duty-note {

@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
       await Promise.all([
         admin.from('branches').select('*'),
         admin.from('departments').select('*'),
-        admin.from('sops').select('*').eq('department_id', staff.department_id),
+        admin.from('sops').select('*').eq('department_id', staff.department_id).eq('approval_status', 'authorized'),
         admin.from('tests').select('*').eq('department_id', staff.department_id).eq('status', 'published'),
         admin.from('test_assignments').select('*').eq('staff_id', staff.id),
       ])
@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
     const haveSop = new Set(sops.map((s) => s.id as string))
     const relSopIds = [...new Set(tests.map((t) => t.related_sop_id as string | null).filter((id): id is string => !!id && !haveSop.has(id)))]
     if (relSopIds.length) {
-      const { data: extraSops } = await admin.from('sops').select('*').in('id', relSopIds)
+      const { data: extraSops } = await admin.from('sops').select('*').in('id', relSopIds).eq('approval_status', 'authorized')
       sops = [...sops, ...(extraSops ?? [])]
     }
 

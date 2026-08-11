@@ -27,6 +27,7 @@ import { hashEmployeeCode, verifyEmployeeCode, generateEmployeeCode } from '../l
 import { addMonths } from '../lib/certs'
 import { nextDocCode, isDocCodeTaken, isValidDocCode } from '../lib/codes'
 import { appliesToStaff, scopeIncludes } from '../lib/scope'
+import { stageForReviewer, canSubmit, nextStatusOnApprove, reviewerForStage } from '../lib/approval'
 import { supabase, isSupabaseEnabled, functionsBase, anonPublicKey } from '../lib/supabase'
 import { DRIVE_DEPARTMENT_FOLDERS } from '../lib/drive'
 import type {
@@ -348,6 +349,7 @@ async function resolveSupabaseActor(): Promise<Actor | null> {
         department_id: m.department_id,
         branch_id: m.branch_id,
         active: m.active,
+        role: (m.role ?? 'manager') as Manager['role'],
       },
     }
   }
@@ -400,6 +402,27 @@ export async function uploadSopViaFunction(
     throw new ApiError(msg)
   }
   await hydrateFromSupabase()
+}
+
+/**
+ * The SOPs awaiting the signed-in reviewer's action. An admin's queue is the
+ * SOPs at admin_review; a branch_manager / hr / ceo see the SOPs sitting at
+ * their own stage. In Supabase mode reviewers have no RLS read on in-review
+ * SOPs, so this goes through the sop-approval Edge Function (service_role); in
+ * demo mode it filters the local cache.
+ */
+export async function approvalQueue(actor: Actor): Promise<Sop[]> {
+  const stage = stageForReviewer(actor.kind === 'admin' ? 'admin' : actor.manager.role)
+  if (!isSupabaseEnabled) {
+    return stage ? read.sops().filter((s) => s.approval_status === stage) : []
+  }
+  try {
+    const j = await callAdminFn('sop-approval', { action: 'queue' })
+    return (Array.isArray(j.sops) ? j.sops : []) as Sop[]
+  } catch {
+    // If the function isn't deployed, fall back to whatever the cache holds.
+    return read.sops().filter((s) => s.approval_status === stage)
+  }
 }
 
 /* ------------------------------------------------------------ SOP format ---- */
@@ -1796,6 +1819,9 @@ export const api = {
       throw new ApiError(`${code} is already in use. Codes must identify one procedure.`)
     }
 
+    // An admin publishes live; a department manager's SOP enters the review
+    // chain as a draft and is invisible to staff until the CEO authorises it.
+    const authorized = actor.kind === 'admin'
     const sop: Sop = {
       id: id('sop'),
       code,
@@ -1807,13 +1833,18 @@ export const api = {
       document_file_id: input.document_file_id ?? null,
       video_file_id: input.video_file_id ?? null,
       sop_doc: input.sop_doc ?? null,
+      approval_status: authorized ? 'authorized' : 'draft',
+      approval_note: null,
+      submitted_by: null,
       updated_at: nowIso(),
       published_by: actorName(actor),
     }
     db.sops.push(sop)
 
-    for (const staff of eligibleStaffFor(sop)) {
-      notify(staff.id, 'sop_published', `New SOP ${sop.code} — ${sop.title} — has been published for your department.`)
+    if (authorized) {
+      for (const staff of eligibleStaffFor(sop)) {
+        notify(staff.id, 'sop_published', `New SOP ${sop.code} — ${sop.title} — has been published for your department.`)
+      }
     }
     commit()
     return sop
@@ -1937,6 +1968,78 @@ export const api = {
     assertCanTouchScope(actor, sop.department_id, sop.branch_scope)
     db.sops = db.sops.filter((s) => s.id !== sopId)
     db.acknowledgments = db.acknowledgments.filter((a) => a.sop_id !== sopId)
+    commit()
+  },
+
+  /* ---- SOP approval chain (sop-approval Edge Function) ---- */
+
+  /**
+   * The author submits a draft (or a sent-back) SOP into the review chain. It
+   * moves to branch_review and stops being editable-as-draft. Everything the
+   * server enforces (author-only, right status) is mirrored in the demo path.
+   */
+  async submitSopForReview(actor: Actor, sopId: string): Promise<void> {
+    if (isSupabaseEnabled) {
+      await callAdminFn('sop-approval', { action: 'submit', sop_id: sopId })
+      await hydrateFromSupabase()
+      return
+    }
+    const sop = db.sops.find((s) => s.id === sopId)
+    if (!sop) throw new ApiError('That SOP no longer exists.')
+    if (actor.kind === 'manager') {
+      if (actor.manager.role !== 'manager') throw new ApiError('Only the author can submit an SOP for review.')
+      if (sop.department_id !== actor.manager.department_id) throw new ApiError('You can only submit your own department’s SOPs.')
+    }
+    if (!canSubmit(sop.approval_status)) throw new ApiError('This SOP is already in review.')
+    sop.approval_status = 'branch_review'
+    sop.submitted_by = actorName(actor)
+    sop.approval_note = null
+    sop.updated_at = nowIso()
+    commit()
+  },
+
+  /**
+   * A reviewer clears (approve) or bounces (reject) the SOP currently sitting at
+   * their stage. The admin's approve carries `target` to route to HR or the CEO.
+   * A CEO approval authorises the SOP and notifies every eligible staff member.
+   */
+  async reviewSop(
+    actor: Actor,
+    sopId: string,
+    input: { decision: 'approve' | 'reject'; note?: string; target?: 'hr' | 'ceo' },
+  ): Promise<void> {
+    if (isSupabaseEnabled) {
+      await callAdminFn('sop-approval', {
+        action: input.decision,
+        sop_id: sopId,
+        note: input.note ?? '',
+        target: input.target ?? '',
+      })
+      await hydrateFromSupabase()
+      return
+    }
+    const sop = db.sops.find((s) => s.id === sopId)
+    if (!sop) throw new ApiError('That SOP no longer exists.')
+    const reviewer = reviewerForStage(sop.approval_status)
+    if (!reviewer) throw new ApiError('This SOP isn’t awaiting review.')
+    const callerRoleName = actor.kind === 'admin' ? 'admin' : actor.manager.role
+    if (callerRoleName !== reviewer) throw new ApiError('This SOP is waiting on a different reviewer.')
+
+    if (input.decision === 'reject') {
+      sop.approval_status = 'rejected'
+      sop.approval_note = input.note?.trim() || null
+    } else {
+      const next = nextStatusOnApprove(sop.approval_status, input.target)
+      if (!next) throw new ApiError('There is nothing to approve at this stage.')
+      sop.approval_status = next
+      sop.approval_note = input.note?.trim() || null
+      if (next === 'authorized') {
+        for (const staff of eligibleStaffFor(sop)) {
+          notify(staff.id, 'sop_published', `New SOP ${sop.code} — ${sop.title} — has been published for your department.`)
+        }
+      }
+    }
+    sop.updated_at = nowIso()
     commit()
   },
 
@@ -2225,8 +2328,9 @@ export const api = {
    */
   async addManager(
     actor: Actor,
-    input: { name: string; email: string; department_id: string; branch_id: string; password?: string },
+    input: { name: string; email: string; department_id: string; branch_id: string; password?: string; role?: Manager['role'] },
   ): Promise<{ manager: Manager; password: string | null }> {
+    const role = input.role ?? 'manager'
     if (isSupabaseEnabled) {
       const j = await callAdminFn('manage-managers', {
         action: 'create',
@@ -2235,6 +2339,7 @@ export const api = {
         department_id: input.department_id,
         branch_id: input.branch_id,
         password: input.password ?? '',
+        role,
       })
       await hydrateFromSupabase()
       return { manager: j.manager as Manager, password: (j.password as string | null) ?? null }
@@ -2253,6 +2358,7 @@ export const api = {
       department_id: input.department_id,
       branch_id: input.branch_id,
       active: true,
+      role,
     }
     db.managers.push(manager)
     commit()
@@ -2266,13 +2372,14 @@ export const api = {
   async updateManager(
     actor: Actor,
     managerId: string,
-    changes: { name?: string; department_id?: string; branch_id?: string; active?: boolean },
+    changes: { name?: string; department_id?: string; branch_id?: string; active?: boolean; role?: Manager['role'] },
   ): Promise<void> {
     const patch: Record<string, unknown> = {}
     if (changes.name !== undefined) patch.name = changes.name.trim()
     if (changes.department_id !== undefined) patch.department_id = changes.department_id
     if (changes.branch_id !== undefined) patch.branch_id = changes.branch_id
     if (changes.active !== undefined) patch.active = changes.active
+    if (changes.role !== undefined) patch.role = changes.role
     if (Object.keys(patch).length === 0) return
 
     if (isSupabaseEnabled) {

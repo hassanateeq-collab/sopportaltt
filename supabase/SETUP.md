@@ -131,6 +131,36 @@ can't create files in a personal Gmail's My Drive (`storageQuotaExceeded`). So
 the function uploads **as the Hamsun Google account** using an OAuth refresh
 token — the files are owned by that account and use its 15 GB.
 
+### SOP approval workflow (Branch Manager · HR · CEO)
+
+Migration `0009_sop_approvals.sql` adds three sign-in roles to `managers`
+(`branch_manager`, `hr`, `ceo` alongside the default `manager`) and an
+`approval_status` to `sops`. A department manager's new SOP now enters the chain
+as a **draft** and is invisible to staff until it is authorised:
+
+```
+draft → branch_review → admin_review → (hr_review) → ceo_review → authorized
+```
+
+The **Admin** decides at their step whether the optional **HR** review is needed
+or the SOP goes straight to the **CEO**, whose approval authorises it (and
+notifies eligible staff, exactly like a publish). Any reviewer can **send it
+back** (`rejected`) with a note; the author fixes it and resubmits. Existing SOPs
+default to `authorized` (already live). The migration also makes the
+`manager_*()` helpers ignore the review roles, so a Branch Manager / HR / CEO
+never inherits a department manager's read/write access.
+
+Admins create these accounts in **Managers & approval access**; each reviewer
+signs in on Manager · Admin and gets a focused **review inbox**.
+
+```bash
+supabase db push
+supabase functions deploy sop-approval    # the review queue + submit/approve/reject
+supabase functions deploy manage-managers  # create accounts carry a role now
+supabase functions deploy upload-sop       # a manager's SOP starts as a draft
+supabase functions deploy staff-data       # staff only ever see authorized SOPs
+```
+
 ### One-time Google OAuth setup
 
 1. **Google Cloud Console → APIs & Services → OAuth consent screen.** User type

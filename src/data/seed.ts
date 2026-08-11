@@ -59,9 +59,12 @@ export const DEMO_STAFF: Array<Omit<Staff, 'employee_code_hash' | 'created_at'> 
 ]
 
 export const MANAGERS: Manager[] = [
-  { id: 'mg-01', name: 'Mehreen Qadir', email: 'mehreen.kitchen.fsl@hamsun.example', department_id: 'dp-kt', branch_id: 'br-fsl', active: true },
-  { id: 'mg-02', name: 'Owais Bhatti', email: 'owais.housekeeping.clf@hamsun.example', department_id: 'dp-hk', branch_id: 'br-clf', active: true },
-  { id: 'mg-03', name: 'Rabia Noor', email: 'rabia.frontdesk.fsl@hamsun.example', department_id: 'dp-fd', branch_id: 'br-fsl', active: true },
+  { id: 'mg-01', name: 'Mehreen Qadir', email: 'mehreen.kitchen.fsl@hamsun.example', department_id: 'dp-kt', branch_id: 'br-fsl', active: true, role: 'manager' },
+  { id: 'mg-02', name: 'Owais Bhatti', email: 'owais.housekeeping.clf@hamsun.example', department_id: 'dp-hk', branch_id: 'br-clf', active: true, role: 'manager' },
+  { id: 'mg-03', name: 'Rabia Noor', email: 'rabia.frontdesk.fsl@hamsun.example', department_id: 'dp-fd', branch_id: 'br-fsl', active: true, role: 'manager' },
+  { id: 'mg-04', name: 'Junaid Farooq', email: 'junaid.branch.fsl@hamsun.example', department_id: 'dp-fd', branch_id: 'br-fsl', active: true, role: 'branch_manager' },
+  { id: 'mg-05', name: 'Sadia Iqbal', email: 'sadia.hr@hamsun.example', department_id: 'dp-qc', branch_id: 'br-clf', active: true, role: 'hr' },
+  { id: 'mg-06', name: 'Hamsun Group CEO', email: 'ceo@hamsun.example', department_id: 'dp-qc', branch_id: 'br-fsl', active: true, role: 'ceo' },
 ]
 
 export const ADMINS: AdminType[] = [
@@ -74,6 +77,9 @@ export const DEMO_PASSWORDS: Record<string, string> = {
   'owais.housekeeping.clf@hamsun.example': 'housekeeping123',
   'rabia.frontdesk.fsl@hamsun.example': 'frontdesk123',
   'admin@hamsun.example': 'admin123',
+  'junaid.branch.fsl@hamsun.example': 'branch123',
+  'sadia.hr@hamsun.example': 'hr123',
+  'ceo@hamsun.example': 'ceo123',
 }
 
 const NOW = '2026-07-01T09:00:00.000Z'
@@ -90,6 +96,7 @@ export const SOPS: Sop[] = [
     version: 3,
     document_file_id: null,
     video_file_id: null,
+    approval_status: 'authorized',
     updated_at: '2026-06-12T10:20:00.000Z',
     published_by: 'Hamsun Group Admin',
   },
@@ -104,6 +111,7 @@ export const SOPS: Sop[] = [
     version: 2,
     document_file_id: null,
     video_file_id: null,
+    approval_status: 'authorized',
     updated_at: '2026-05-28T14:05:00.000Z',
     published_by: 'Hamsun Group Admin',
   },
@@ -118,6 +126,7 @@ export const SOPS: Sop[] = [
     version: 1,
     document_file_id: null,
     video_file_id: null,
+    approval_status: 'authorized',
     updated_at: '2026-04-02T08:45:00.000Z',
     published_by: 'Rabia Noor',
   },
@@ -132,6 +141,7 @@ export const SOPS: Sop[] = [
     version: 4,
     document_file_id: null,
     video_file_id: null,
+    approval_status: 'authorized',
     updated_at: '2026-06-25T07:30:00.000Z',
     published_by: 'Hamsun Group Admin',
   },
@@ -146,6 +156,7 @@ export const SOPS: Sop[] = [
     version: 1,
     document_file_id: null,
     video_file_id: null,
+    approval_status: 'authorized',
     updated_at: '2026-03-14T11:00:00.000Z',
     published_by: 'Hamsun Group Admin',
   },
@@ -160,6 +171,7 @@ export const SOPS: Sop[] = [
     version: 2,
     document_file_id: null,
     video_file_id: null,
+    approval_status: 'authorized',
     updated_at: '2026-06-30T06:15:00.000Z',
     published_by: 'Hamsun Group Admin',
   },
@@ -174,6 +186,7 @@ export const SOPS: Sop[] = [
     version: 1,
     document_file_id: null,
     video_file_id: null,
+    approval_status: 'authorized',
     updated_at: '2026-02-19T05:40:00.000Z',
     published_by: 'Mehreen Qadir',
   },
@@ -188,6 +201,7 @@ export const SOPS: Sop[] = [
     version: 1,
     document_file_id: null,
     video_file_id: null,
+    approval_status: 'authorized',
     updated_at: '2026-01-22T09:10:00.000Z',
     published_by: 'Hamsun Group Admin',
   },
@@ -202,6 +216,7 @@ export const SOPS: Sop[] = [
     version: 1,
     document_file_id: null,
     video_file_id: null,
+    approval_status: 'authorized',
     updated_at: '2026-05-09T12:00:00.000Z',
     published_by: 'Hamsun Group Admin',
   },

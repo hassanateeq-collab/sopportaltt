@@ -48,7 +48,10 @@ export function appliesToStaff(record: Scoped, staff: Staff, branchCode: string)
 
 export function sopsForStaff(sops: Sop[], staff: Staff, branchCode: string): Sop[] {
   return sops
-    .filter((s) => appliesToStaff(s, staff, branchCode))
+    // Staff only ever see an SOP once it has been authorised (the Supabase
+    // staff-data function enforces the same rule server-side; this keeps the
+    // demo mode — and any in-review SOP that slipped into the cache — honest).
+    .filter((s) => s.approval_status === 'authorized' && appliesToStaff(s, staff, branchCode))
     .sort((a, b) => a.code.localeCompare(b.code))
 }
 

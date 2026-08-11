@@ -155,6 +155,9 @@ Deno.serve(async (req) => {
     }
 
     // ---- insert the SOP ----
+    // An admin publishes live; a department manager's SOP enters the review
+    // chain as a draft and stays invisible to staff until the CEO authorises it.
+    const approvalStatus = isAdmin ? 'authorized' : 'draft'
     const { data: sop, error: insErr } = await admin
       .from('sops')
       .insert({
@@ -166,6 +169,7 @@ Deno.serve(async (req) => {
         version: 1,
         document_file_id: docId,
         video_file_id: videoId,
+        approval_status: approvalStatus,
         updated_at: new Date().toISOString(),
         published_by: actorName,
       })
@@ -174,6 +178,9 @@ Deno.serve(async (req) => {
     if (insErr) return json({ error: `Could not save the SOP: ${insErr.message}` }, 500)
 
     // ---- notify eligible staff (best-effort) ----
+    // Only an admin's live publish reaches staff now; a manager's draft notifies
+    // them only once the CEO authorises it (handled in sop-approval).
+    if (!isAdmin) return json({ sop })
     try {
       const { data: staff } = await admin
         .from('staff')
