@@ -1927,7 +1927,7 @@ details.board > summary .hint {
 }
 
 .sopeditor .se-sel.se-style { width: 118px; }
-.sopeditor .se-sel.se-font { width: 96px; }
+.sopeditor .se-sel.se-font { width: 124px; }
 .sopeditor .se-sel.se-size { width: 66px; }
 
 .se-color {
@@ -1962,7 +1962,7 @@ details.board > summary .hint {
 
 .sopeditor-area {
   max-height: 460px;
-  overflow-y: auto;
+  overflow: auto; /* vertical (right) + horizontal (bottom) scrollbars */
   background: #fff;
 }
 

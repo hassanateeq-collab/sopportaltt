@@ -17,7 +17,12 @@ import { TableKit } from '@tiptap/extension-table'
  * the live editor via `onEditor` and reads `editor.getHTML()` at save time.
  */
 
-const FONTS = ['Arial', 'Calibri', 'Times New Roman', 'Georgia', 'Verdana', 'Tahoma', 'Courier New']
+const FONTS = [
+  'Arial', 'Arial Black', 'Calibri', 'Cambria', 'Candara', 'Century Gothic', 'Comic Sans MS',
+  'Consolas', 'Constantia', 'Corbel', 'Courier New', 'Franklin Gothic Medium', 'Garamond',
+  'Georgia', 'Gill Sans', 'Helvetica', 'Impact', 'Lucida Console', 'Lucida Sans Unicode',
+  'Palatino Linotype', 'Segoe UI', 'Tahoma', 'Times New Roman', 'Trebuchet MS', 'Verdana',
+]
 const SIZES = ['10', '11', '12', '14', '16', '18', '24', '30', '36']
 
 export function SopEditor({ onEditor }: { onEditor: (e: Editor | null) => void }) {
