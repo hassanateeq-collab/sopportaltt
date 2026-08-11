@@ -472,6 +472,45 @@ textarea {
   vertical-align: middle;
 }
 
+/* Compact on-row sign-off summary: a chip per approver + the current reviewer. */
+.apstrip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 2px;
+}
+.apstrip-label {
+  font-size: 11px;
+  color: var(--ink-faint);
+  font-weight: 600;
+}
+.apstrip-chip {
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 1px 9px;
+  border: 1px solid var(--line-strong);
+  background: #eef1ec;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+.apstrip-chip.yes {
+  color: var(--pine);
+  border-color: #c5dbd6;
+  background: var(--pine-tint);
+}
+.apstrip-chip.no {
+  color: var(--exp);
+  border-color: var(--exp-line);
+  background: var(--exp-bg);
+}
+.apstrip-chip.wait {
+  color: var(--brass-deep);
+  border-color: var(--brass-line);
+  background: var(--brass-soft);
+}
+
 /* The author's submit / rejection strip under an SOP row. */
 .approw {
   display: flex;

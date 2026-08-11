@@ -32,7 +32,7 @@ import type { Editor } from '@tiptap/react'
 import type { Branch, BranchScope, Department, Difficulty, Language, Manager, Sop, Staff, Test } from '../types'
 import { LANGUAGE_NAMES, APPROVAL_STATUS_LABELS, APPROVAL_ACTION_LABELS, MANAGER_ROLE_LABELS } from '../types'
 import type { ApprovalStatus, ManagerRole, ApprovalEvent } from '../types'
-import { isReviewerRole, isInReview } from '../lib/approval'
+import { isReviewerRole, isInReview, reviewerForStage } from '../lib/approval'
 import { scopeIncludes } from '../lib/scope'
 import { certStatus, daysUntil } from '../lib/certs'
 import { fmtD } from '../lib/format'
@@ -830,6 +830,7 @@ function SopBoard({
                 <button className="btn sm" onClick={() => onOpen(s, 'video')}>▶ Video</button>
                 <span className={`brow-frac ${full ? 'full' : 'gap'}`}>{signed}/{eligible.length} signed</span>
               </div>
+              <ApprovalStrip sop={s} />
               <SopApprovalControl actor={actor} sop={s} />
               {eligible.length === 0 ? (
                 <div className="names"><span className="nm">No staff here yet</span></div>
@@ -854,6 +855,34 @@ function SopBoard({
 function ApprovalChip({ status }: { status: ApprovalStatus }) {
   if (status === 'authorized') return null
   return <span className={`apchip ap-${status}`}>{APPROVAL_STATUS_LABELS[status]}</span>
+}
+
+/** Short label for a trail role, for the compact on-row strip. */
+function shortRole(r: ApprovalEvent['role']): string {
+  return r === 'admin' ? 'Admin' : r === 'branch_manager' ? 'Branch Mgr' : r === 'hr' ? 'HR' : r === 'ceo' ? 'CEO' : 'Manager'
+}
+
+/**
+ * A compact one-line summary of who has signed off, shown right on the SOP row:
+ * a green ✓ chip per approver (✕ for a send-back), plus a "● with <role>" chip
+ * for whoever is currently reviewing. Empty (renders nothing) until the SOP has
+ * been through at least one review step.
+ */
+function ApprovalStrip({ sop }: { sop: Sop }) {
+  const trail = (sop.approval_trail ?? []).filter((e) => e.action !== 'submitted')
+  const pending = reviewerForStage(sop.approval_status)
+  if (!trail.length && !pending) return null
+  return (
+    <div className="apstrip">
+      <span className="apstrip-label">Sign-off:</span>
+      {trail.map((e, i) => (
+        <span key={i} className={`apstrip-chip ${e.action === 'rejected' ? 'no' : 'yes'}`} title={e.note ?? ''}>
+          {e.action === 'rejected' ? '✕' : '✓'} {shortRole(e.role)}
+        </span>
+      ))}
+      {pending && <span className="apstrip-chip wait">● with {shortRole(pending)}</span>}
+    </div>
+  )
 }
 
 /**
