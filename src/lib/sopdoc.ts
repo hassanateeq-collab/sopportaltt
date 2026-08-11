@@ -29,9 +29,26 @@ function esc(s: unknown): string {
   return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string)
 }
 
+/** First letter of every word in the title, e.g. "Personal Grooming" → "PG". */
+export function titleInitials(title: string): string {
+  return title.trim().split(/\s+/).filter(Boolean).map((w) => w[0]!.toUpperCase()).join('')
+}
+
+/**
+ * The document-control SOP number:
+ *   <DeptCode>-<TitleInitials>-<ddmmyyyy>-<version>
+ * e.g. Housekeeping "Personal Grooming" published 11 Aug 2026 v1 → HK-PG-11082026-1
+ */
+export function sopNumber(deptCode: string, title: string, date: Date, version: number): string {
+  const dd = String(date.getDate()).padStart(2, '0')
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  return `${deptCode}-${titleInitials(title)}-${dd}${mm}${date.getFullYear()}-${version}`
+}
+
 /** The controlled-document header (logo + SOP metadata), matching the template. */
 export function sopHeaderHtml(m: SopDocMeta): string {
   const cell = 'border:1px solid #000000;padding:5px 8px;font-family:Arial,sans-serif;font-size:10pt;'
+  const sec = 'font-family:Arial,sans-serif;font-size:11pt;margin:14px 0 0;'
   return (
     `<table style="width:100%;border-collapse:collapse;">` +
       `<tr>` +
@@ -42,10 +59,8 @@ export function sopHeaderHtml(m: SopDocMeta): string {
       `<tr><td style="${cell}"><b>Title:</b> ${esc(m.title)}</td><td style="${cell}"><b>Version No.:</b> ${esc(String(m.version))}</td></tr>` +
       `<tr><td style="${cell}"><b>Department:</b> ${esc(m.department)}</td><td style="${cell}"><b>Effective Date:</b> ${esc(m.effectiveDate)}</td></tr>` +
     `</table>` +
-    `<table style="width:100%;border-collapse:collapse;">` +
-      `<tr><td style="${cell}"><b>Purpose:</b> ${esc(m.purpose)}</td></tr>` +
-      `<tr><td style="${cell}"><b>Who This Applies To:</b> ${esc(m.appliesTo)}</td></tr>` +
-    `</table>` +
+    `<p style="${sec}"><b>1.&#9;PURPOSE:</b> ${esc(m.purpose)}</p>` +
+    `<p style="${sec}"><b>2.&#9;WHO THIS APPLIES TO:</b> ${esc(m.appliesTo)}</p>` +
     `<p></p>`
   )
 }

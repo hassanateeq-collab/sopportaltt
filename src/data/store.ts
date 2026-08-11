@@ -2032,11 +2032,16 @@ export const api = {
   },
 
   /** Rename a department. Its code is fixed (it prefixes its SOP codes). */
-  async updateDepartment(actor: Actor, deptId: string, changes: { name?: string }): Promise<void> {
+  async updateDepartment(actor: Actor, deptId: string, changes: { name?: string; code?: string }): Promise<void> {
     const patch: Record<string, unknown> = {}
     if (changes.name !== undefined) {
       if (!changes.name.trim()) throw new ApiError('A department needs a name.')
       patch.name = changes.name.trim()
+    }
+    if (changes.code !== undefined) {
+      const code = changes.code.trim().toUpperCase()
+      if (!code) throw new ApiError('A department needs a code.')
+      patch.code = code
     }
     if (Object.keys(patch).length === 0) return
 

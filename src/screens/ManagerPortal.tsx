@@ -24,7 +24,7 @@ import {
   ApiError,
 } from '../data/store'
 import type { Actor, DraftQuestion, OrgStaff, SopFormat } from '../data/store'
-import { generateSopDocx, SOP_DOCX_MIME } from '../lib/sopdoc'
+import { generateSopDocx, sopNumber, SOP_DOCX_MIME } from '../lib/sopdoc'
 import { SopEditor } from '../components/SopEditor'
 import type { Editor } from '@tiptap/react'
 import type { Branch, BranchScope, Department, Difficulty, Language, Manager, Sop, Staff, Test } from '../types'
@@ -981,7 +981,6 @@ function AddSopForm({
   const defaultFolder =
     DRIVE_DEPARTMENT_FOLDERS.find((f) => f.name === dept.name)?.id ?? DRIVE_DEPARTMENT_FOLDERS[0]?.id ?? ''
   const [title, setTitle] = useState('')
-  const [code, setCode] = useState('')
   const [purpose, setPurpose] = useState('')
   const [appliesTo, setAppliesTo] = useState('')
   const [folderId, setFolderId] = useState(defaultFolder)
@@ -1032,12 +1031,14 @@ function AddSopForm({
 
   async function submit() {
     if (!title.trim()) { toast('Enter the SOP title'); return }
-    if (!code.trim()) { toast('Enter the SOP number'); return }
     if (!purpose.trim()) { toast('Enter the purpose'); return }
     if (!appliesTo.trim()) { toast('Enter who this SOP applies to'); return }
     if (!editor || editor.getText().trim().length === 0) { toast('Write the SOP body in the editor'); return }
     const body = editor.getHTML()
     setBusy(true)
+    // The SOP number is generated: <dept code>-<title initials>-<ddmmyyyy>-<version>.
+    const now = new Date()
+    const codeVal = sopNumber(dept.code, title.trim(), now, 1)
     const scope: BranchScope =
       forceAllBranches ? { kind: 'ALL' } : lockBranch || !allBranches ? { kind: 'LIST', branch_codes: [branch.code] } : { kind: 'ALL' }
     const folderName = folders.find((f) => f.id === folderId)?.name ?? 'the folder'
@@ -1046,37 +1047,37 @@ function AddSopForm({
       const blob = await generateSopDocx(
         {
           title: title.trim(),
-          code: code.trim(),
+          code: codeVal,
           version: 1,
           department: dept.name,
-          effectiveDate: fmtD(new Date()),
+          effectiveDate: fmtD(now),
           purpose: purpose.trim(),
           appliesTo: appliesTo.trim(),
         },
         body,
       )
-      const docFile = new File([blob], `${(code.trim() || title.trim()).replace(/[\\/:*?"<>|]/g, '-')}.docx`, { type: SOP_DOCX_MIME })
+      const docFile = new File([blob], `${codeVal.replace(/[\\/:*?"<>|]/g, '-')}.docx`, { type: SOP_DOCX_MIME })
 
       if (isSupabaseEnabled) {
         await uploadSopViaFunction(
-          { title: title.trim(), code: code.trim() || undefined, department_id: dept.id, branch_scope: scope, folder_id: folderId },
+          { title: title.trim(), code: codeVal, department_id: dept.id, branch_scope: scope, folder_id: folderId },
           docFile,
           video?.file ?? null,
         )
-        toast(`Saved to ${folderName} and published — matching ${dept.name} staff notified`)
+        toast(`Saved as ${codeVal} to ${folderName} — matching ${dept.name} staff notified`)
       } else {
         const s = await api.publishSop(actor, {
           title: title.trim(),
           summary: '',
           department_id: dept.id,
           branch_scope: scope,
-          code: code.trim() || undefined,
+          code: codeVal,
           document_file_id: URL.createObjectURL(blob),
           video_file_id: video?.src ?? null,
         })
         toast(`Published as ${s.code} into ${folderName}`)
       }
-      setTitle(''); setCode(''); setPurpose(''); setAppliesTo(''); setVideo(null)
+      setTitle(''); setPurpose(''); setAppliesTo(''); setVideo(null)
       editor.commands.clearContent(true)
     } catch (e) {
       toast(e instanceof ApiError ? e.message : 'Could not save the SOP.')
@@ -1096,11 +1097,14 @@ function AddSopForm({
           </div>
         )}
 
-        <div className="fieldrow">
-          <div className="field"><label htmlFor="f-title">SOP title</label>
-            <input id="f-title" type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Guest Complaint Handling" /></div>
-          <div className="field"><label htmlFor="f-code">SOP number</label>
-            <input id="f-code" type="text" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} style={{ textTransform: 'uppercase' }} placeholder={`${dept.code}-001`} /></div>
+        <div className="field"><label htmlFor="f-title">SOP title</label>
+          <input id="f-title" type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Personal Grooming" /></div>
+        <div className="field">
+          <label>SOP number <span style={{ fontWeight: 500, textTransform: 'none', letterSpacing: 0, color: 'var(--ink-faint)' }}>— generated automatically</span></label>
+          <div className="pdfchip">
+            <span className="mono" style={{ fontWeight: 700 }}>{title.trim() ? sopNumber(dept.code, title, new Date(), 1) : `${dept.code}-…`}</span>
+          </div>
+          <div className="demo-hint">Department code · title initials · date (ddmmyyyy) · version. The department code is set in Departments (admin only).</div>
         </div>
         <div className="field"><label htmlFor="f-purpose">Purpose</label>
           <textarea id="f-purpose" value={purpose} onChange={(e) => setPurpose(e.target.value)} rows={2} placeholder="What this SOP is for" style={{ resize: 'vertical', width: '100%' }} /></div>
@@ -1898,7 +1902,8 @@ function DepartmentAdmin({ actor }: { actor: Actor }) {
         )}
         <NewDepartment actor={actor} />
         <p className="demo-hint" style={{ marginTop: 8 }}>
-          A department code (e.g. FD) can't be changed — it prefixes its SOP codes. Rename it above.
+          A department's code (e.g. HK, KTC, Q&amp;C) prefixes its SOP numbers — edit the code or name above. Only an
+          admin can change it.
         </p>
       </div>
     </details>
@@ -1907,7 +1912,8 @@ function DepartmentAdmin({ actor }: { actor: Actor }) {
 
 function DepartmentRow({ actor, dept }: { actor: Actor; dept: Department }) {
   const [name, setName] = useState(dept.name)
-  const dirty = name.trim() !== dept.name
+  const [code, setCode] = useState(dept.code)
+  const dirty = name.trim() !== dept.name || code.trim().toUpperCase() !== dept.code
   const inUse =
     read.staff().some((s) => s.department_id === dept.id) ||
     read.managers().some((m) => m.department_id === dept.id) ||
@@ -1920,6 +1926,8 @@ function DepartmentRow({ actor, dept }: { actor: Actor; dept: Department }) {
         <span className="brow-title"><span className="ver mono">{dept.code}</span> {dept.name}</span>
       </div>
       <div className="fieldrow" style={{ marginTop: 6 }}>
+        <div className="field" style={{ flex: '0 0 110px' }}><label>Code</label>
+          <input value={code} maxLength={5} onChange={(e) => setCode(e.target.value.toUpperCase())} style={{ textTransform: 'uppercase' }} /></div>
         <div className="field"><label>Name</label>
           <input value={name} onChange={(e) => setName(e.target.value)} /></div>
       </div>
@@ -1927,7 +1935,7 @@ function DepartmentRow({ actor, dept }: { actor: Actor; dept: Department }) {
         <button
           className="btn sm primary"
           disabled={!dirty}
-          onClick={() => run(() => api.updateDepartment(actor, dept.id, { name }), `${dept.code} updated`)}
+          onClick={() => run(() => api.updateDepartment(actor, dept.id, { name, code }), `${code.trim().toUpperCase()} updated`)}
         >
           Save changes
         </button>
