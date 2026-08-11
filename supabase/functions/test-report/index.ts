@@ -14,6 +14,9 @@ import { serviceClient, callerRole, bearer } from '../_shared/auth.ts'
 import { cors, json } from '../_shared/http.ts'
 import { getUserAccessToken, uploadToDrive, findOrCreateFolder } from '../_shared/google.ts'
 
+// The Hamsun_SOP root storage folder that holds the per-department folders.
+const STORAGE_FOLDER_ID = '1ERAgtoCpbhCEzFYq0gxhfbXc_rM6l9LQ'
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405)
@@ -44,14 +47,24 @@ Deno.serve(async (req) => {
     const G_ID = Deno.env.get('GOOGLE_CLIENT_ID')
     const G_SECRET = Deno.env.get('GOOGLE_CLIENT_SECRET')
     const G_REFRESH = Deno.env.get('GOOGLE_REFRESH_TOKEN')
-    if (!G_ID || !G_SECRET || !G_REFRESH || !fallbackFolder) return json({ driveSaved: false })
+    if (!G_ID || !G_SECRET || !G_REFRESH) return json({ driveSaved: false })
 
     const bytes = Uint8Array.from(atob(pdfB64), (c) => c.charCodeAt(0))
     const token = await getUserAccessToken(G_ID, G_SECRET, G_REFRESH)
 
-    // All test reports go into a "Tests" sub-folder of the department's Drive
-    // folder (created once), kept separate from the SOP documents.
-    const testsFolder = await findOrCreateFolder(token, fallbackFolder, 'Tests')
+    // Resolve the TEST'S OWN department folder by its name from the database —
+    // authoritative, so a Housekeeping report always lands in the Housekeeping
+    // folder, never wherever the client guessed. The client-passed folder id is
+    // only a last-resort fallback. Reports go into a "Tests" sub-folder there,
+    // kept separate from the SOP documents.
+    let deptFolder = fallbackFolder
+    if (test?.department_id) {
+      const { data: deptRow } = await admin.from('departments').select('name').eq('id', test.department_id).maybeSingle()
+      if (deptRow?.name) deptFolder = await findOrCreateFolder(token, STORAGE_FOLDER_ID, String(deptRow.name).trim())
+    }
+    if (!deptFolder) return json({ driveSaved: false })
+
+    const testsFolder = await findOrCreateFolder(token, deptFolder, 'Tests')
     await uploadToDrive(token, testsFolder, filename, 'application/pdf', bytes as unknown as ArrayBuffer)
     return json({ driveSaved: true })
   } catch (e) {
