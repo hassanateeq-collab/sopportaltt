@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
     const video = form.get('video')
 
     if (!title) return json({ error: 'Give the SOP a title.' }, 400)
-    if (!(document instanceof File)) return json({ error: 'Upload the SOP document (PDF).' }, 400)
+    if (!(document instanceof File)) return json({ error: 'Provide the SOP document.' }, 400)
     if (!folderId) return json({ error: 'Choose a destination folder.' }, 400)
     if (!G_CLIENT_ID || !G_CLIENT_SECRET || !G_REFRESH) {
       return json({ error: 'Drive is not configured — set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REFRESH_TOKEN.' }, 500)
@@ -101,7 +101,12 @@ Deno.serve(async (req) => {
 
     // ---- push files to Drive (view-only), as the Hamsun Google account ----
     const token = await getUserAccessToken(G_CLIENT_ID, G_CLIENT_SECRET, G_REFRESH)
-    const docId = await uploadToDrive(token, folderId, `${code} — ${title}.pdf`, 'application/pdf', await document.arrayBuffer())
+    // The SOP document may be a manager-authored Word file (from the in-app
+    // editor) or a PDF — name and type it by what was actually uploaded.
+    const isDocx = (document.type || '').includes('word') || document.name.toLowerCase().endsWith('.docx')
+    const ext = isDocx ? 'docx' : 'pdf'
+    const mime = isDocx ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'application/pdf'
+    const docId = await uploadToDrive(token, folderId, `${code} — ${title}.${ext}`, mime, await document.arrayBuffer())
     await makeViewOnly(token, docId)
 
     let videoId: string | null = null

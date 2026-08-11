@@ -90,10 +90,15 @@ values in it, then `npm run dev`.
 
 ## Stage 3a — Drive upload (the `upload-sop` function)  ← turns on Add SOP
 
-The Add-SOP form uploads a PDF + optional video and picks a Drive folder. The
-files are pushed into your **Hamsun_SOP** folder (view-only) by the
-`upload-sop` Edge Function (`supabase/functions/upload-sop`), which then inserts
-the SOP and notifies staff. The browser never holds Drive credentials.
+The **Write a new SOP** form is a Word-like editor: the manager enters the SOP
+title, number, purpose and who it applies to, then writes the body (headings,
+fonts, lists, tables). On save the app composes the controlled header (logo +
+metadata, matching `SOP_Format.docx`) with the body into a real **.docx** and
+sends it (plus an optional video) to the `upload-sop` Edge Function
+(`supabase/functions/upload-sop`), which pushes it into your **Hamsun_SOP**
+folder (view-only), inserts the SOP and notifies staff. The browser never holds
+Drive credentials. (Re-deploy `upload-sop` after this change — it now files a
+`.docx` as well as legacy PDFs.)
 
 **Why not a service account?** A service account owns no Drive storage, so it
 can't create files in a personal Gmail's My Drive (`storageQuotaExceeded`). So

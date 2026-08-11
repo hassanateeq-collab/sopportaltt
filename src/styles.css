@@ -1797,6 +1797,163 @@ details.board > summary .hint {
   line-height: 1.8;
 }
 
+/* ------------------------------------------------------- SOP rich editor -- */
+.sopeditor {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--card);
+}
+
+.se-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  padding: 7px 8px;
+  background: var(--ground);
+  border-bottom: 1px solid var(--line-strong);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.se-btn {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.se-btn:hover {
+  border-color: var(--pine);
+  color: var(--pine);
+}
+
+.se-btn.on {
+  background: var(--pine-tint);
+  border-color: var(--pine);
+  color: var(--pine);
+}
+
+.se-sel {
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  font-size: 12.5px;
+  padding: 0 6px;
+  color: var(--ink);
+}
+
+.se-color {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 30px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.se-color input[type='color'] {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.se-div {
+  width: 1px;
+  height: 20px;
+  background: var(--line-strong);
+  margin: 0 3px;
+}
+
+.sopeditor-area {
+  max-height: 460px;
+  overflow-y: auto;
+  background: #fff;
+}
+
+.sopeditor-area .ProseMirror {
+  min-height: 260px;
+  padding: 18px 22px;
+  outline: none;
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #1a1a1a;
+}
+
+.sopeditor-area .ProseMirror:focus {
+  outline: none;
+}
+
+.sopeditor-area .ProseMirror > * + * {
+  margin-top: 0.6em;
+}
+
+.sopeditor-area .ProseMirror h1 { font-size: 1.7em; font-weight: 700; }
+.sopeditor-area .ProseMirror h2 { font-size: 1.4em; font-weight: 700; }
+.sopeditor-area .ProseMirror h3 { font-size: 1.18em; font-weight: 700; }
+.sopeditor-area .ProseMirror ul { list-style: disc; padding-left: 1.5em; }
+.sopeditor-area .ProseMirror ol { list-style: decimal; padding-left: 1.5em; }
+.sopeditor-area .ProseMirror li { margin: 0.2em 0; }
+
+.sopeditor-area .ProseMirror table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.6em 0;
+  table-layout: fixed;
+}
+
+.sopeditor-area .ProseMirror th,
+.sopeditor-area .ProseMirror td {
+  border: 1px solid #999;
+  padding: 6px 8px;
+  vertical-align: top;
+}
+
+.sopeditor-area .ProseMirror th {
+  background: #f1efe7;
+  font-weight: 700;
+  text-align: left;
+}
+
+.sopeditor-area .ProseMirror .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 83, 45, 0.12);
+  pointer-events: none;
+}
+
+.sopeditor-area .ProseMirror td,
+.sopeditor-area .ProseMirror th {
+  position: relative;
+}
+
+.sopeditor-area .ProseMirror p.is-editor-empty:first-child::before {
+  content: 'Write the SOP here…';
+  color: #9aa0a6;
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
 /* -------------------------------------------------------------- spinner -- */
 
 .spinner {

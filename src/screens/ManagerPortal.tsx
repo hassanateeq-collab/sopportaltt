@@ -24,6 +24,9 @@ import {
   ApiError,
 } from '../data/store'
 import type { Actor, DraftQuestion, OrgStaff, SopFormat } from '../data/store'
+import { generateSopDocx, SOP_DOCX_MIME } from '../lib/sopdoc'
+import { SopEditor } from '../components/SopEditor'
+import type { Editor } from '@tiptap/react'
 import type { Branch, BranchScope, Department, Difficulty, Language, Manager, Sop, Staff, Test } from '../types'
 import { LANGUAGE_NAMES } from '../types'
 import { scopeIncludes } from '../lib/scope'
@@ -953,11 +956,12 @@ interface Upload {
 }
 
 /**
- * Add an SOP by uploading its document (PDF) and an optional training video, and
- * choosing which Drive folder they go into. In production these files are pushed
- * to the chosen folder by the upload-sop Edge Function (view-only), which stores
- * the returned file ids on the SOP. In the demo they are previewed inline so the
- * whole flow is visible without a backend.
+ * Write a new SOP in a Word-like editor. The manager enters the title, number,
+ * purpose and who it applies to, then writes the body with full formatting
+ * (headings, fonts, lists, tables…). On save the app composes the controlled
+ * header + body into a real .docx and the upload-sop Edge Function pushes it to
+ * the chosen Drive folder (view-only) and inserts the SOP. An optional training
+ * video can be attached too.
  */
 function AddSopForm({
   dept,
@@ -978,14 +982,16 @@ function AddSopForm({
     DRIVE_DEPARTMENT_FOLDERS.find((f) => f.name === dept.name)?.id ?? DRIVE_DEPARTMENT_FOLDERS[0]?.id ?? ''
   const [title, setTitle] = useState('')
   const [code, setCode] = useState('')
+  const [purpose, setPurpose] = useState('')
+  const [appliesTo, setAppliesTo] = useState('')
   const [folderId, setFolderId] = useState(defaultFolder)
-  const [pdf, setPdf] = useState<Upload | null>(null)
   const [video, setVideo] = useState<Upload | null>(null)
   const [allBranches, setAllBranches] = useState(true)
   const [busy, setBusy] = useState(false)
   const [newFolder, setNewFolder] = useState('')
   const [showNewFolder, setShowNewFolder] = useState(false)
   const [creatingFolder, setCreatingFolder] = useState(false)
+  const [editor, setEditor] = useState<Editor | null>(null)
 
   // Load the live Drive folders (falls back to the known department folders).
   useEffect(() => {
@@ -1017,13 +1023,6 @@ function AddSopForm({
     }
   }
 
-  function onPdf(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0]
-    if (!f) return
-    if (f.type !== 'application/pdf' && !f.name.toLowerCase().endsWith('.pdf')) { toast('Upload a PDF file'); e.target.value = ''; return }
-    setPdf({ name: f.name, size: f.size, src: URL.createObjectURL(f), file: f })
-  }
-
   function onVideo(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
     if (!f) return
@@ -1032,36 +1031,55 @@ function AddSopForm({
   }
 
   async function submit() {
-    if (!title.trim()) { toast('Give the SOP a title first'); return }
-    if (!pdf) { toast('Upload the SOP document (PDF) first'); return }
+    if (!title.trim()) { toast('Enter the SOP title'); return }
+    if (!code.trim()) { toast('Enter the SOP number'); return }
+    if (!purpose.trim()) { toast('Enter the purpose'); return }
+    if (!appliesTo.trim()) { toast('Enter who this SOP applies to'); return }
+    if (!editor || editor.getText().trim().length === 0) { toast('Write the SOP body in the editor'); return }
+    const body = editor.getHTML()
     setBusy(true)
     const scope: BranchScope =
       forceAllBranches ? { kind: 'ALL' } : lockBranch || !allBranches ? { kind: 'LIST', branch_codes: [branch.code] } : { kind: 'ALL' }
-    const folderName = DRIVE_DEPARTMENT_FOLDERS.find((f) => f.id === folderId)?.name ?? 'the folder'
+    const folderName = folders.find((f) => f.id === folderId)?.name ?? 'the folder'
     try {
+      // Compose the controlled header + the manager's body into a real .docx.
+      const blob = await generateSopDocx(
+        {
+          title: title.trim(),
+          code: code.trim(),
+          version: 1,
+          department: dept.name,
+          effectiveDate: fmtD(new Date()),
+          purpose: purpose.trim(),
+          appliesTo: appliesTo.trim(),
+        },
+        body,
+      )
+      const docFile = new File([blob], `${(code.trim() || title.trim()).replace(/[\\/:*?"<>|]/g, '-')}.docx`, { type: SOP_DOCX_MIME })
+
       if (isSupabaseEnabled) {
-        // Real upload: the Edge Function pushes the files to Drive and inserts the SOP.
         await uploadSopViaFunction(
-          { title, code: code || undefined, department_id: dept.id, branch_scope: scope, folder_id: folderId },
-          pdf.file,
+          { title: title.trim(), code: code.trim() || undefined, department_id: dept.id, branch_scope: scope, folder_id: folderId },
+          docFile,
           video?.file ?? null,
         )
-        toast(`Uploaded to ${folderName} and published — matching ${dept.name} staff notified`)
+        toast(`Saved to ${folderName} and published — matching ${dept.name} staff notified`)
       } else {
         const s = await api.publishSop(actor, {
-          title,
+          title: title.trim(),
           summary: '',
           department_id: dept.id,
           branch_scope: scope,
-          code: code || undefined,
-          document_file_id: pdf.src,
+          code: code.trim() || undefined,
+          document_file_id: URL.createObjectURL(blob),
           video_file_id: video?.src ?? null,
         })
-        toast(`Published as ${s.code} into ${folderName} — matching ${dept.name} staff notified`)
+        toast(`Published as ${s.code} into ${folderName}`)
       }
-      setTitle(''); setCode(''); setPdf(null); setVideo(null)
+      setTitle(''); setCode(''); setPurpose(''); setAppliesTo(''); setVideo(null)
+      editor.commands.clearContent(true)
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : 'Could not publish.')
+      toast(e instanceof ApiError ? e.message : 'Could not save the SOP.')
     } finally {
       setBusy(false)
     }
@@ -1069,31 +1087,34 @@ function AddSopForm({
 
   return (
     <details className="board">
-      <summary><SopSectionIcon />Add SOP<span className="hint">upload document + video · to {dept.name}{lockBranch ? ` · ${branch.code} only` : forceAllBranches ? ' · all branches' : ''}</span></summary>
+      <summary><SopSectionIcon />Write a new SOP<span className="hint">editor → Word file · to {dept.name}{lockBranch ? ` · ${branch.code} only` : forceAllBranches ? ' · all branches' : ''}</span></summary>
       <div className="card-body">
         {isSupabaseEnabled && (
           <div className="notice info" style={{ marginBottom: 14 }}>
-            The document and video upload to your locked Drive folder through the upload function — deploy it (see
-            supabase/SETUP.md) to save against your live database.
+            The SOP saves to your Drive folder as an editable Word (.docx) file through the upload function — deploy it
+            (see supabase/SETUP.md) to save against your live database.
           </div>
         )}
 
-        <div className="field"><label htmlFor="f-title">Title</label>
-          <input id="f-title" type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Guest Complaint Handling" /></div>
-        <div className="field"><label htmlFor="f-code">SOP code — blank = auto</label>
-          <input id="f-code" type="text" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} style={{ textTransform: 'uppercase' }} placeholder={`${dept.code}-00X`} /></div>
+        <div className="fieldrow">
+          <div className="field"><label htmlFor="f-title">SOP title</label>
+            <input id="f-title" type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Guest Complaint Handling" /></div>
+          <div className="field"><label htmlFor="f-code">SOP number</label>
+            <input id="f-code" type="text" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} style={{ textTransform: 'uppercase' }} placeholder={`${dept.code}-001`} /></div>
+        </div>
+        <div className="field"><label htmlFor="f-purpose">Purpose</label>
+          <textarea id="f-purpose" value={purpose} onChange={(e) => setPurpose(e.target.value)} rows={2} placeholder="What this SOP is for" style={{ resize: 'vertical', width: '100%' }} /></div>
+        <div className="field"><label htmlFor="f-applies">Who this applies to</label>
+          <textarea id="f-applies" value={appliesTo} onChange={(e) => setAppliesTo(e.target.value)} rows={2} placeholder="e.g. All Housekeeping room attendants at every branch" style={{ resize: 'vertical', width: '100%' }} /></div>
 
         <div className="field">
-          <label>SOP document (PDF)</label>
-          {pdf ? (
-            <div className="pdfchip">
-              <span className="mono">📄 {pdf.name}</span>
-              <span className="mono" style={{ color: 'var(--ink-faint)' }}>{(pdf.size / 1024).toFixed(0)} KB</span>
-              <button className="btn sm" onClick={() => setPdf(null)}>✕ Remove</button>
-            </div>
-          ) : (
-            <input type="file" accept="application/pdf,.pdf" onChange={onPdf} />
-          )}
+          <label>SOP document</label>
+          <div className="demo-hint" style={{ marginTop: 0, marginBottom: 6 }}>
+            Write the SOP below with full formatting — headings, fonts, bold, lists, tables. The Hamsun header (logo,
+            SOP no., title, department, effective date) and the confidential footer are added automatically, and it
+            saves to Drive as an editable Word (.docx) file.
+          </div>
+          <SopEditor onEditor={setEditor} />
         </div>
 
         <div className="field">
@@ -1152,7 +1173,7 @@ function AddSopForm({
             </div></div>
         )}
         <button className="btn primary block" disabled={busy} onClick={() => void submit()}>
-          {busy ? <span className="spinner" /> : `Upload & publish to ${dept.name}`}
+          {busy ? <><span className="spinner" /> Saving…</> : `Save & publish to ${dept.name}`}
         </button>
       </div>
     </details>
