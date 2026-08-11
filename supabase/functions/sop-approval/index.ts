@@ -110,7 +110,9 @@ Deno.serve(async (req) => {
         if (role.role !== 'manager') return json({ error: 'Only the author submits an SOP for review.' }, 403)
         if (sop.department_id !== role.department_id) return json({ error: 'You can only submit your own department’s SOPs.' }, 403)
       }
-      if (status !== 'draft' && status !== 'rejected') {
+      // draft = never reviewed; rejected = sent back; authorized = a live SOP the
+      // author wants re-approved. Anything else is already mid-chain.
+      if (status !== 'draft' && status !== 'rejected' && status !== 'authorized') {
         return json({ error: 'This SOP is already in review.' }, 409)
       }
       const { error } = await admin

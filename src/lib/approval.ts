@@ -54,9 +54,11 @@ export function nextStatusOnApprove(status: ApprovalStatus, target?: 'hr' | 'ceo
   }
 }
 
-/** Statuses the author may (re)submit from. */
+/** Statuses the author may (re)submit for review from. */
 export function canSubmit(status: ApprovalStatus): boolean {
-  return status === 'draft' || status === 'rejected'
+  // draft = never reviewed; rejected = sent back to fix; authorized = a live SOP
+  // the author wants re-approved (e.g. after an edit).
+  return status === 'draft' || status === 'rejected' || status === 'authorized'
 }
 
 /** Is this SOP still moving through review (not live, not a fresh draft)? */

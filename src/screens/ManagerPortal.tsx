@@ -856,6 +856,25 @@ function SopApprovalControl({ actor, sop }: { actor: Actor; sop: Sop }) {
       </div>
     )
   }
+  // Authorised = live to staff. The owner can still push it back through the
+  // review chain (e.g. after editing it) to have it re-approved.
+  if (status === 'authorized') {
+    if (!mayAct) return null
+    return (
+      <div className="approw">
+        <span className="demo-hint" style={{ margin: 0 }}>Live — visible to staff.</span>
+        <button
+          className="btn sm"
+          onClick={() => {
+            if (!confirm(`Send ${sop.code} into the review chain?\n\nIt goes to the Branch Manager, then Admin, then HR/CEO. It stays hidden from staff until the CEO re-authorises it.`)) return
+            run(() => api.submitSopForReview(actor, sop.id), `${sop.code} submitted for review`)
+          }}
+        >
+          ↑ Submit for review
+        </button>
+      </div>
+    )
+  }
   return null
 }
 
