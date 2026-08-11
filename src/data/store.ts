@@ -2063,7 +2063,7 @@ export const api = {
   },
 
   /** Rename a department. Its code is fixed (it prefixes its SOP codes). */
-  async updateDepartment(actor: Actor, deptId: string, changes: { name?: string; code?: string }): Promise<void> {
+  async updateDepartment(actor: Actor, deptId: string, changes: { name?: string; code?: string; drive_folder_id?: string | null }): Promise<void> {
     const patch: Record<string, unknown> = {}
     if (changes.name !== undefined) {
       if (!changes.name.trim()) throw new ApiError('A department needs a name.')
@@ -2074,6 +2074,7 @@ export const api = {
       if (!code) throw new ApiError('A department needs a code.')
       patch.code = code
     }
+    if (changes.drive_folder_id !== undefined) patch.drive_folder_id = changes.drive_folder_id || null
     if (Object.keys(patch).length === 0) return
 
     if (isSupabaseEnabled) {

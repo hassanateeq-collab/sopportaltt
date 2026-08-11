@@ -113,6 +113,19 @@ supabase db push        # or: supabase migration up
 # upload-sop only needs redeploying for the .docx naming change (Stage 3a).
 ```
 
+### Settings → Drive folders (admin)
+
+Migration `0008_dept_drive_folder.sql` adds `departments.drive_folder_id`. The
+admin **Settings** tile syncs the live Drive directory, creates folders, and sets
+which Drive folder each department's SOPs upload into (test reports go to a
+`Tests` sub-folder of it). Managers no longer pick or create folders. Redeploy
+`test-report` so it files into the admin-set folder:
+
+```bash
+supabase db push
+supabase functions deploy test-report
+```
+
 **Why not a service account?** A service account owns no Drive storage, so it
 can't create files in a personal Gmail's My Drive (`storageQuotaExceeded`). So
 the function uploads **as the Hamsun Google account** using an OAuth refresh

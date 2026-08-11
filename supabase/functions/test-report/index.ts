@@ -59,8 +59,10 @@ Deno.serve(async (req) => {
     // kept separate from the SOP documents.
     let deptFolder = fallbackFolder
     if (test?.department_id) {
-      const { data: deptRow } = await admin.from('departments').select('name').eq('id', test.department_id).maybeSingle()
-      if (deptRow?.name) deptFolder = await findOrCreateFolder(token, STORAGE_FOLDER_ID, String(deptRow.name).trim())
+      const { data: deptRow } = await admin.from('departments').select('name, drive_folder_id').eq('id', test.department_id).maybeSingle()
+      // Prefer the admin-set folder (Settings → Drive folders); else match by name.
+      if (deptRow?.drive_folder_id) deptFolder = deptRow.drive_folder_id as string
+      else if (deptRow?.name) deptFolder = await findOrCreateFolder(token, STORAGE_FOLDER_ID, String(deptRow.name).trim())
     }
     if (!deptFolder) return json({ driveSaved: false })
 

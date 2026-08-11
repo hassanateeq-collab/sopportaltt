@@ -53,7 +53,7 @@ import {
  * and also manages the org. The boards and forms are the same; only the scope
  * and the extra admin sections differ.
  */
-type Page = 'home' | 'sops' | 'tests' | 'staff' | 'managers' | 'branches' | 'departments'
+type Page = 'home' | 'sops' | 'tests' | 'staff' | 'managers' | 'branches' | 'departments' | 'settings'
 
 export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
   const isAdmin = actor.kind === 'admin'
@@ -91,6 +91,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
   const managerTile: TileDef = { key: 'managers', icon: <ManagerSectionIcon />, title: 'Managers', sub: `${mgrCount} · every branch · access` }
   const branchTile: TileDef = { key: 'branches', icon: <BranchSectionIcon />, title: 'Branches', sub: `${branches.length} · add, rename, status` }
   const deptTile: TileDef = { key: 'departments', icon: <DepartmentSectionIcon />, title: 'Departments', sub: `${departments.length} · add, rename, delete` }
+  const settingsTile: TileDef = { key: 'settings', icon: <span style={{ fontSize: 26, lineHeight: 1 }}>⚙️</span>, title: 'Settings', sub: 'Drive folders · SOP & test routing' }
 
   const renderTile = (t: TileDef) => (
     <button key={t.key} className="mtile" onClick={() => setPage(t.key)}>
@@ -174,7 +175,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
             <div className="mtiles">
               {[sopTile, managerTile].map(renderTile)}
               {formatTile}
-              {[branchTile, deptTile].map(renderTile)}
+              {[branchTile, deptTile, settingsTile].map(renderTile)}
             </div>
             {branchSelect}
             {/* Branch-dependent: staff and test scores for the selected branch. */}
@@ -230,6 +231,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
 
           {page === 'branches' && isAdmin && <BranchAdmin actor={actor} />}
           {page === 'departments' && isAdmin && <DepartmentAdmin actor={actor} />}
+          {page === 'settings' && isAdmin && <DriveSettings actor={actor} />}
         </>
       )}
 
@@ -1106,50 +1108,19 @@ function AddSopForm({
   /** Manager view: always publish to every branch — no scope choice. */
   forceAllBranches?: boolean
 }) {
-  const [folders, setFolders] = useState<Array<{ id: string; name: string }>>(DRIVE_DEPARTMENT_FOLDERS)
-  const defaultFolder =
-    DRIVE_DEPARTMENT_FOLDERS.find((f) => f.name === dept.name)?.id ?? DRIVE_DEPARTMENT_FOLDERS[0]?.id ?? ''
   const [title, setTitle] = useState('')
   const [purpose, setPurpose] = useState('')
   const [appliesTo, setAppliesTo] = useState('')
-  const [folderId, setFolderId] = useState(defaultFolder)
   const [video, setVideo] = useState<Upload | null>(null)
   const [allBranches, setAllBranches] = useState(true)
   const [busy, setBusy] = useState(false)
-  const [newFolder, setNewFolder] = useState('')
-  const [showNewFolder, setShowNewFolder] = useState(false)
-  const [creatingFolder, setCreatingFolder] = useState(false)
   const [editor, setEditor] = useState<Editor | null>(null)
 
-  // Load the live Drive folders (falls back to the known department folders).
-  useEffect(() => {
-    let active = true
-    listDriveFolders().then((list) => {
-      if (!active || !list.length) return
-      setFolders(list)
-      setFolderId((cur) => (list.some((f) => f.id === cur) ? cur : list.find((f) => f.name === dept.name)?.id ?? list[0].id))
-    })
-    return () => {
-      active = false
-    }
-  }, [dept.name])
-
-  async function addFolder() {
-    if (!newFolder.trim()) return
-    setCreatingFolder(true)
-    try {
-      const folder = await createDriveFolder(newFolder)
-      setFolders((prev) => (prev.some((f) => f.id === folder.id) ? prev : [...prev, folder].sort((a, b) => a.name.localeCompare(b.name))))
-      setFolderId(folder.id)
-      setNewFolder('')
-      setShowNewFolder(false)
-      toast(`Folder "${folder.name}" ready`)
-    } catch (e) {
-      toast(e instanceof ApiError ? e.message : 'Could not create the folder.')
-    } finally {
-      setCreatingFolder(false)
-    }
-  }
+  // Managers no longer pick or create folders — the admin sets each department's
+  // Drive folder in Settings. Fall back to the name-matched folder if unset.
+  const folderId =
+    dept.drive_folder_id ?? DRIVE_DEPARTMENT_FOLDERS.find((f) => f.name === dept.name)?.id ?? DRIVE_DEPARTMENT_FOLDERS[0]?.id ?? ''
+  const folderName = DRIVE_DEPARTMENT_FOLDERS.find((f) => f.id === folderId)?.name ?? dept.name
 
   function onVideo(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
@@ -1170,7 +1141,6 @@ function AddSopForm({
     const codeVal = sopNumber(dept.code, title.trim(), now, 1)
     const scope: BranchScope =
       forceAllBranches ? { kind: 'ALL' } : lockBranch || !allBranches ? { kind: 'LIST', branch_codes: [branch.code] } : { kind: 'ALL' }
-    const folderName = folders.find((f) => f.id === folderId)?.name ?? 'the folder'
     const meta = {
       title: title.trim(),
       code: codeVal,
@@ -1267,32 +1237,11 @@ function AddSopForm({
         </div>
 
         <div className="field">
-          <label htmlFor="f-folder">Destination folder in Drive</label>
-          <div className="row" style={{ gap: 8, alignItems: 'stretch' }}>
-            <select id="f-folder" style={{ flex: 1 }} value={folderId} onChange={(e) => setFolderId(e.target.value)}>
-              {folders.map((f) => (
-                <option key={f.id} value={f.id}>Hamsun_SOP / {f.name}</option>
-              ))}
-            </select>
-            <button type="button" className="btn sm" onClick={() => setShowNewFolder((v) => !v)}>
-              ＋ New folder
-            </button>
+          <label>Destination folder in Drive</label>
+          <div style={{ fontSize: 13.5 }}>
+            Hamsun_SOP / <strong>{folderName}</strong>
+            <span className="demo-hint" style={{ marginTop: 4 }}>Set by the admin in Settings → Drive folders. Files land here view-only.</span>
           </div>
-          {showNewFolder && (
-            <div className="linkedit" style={{ marginTop: 8 }}>
-              <input
-                type="text"
-                value={newFolder}
-                onChange={(e) => setNewFolder(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void addFolder() } }}
-                placeholder="New folder name, e.g. Kitchen · Food Safety"
-              />
-              <button type="button" className="btn sm primary" disabled={creatingFolder || !newFolder.trim()} onClick={() => void addFolder()}>
-                {creatingFolder ? <span className="spinner" /> : 'Create'}
-              </button>
-            </div>
-          )}
-          <div className="demo-hint">Files land here view-only inside the Hamsun_SOP folder. The viewer streams them; no downloads.</div>
         </div>
 
         {forceAllBranches ? (
@@ -2119,6 +2068,117 @@ function NewDepartment({ actor }: { actor: Actor }) {
         }}
       >
         {busy ? <span className="spinner" /> : '＋ Add department'}
+      </button>
+    </div>
+  )
+}
+
+/* ---- settings: Drive folders + per-department SOP/test routing (admin) ---- */
+
+function DriveSettings({ actor }: { actor: Actor }) {
+  const departments = read.departments().slice().sort((a, b) => a.code.localeCompare(b.code))
+  const [folders, setFolders] = useState<Array<{ id: string; name: string }>>(DRIVE_DEPARTMENT_FOLDERS)
+  const [syncing, setSyncing] = useState(false)
+  const [newFolder, setNewFolder] = useState('')
+  const [creating, setCreating] = useState(false)
+
+  async function sync() {
+    setSyncing(true)
+    try {
+      const list = await listDriveFolders()
+      if (list.length) setFolders(list)
+      toast(`Synced ${list.length} folders from Drive`)
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Could not sync folders.')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  // Pull the live directory when the page opens.
+  useEffect(() => { void sync() }, [])
+
+  async function addFolder() {
+    if (!newFolder.trim()) return
+    setCreating(true)
+    try {
+      const folder = await createDriveFolder(newFolder)
+      setFolders((prev) => (prev.some((f) => f.id === folder.id) ? prev : [...prev, folder].sort((a, b) => a.name.localeCompare(b.name))))
+      setNewFolder('')
+      toast(`Folder "${folder.name}" created`)
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Could not create the folder.')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return (
+    <>
+      <details className="board" open>
+        <summary><SopSectionIcon />Drive folders<span className="hint">{folders.length} in Hamsun_SOP</span></summary>
+        <div className="card-body">
+          <p className="demo-hint" style={{ marginTop: 0 }}>
+            The whole Hamsun_SOP directory. Only the admin manages folders — managers upload into the folder you set for
+            their department below. Each department's test reports are filed in a <span className="mono">Tests</span>{' '}
+            sub-folder of the same folder.
+          </p>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+            <button className="btn sm" disabled={syncing} onClick={() => void sync()}>
+              {syncing ? <span className="spinner" /> : '🔄 Sync from Drive'}
+            </button>
+            <input
+              type="text"
+              value={newFolder}
+              onChange={(e) => setNewFolder(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void addFolder() } }}
+              placeholder="New folder name…"
+              style={{ flex: 1, minWidth: 160, padding: '7px 10px', border: '1px solid var(--line-strong)', borderRadius: 'var(--r-sm)', fontSize: 13 }}
+            />
+            <button className="btn sm primary" disabled={creating || !newFolder.trim()} onClick={() => void addFolder()}>
+              {creating ? <span className="spinner" /> : '＋ New folder'}
+            </button>
+          </div>
+          <div className="names" style={{ marginTop: 0 }}>
+            {folders.map((f) => <span key={f.id} className="nm">📁 {f.name}</span>)}
+          </div>
+        </div>
+      </details>
+
+      <details className="board" open>
+        <summary><DepartmentSectionIcon />SOP &amp; test routing<span className="hint">{departments.length} departments</span></summary>
+        <div className="card-body">
+          {departments.map((d) => <DeptFolderRow key={d.id} actor={actor} dept={d} folders={folders} />)}
+        </div>
+      </details>
+    </>
+  )
+}
+
+function DeptFolderRow({ actor, dept, folders }: { actor: Actor; dept: Department; folders: Array<{ id: string; name: string }> }) {
+  const [folderId, setFolderId] = useState(dept.drive_folder_id ?? '')
+  const dirty = folderId !== (dept.drive_folder_id ?? '')
+  const current = folders.find((f) => f.id === (dept.drive_folder_id ?? ''))
+
+  return (
+    <div className="brow">
+      <div className="brow-top">
+        <span className="brow-title"><span className="ver mono">{dept.code}</span> {dept.name}</span>
+        <span className="hint">{current ? `→ ${current.name}` : dept.drive_folder_id ? '→ set' : '→ by name (default)'}</span>
+      </div>
+      <div className="fieldrow" style={{ marginTop: 6 }}>
+        <div className="field"><label>SOP folder in Drive</label>
+          <select value={folderId} onChange={(e) => setFolderId(e.target.value)}>
+            <option value="">— match by department name (default) —</option>
+            {folders.map((f) => <option key={f.id} value={f.id}>Hamsun_SOP / {f.name}</option>)}
+          </select></div>
+      </div>
+      <button
+        className="btn sm primary"
+        disabled={!dirty}
+        onClick={() => run(() => api.updateDepartment(actor, dept.id, { drive_folder_id: folderId || null }), `${dept.code} route saved`)}
+      >
+        Save route
       </button>
     </div>
   )

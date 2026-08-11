@@ -26,6 +26,8 @@ export interface Department {
   /** Two-letter prefix for this department's document-control codes: FD, HK, KT, MT, QC. */
   code: string
   name: string
+  /** Drive folder this department's SOPs upload to (admin-set in Settings). */
+  drive_folder_id?: string | null
 }
 
 export interface Staff {
