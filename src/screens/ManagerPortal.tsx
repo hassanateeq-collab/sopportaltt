@@ -24,7 +24,8 @@ import {
   ApiError,
 } from '../data/store'
 import type { Actor, DraftQuestion, OrgStaff, SopFormat } from '../data/store'
-import { generateSopDocx, sopNumber, SOP_DOCX_MIME } from '../lib/sopdoc'
+import DOMPurify from 'dompurify'
+import { generateSopDocx, sopContentHtml, sopNumber, SOP_DOCX_MIME } from '../lib/sopdoc'
 import { SopEditor } from '../components/SopEditor'
 import type { Editor } from '@tiptap/react'
 import type { Branch, BranchScope, Department, Difficulty, Language, Manager, Sop, Staff, Test } from '../types'
@@ -65,6 +66,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
   const [aBranch, setABranch] = useState(isAdmin ? branches[0]?.code ?? '' : managerHomeBranchCode || branches[0]?.code || '')
   const [aDept, setADept] = useState(departments[0]?.id ?? '')
   const [viewer, setViewer] = useState<{ sop: Sop; kind: 'doc' | 'video' } | null>(null)
+  const [reading, setReading] = useState<Sop | null>(null)
   const [editing, setEditing] = useState<Sop | null>(null)
   const [page, setPage] = useState<Page>('home')
   const [formatOpen, setFormatOpen] = useState(false)
@@ -157,7 +159,13 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
         </div>
       )}
 
-      {page === 'home' ? (
+      {reading ? (
+        <SopReader
+          sop={reading}
+          onBack={() => setReading(null)}
+          onEdit={() => { setEditing(reading); setReading(null) }}
+        />
+      ) : page === 'home' ? (
         isAdmin ? (
           <>
             {/* Branch-independent: one SOP, one format, the managers, and the
@@ -191,7 +199,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
 
           {page === 'sops' && (
             <>
-              <SopBoard dept={dept} branch={branch} actor={actor} orgWide onOpen={(sop, kind) => setViewer({ sop, kind })} />
+              <SopBoard dept={dept} branch={branch} actor={actor} orgWide onOpen={(sop, kind) => (kind === 'doc' ? setReading(sop) : setViewer({ sop, kind }))} />
               <AddSopForm dept={dept} branch={branch} actor={actor} lockBranch={false} forceAllBranches />
             </>
           )}
@@ -238,6 +246,50 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
         <EditSopForm actor={actor} sop={editing} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />
       )}
       {formatOpen && <SopFormatModal actor={actor} onClose={() => setFormatOpen(false)} />}
+    </>
+  )
+}
+
+/* -------------------------------------------------------------- read SOP -- */
+
+/**
+ * Read an SOP as an inline page — the document rendered right in the portal (in
+ * the portal's theme), not a Drive preview or an overlay. Edit sits top-right.
+ */
+function SopReader({ sop, onBack, onEdit }: { sop: Sop; onBack: () => void; onEdit: () => void }) {
+  const safeDoc = useMemo(() => {
+    if (!sop.sop_doc) return ''
+    const html = sopContentHtml(
+      {
+        title: sop.title,
+        code: sop.code,
+        version: sop.version,
+        department: read.department(sop.department_id)?.name ?? '',
+        effectiveDate: fmtD(sop.updated_at),
+        purpose: sop.sop_doc.purpose,
+        appliesTo: sop.sop_doc.appliesTo,
+      },
+      sop.sop_doc.body,
+    )
+    return DOMPurify.sanitize(html)
+  }, [sop])
+
+  return (
+    <>
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+        <button className="btn backbtn" style={{ marginBottom: 0 }} onClick={onBack}>← Back to SOPs</button>
+        <button className="btn sm primary" onClick={onEdit}>✎ Edit</button>
+      </div>
+      {safeDoc ? (
+        <article className="soppage" dangerouslySetInnerHTML={{ __html: safeDoc }} />
+      ) : (
+        <div className="notice">
+          This SOP isn't set up for the in-portal view yet — click <strong>✎ Edit</strong> to write its content here.
+          {isSupabaseEnabled && sop.document_file_id && (
+            <> The original Word file is <a href={driveFileViewLink(sop.document_file_id)} target="_blank" rel="noopener noreferrer">available here</a>.</>
+          )}
+        </div>
+      )}
     </>
   )
 }
