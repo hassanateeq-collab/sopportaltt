@@ -141,7 +141,7 @@ Deno.serve(async (req) => {
 
     const { data: sop } = await admin
       .from('sops')
-      .select('id, code, title, summary, department_id, document_file_id')
+      .select('id, code, title, summary, department_id, document_file_id, sop_doc')
       .eq('id', sopId)
       .maybeSingle()
     if (!sop) return json({ error: 'That SOP no longer exists.' }, 404)
@@ -157,22 +157,40 @@ Deno.serve(async (req) => {
       'Respond with ONLY this JSON, no markdown fences: {"questions":[{"q":"...","opts":["...","...","...","..."],"ans":0}]}\n' +
       '"ans" is the 0-based index of the correct option.'
 
-    // Build the Gemini request — prefer the real PDF; fall back to the title.
+    // Ground the questions in the SOP's real content. Editor-authored SOPs carry
+    // their text in sop_doc — use it directly (no download, and never send a
+    // .docx to Gemini as a PDF, which fails with INVALID_ARGUMENT). Legacy PDF
+    // SOPs are downloaded and inlined ONLY if the bytes are really a PDF.
+    const bodyHtml = (sop.sop_doc as { body?: string } | null)?.body ?? ''
+    const sopText = bodyHtml
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/\s+/g, ' ')
+      .trim()
+
     const parts: unknown[] = []
     let usedPdf = false
-    if (sop.document_file_id && !/^(https?:|data:|blob:)/.test(sop.document_file_id) && G_ID && G_SECRET && G_REFRESH) {
+    if (!sopText && sop.document_file_id && !/^(https?:|data:|blob:)/.test(sop.document_file_id) && G_ID && G_SECRET && G_REFRESH) {
       try {
         const token = await getUserAccessToken(G_ID, G_SECRET, G_REFRESH)
-        const pdf = await downloadFromDrive(token, sop.document_file_id)
-        parts.push({ inlineData: { mimeType: 'application/pdf', data: toBase64(pdf) } })
-        usedPdf = true
+        const bytes = await downloadFromDrive(token, sop.document_file_id)
+        const head = new Uint8Array(bytes.slice(0, 5))
+        const isPdf = head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46 // "%PDF"
+        if (isPdf) {
+          parts.push({ inlineData: { mimeType: 'application/pdf', data: toBase64(bytes) } })
+          usedPdf = true
+        }
       } catch (_) {
-        // couldn't fetch the PDF — fall back to text below
+        // couldn't fetch the file — fall back to text below
       }
     }
     const intro =
       `You write staff certification quiz questions for a boutique hotel group in Karachi, in ${LANG_NAMES[language]}.\n` +
-      (usedPdf ? 'Read the attached SOP document.\n' : `SOP: ${sop.title} (${sop.code}). ${sop.summary || ''}\n`) +
+      (sopText
+        ? `SOP: ${sop.title} (${sop.code}).\nSOP CONTENT:\n${sopText.slice(0, 12000)}\n`
+        : usedPdf
+          ? 'Read the attached SOP document.\n'
+          : `SOP: ${sop.title} (${sop.code}). ${sop.summary || ''}\n`) +
       rules
     parts.push({ text: intro })
 
