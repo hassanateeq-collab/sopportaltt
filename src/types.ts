@@ -100,6 +100,11 @@ export interface Sop {
   document_file_id: string | null
   /** Google Drive file id for the training video that belongs to this same SOP. */
   video_file_id: string | null
+  /**
+   * Rendered HTML of an editor-authored SOP (header + body), shown natively in
+   * the portal viewer. Null for legacy PDF SOPs, which embed the Drive preview.
+   */
+  document_html?: string | null
   updated_at: Iso
   published_by: string
 }

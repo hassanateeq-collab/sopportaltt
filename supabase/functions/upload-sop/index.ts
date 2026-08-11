@@ -67,6 +67,7 @@ Deno.serve(async (req) => {
     const branchScope = JSON.parse(String(form.get('branch_scope') ?? '{"kind":"ALL"}'))
     const document = form.get('document')
     const video = form.get('video')
+    const documentHtml = form.get('document_html') ? String(form.get('document_html')) : null
 
     if (!title) return json({ error: 'Give the SOP a title.' }, 400)
     if (!(document instanceof File)) return json({ error: 'Provide the SOP document.' }, 400)
@@ -127,6 +128,7 @@ Deno.serve(async (req) => {
         version: 1,
         document_file_id: docId,
         video_file_id: videoId,
+        document_html: documentHtml,
         updated_at: new Date().toISOString(),
         published_by: actorName,
       })

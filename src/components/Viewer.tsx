@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import DOMPurify from 'dompurify'
 import type { Sop } from '../types'
 import { scopeLabel } from '../lib/scope'
 import { read } from '../data/store'
@@ -32,6 +33,9 @@ export function Viewer({
   const fileId = kind === 'doc' ? sop.document_file_id : sop.video_file_id
   const dept = read.department(sop.department_id)?.name ?? ''
   const scope = scopeLabel(sop.branch_scope)
+  // An editor-authored SOP is shown natively in the portal (its rendered HTML),
+  // not the Google Drive file preview. Sanitised before it's injected.
+  const safeDoc = useMemo(() => (sop.document_html ? DOMPurify.sanitize(sop.document_html) : ''), [sop.document_html])
 
   return (
     <div className="viewer">
@@ -49,7 +53,11 @@ export function Viewer({
       </div>
 
       <div className="v-doc">
-        {fileId && isInlineSource(fileId) ? (
+        {kind === 'doc' && safeDoc ? (
+          <div className="sopview-wrap">
+            <div className="sopview" dangerouslySetInnerHTML={{ __html: safeDoc }} />
+          </div>
+        ) : fileId && isInlineSource(fileId) ? (
           <div className="v-frame-wrap">
             {kind === 'video' ? (
               <video

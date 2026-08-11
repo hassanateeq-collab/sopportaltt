@@ -98,7 +98,16 @@ sends it (plus an optional video) to the `upload-sop` Edge Function
 (`supabase/functions/upload-sop`), which pushes it into your **Hamsun_SOP**
 folder (view-only), inserts the SOP and notifies staff. The browser never holds
 Drive credentials. (Re-deploy `upload-sop` after this change — it now files a
-`.docx` as well as legacy PDFs.)
+`.docx` as well as legacy PDFs, and stores the SOP's rendered HTML.)
+
+Apply migration `0006_sop_html.sql` first — it adds a `document_html` column to
+`sops` so editor-authored SOPs display **natively in the portal** (the portal's
+own document view) instead of embedding the Google Drive preview:
+
+```bash
+supabase db push        # or: supabase migration up
+supabase functions deploy upload-sop
+```
 
 **Why not a service account?** A service account owns no Drive storage, so it
 can't create files in a personal Gmail's My Drive (`storageQuotaExceeded`). So

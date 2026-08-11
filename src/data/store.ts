@@ -360,7 +360,7 @@ async function resolveSupabaseActor(): Promise<Actor | null> {
  * Used in Supabase mode instead of the gated api.publishSop.
  */
 export async function uploadSopViaFunction(
-  input: { title: string; code?: string; department_id: string; branch_scope: BranchScope; folder_id: string },
+  input: { title: string; code?: string; department_id: string; branch_scope: BranchScope; folder_id: string; document_html?: string },
   pdf: File,
   video: File | null,
 ): Promise<void> {
@@ -375,6 +375,7 @@ export async function uploadSopViaFunction(
   fd.set('branch_scope', JSON.stringify(input.branch_scope))
   fd.set('folder_id', input.folder_id)
   fd.set('document', pdf)
+  if (input.document_html) fd.set('document_html', input.document_html)
   if (video) fd.set('video', video)
 
   let res: Response
@@ -1774,6 +1775,7 @@ export const api = {
       code?: string
       document_file_id?: string | null
       video_file_id?: string | null
+      document_html?: string | null
     },
   ): Promise<Sop> {
     assertCanTouchScope(actor, input.department_id, input.branch_scope)
@@ -1783,8 +1785,11 @@ export const api = {
     if (!input.title.trim()) throw new ApiError('An SOP needs a title.')
 
     const existingCodes = db.sops.map((s) => s.code)
-    let code = input.code?.trim().toUpperCase() || nextDocCode(dept.code, existingCodes)
-    if (!isValidDocCode(code)) {
+    const provided = input.code?.trim().toUpperCase()
+    const code = provided || nextDocCode(dept.code, existingCodes)
+    // A generated SOP number (e.g. HK-PG-11082026-1) doesn't follow the legacy
+    // FD-001 shape, so only validate the shape when we auto-generate the code.
+    if (!provided && !isValidDocCode(code)) {
       throw new ApiError('Document-control code must look like FD-001.')
     }
     if (isDocCodeTaken(code, existingCodes)) {
@@ -1801,6 +1806,7 @@ export const api = {
       version: 1,
       document_file_id: input.document_file_id ?? null,
       video_file_id: input.video_file_id ?? null,
+      document_html: input.document_html ?? null,
       updated_at: nowIso(),
       published_by: actorName(actor),
     }

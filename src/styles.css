@@ -1797,6 +1797,51 @@ details.board > summary .hint {
   line-height: 1.8;
 }
 
+/* --------------------------------------- SOP native view (in the portal) -- */
+.sopview-wrap {
+  max-height: 74vh;
+  overflow-y: auto;
+  background: var(--ground);
+  border-radius: var(--r);
+  padding: 18px;
+}
+
+.sopview {
+  background: #fff;
+  color: #1a1a1a;
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 40px 46px;
+  box-shadow: 0 2px 14px rgba(20, 40, 32, 0.12);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.sopview > * + * { margin-top: 0.6em; }
+.sopview h1 { font-size: 1.6em; font-weight: 700; }
+.sopview h2 { font-size: 1.35em; font-weight: 700; }
+.sopview h3 { font-size: 1.15em; font-weight: 700; }
+.sopview ul { list-style: disc; padding-left: 1.6em; }
+.sopview ol { list-style: decimal; padding-left: 1.6em; }
+.sopview li { margin: 0.2em 0; }
+.sopview img { max-width: 100%; height: auto; }
+
+.sopview table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5em 0;
+}
+
+.sopview table td,
+.sopview table th {
+  border: 1px solid #999;
+  padding: 6px 9px;
+  vertical-align: top;
+}
+
+.sopview table th { background: #f1efe7; font-weight: 700; }
+
 /* ------------------------------------------------------- SOP rich editor -- */
 .sopeditor {
   border: 1px solid var(--line-strong);

@@ -52,16 +52,29 @@ export function sopHeaderHtml(m: SopDocMeta): string {
   return (
     `<table style="width:100%;border-collapse:collapse;">` +
       `<tr>` +
-        `<td rowspan="3" style="${cell}width:92px;text-align:center;vertical-align:middle;"><img src="${SOP_LOGO_DATA_URI}" width="58" height="58" alt="Hamsun"/></td>` +
+        `<td rowspan="3" style="${cell}width:172px;text-align:center;vertical-align:middle;"><img src="${SOP_LOGO_DATA_URI}" width="140" height="140" alt="Hamsun"/></td>` +
         `<td style="${cell}text-align:center;font-weight:bold;">STANDARD OPERATING PROCEDURE</td>` +
         `<td style="${cell}"><b>SOP No.:</b> ${esc(m.code)}</td>` +
       `</tr>` +
       `<tr><td style="${cell}"><b>Title:</b> ${esc(m.title)}</td><td style="${cell}"><b>Version No.:</b> ${esc(String(m.version))}</td></tr>` +
       `<tr><td style="${cell}"><b>Department:</b> ${esc(m.department)}</td><td style="${cell}"><b>Effective Date:</b> ${esc(m.effectiveDate)}</td></tr>` +
     `</table>` +
-    `<p style="${sec}"><b>1.&#9;PURPOSE:</b> ${esc(m.purpose)}</p>` +
-    `<p style="${sec}"><b>2.&#9;WHO THIS APPLIES TO:</b> ${esc(m.appliesTo)}</p>` +
+    `<p style="${sec}"><b>PURPOSE:</b> ${esc(m.purpose)}</p>` +
+    `<p style="${sec}"><b>WHO THIS APPLIES TO:</b> ${esc(m.appliesTo)}</p>` +
     `<p></p>`
+  )
+}
+
+/**
+ * The full SOP content (header + the manager's body + confidential line) as one
+ * HTML string. Used both to render the .docx and to display the SOP inside the
+ * portal, so the two always match.
+ */
+export function sopContentHtml(meta: SopDocMeta, bodyHtml: string): string {
+  return (
+    sopHeaderHtml(meta) +
+    (bodyHtml && bodyHtml.trim() ? bodyHtml : '<p></p>') +
+    `<p style="text-align:center;font-size:8pt;color:#666666;margin-top:20px;">${CONFIDENTIAL}</p>`
   )
 }
 
@@ -75,12 +88,7 @@ export async function generateSopDocx(meta: SopDocMeta, bodyHtml: string): Promi
     footer?: string | null,
   ) => Promise<Blob | ArrayBuffer | Uint8Array>
 
-  const html =
-    `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>` +
-    sopHeaderHtml(meta) +
-    (bodyHtml && bodyHtml.trim() ? bodyHtml : '<p></p>') +
-    `<p style="text-align:center;font-size:8pt;color:#666666;margin-top:20px;">${CONFIDENTIAL}</p>` +
-    `</body></html>`
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${sopContentHtml(meta, bodyHtml)}</body></html>`
 
   const out = await HTMLtoDOCX(html, null, {
     font: 'Arial',

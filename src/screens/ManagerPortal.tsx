@@ -24,7 +24,7 @@ import {
   ApiError,
 } from '../data/store'
 import type { Actor, DraftQuestion, OrgStaff, SopFormat } from '../data/store'
-import { generateSopDocx, sopNumber, SOP_DOCX_MIME } from '../lib/sopdoc'
+import { generateSopDocx, sopContentHtml, sopNumber, SOP_DOCX_MIME } from '../lib/sopdoc'
 import { SopEditor } from '../components/SopEditor'
 import type { Editor } from '@tiptap/react'
 import type { Branch, BranchScope, Department, Difficulty, Language, Manager, Sop, Staff, Test } from '../types'
@@ -1042,25 +1042,24 @@ function AddSopForm({
     const scope: BranchScope =
       forceAllBranches ? { kind: 'ALL' } : lockBranch || !allBranches ? { kind: 'LIST', branch_codes: [branch.code] } : { kind: 'ALL' }
     const folderName = folders.find((f) => f.id === folderId)?.name ?? 'the folder'
+    const meta = {
+      title: title.trim(),
+      code: codeVal,
+      version: 1,
+      department: dept.name,
+      effectiveDate: fmtD(now),
+      purpose: purpose.trim(),
+      appliesTo: appliesTo.trim(),
+    }
+    // The same composed HTML backs both the .docx and the in-portal view.
+    const contentHtml = sopContentHtml(meta, body)
     try {
-      // Compose the controlled header + the manager's body into a real .docx.
-      const blob = await generateSopDocx(
-        {
-          title: title.trim(),
-          code: codeVal,
-          version: 1,
-          department: dept.name,
-          effectiveDate: fmtD(now),
-          purpose: purpose.trim(),
-          appliesTo: appliesTo.trim(),
-        },
-        body,
-      )
+      const blob = await generateSopDocx(meta, body)
       const docFile = new File([blob], `${codeVal.replace(/[\\/:*?"<>|]/g, '-')}.docx`, { type: SOP_DOCX_MIME })
 
       if (isSupabaseEnabled) {
         await uploadSopViaFunction(
-          { title: title.trim(), code: codeVal, department_id: dept.id, branch_scope: scope, folder_id: folderId },
+          { title: title.trim(), code: codeVal, department_id: dept.id, branch_scope: scope, folder_id: folderId, document_html: contentHtml },
           docFile,
           video?.file ?? null,
         )
@@ -1074,6 +1073,7 @@ function AddSopForm({
           code: codeVal,
           document_file_id: URL.createObjectURL(blob),
           video_file_id: video?.src ?? null,
+          document_html: contentHtml,
         })
         toast(`Published as ${s.code} into ${folderName}`)
       }
