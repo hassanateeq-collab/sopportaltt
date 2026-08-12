@@ -1923,11 +1923,18 @@ export const api = {
     // Supabase mode: bump the version via PostgREST (RLS confines managers to
     // their own department + branch). The bump reopens the sign-off because
     // acknowledgments are pinned to the old version number.
+    // A new version re-opens the approval chain: it drops back to a draft
+    // (hidden from staff), so "Submit for review" appears again and it must be
+    // re-authorised before it goes live. The sign-off register reopens too.
     if (isSupabaseEnabled) {
       const patch: Record<string, unknown> = {
         version: current.version + 1,
         updated_at: nowIso(),
         published_by: actorName(actor),
+        approval_status: 'draft',
+        approval_trail: [],
+        submitted_by: null,
+        approval_note: null,
       }
       if (changes.title !== undefined) patch.title = changes.title.trim()
       if (changes.summary !== undefined) patch.summary = changes.summary.trim()
@@ -1949,14 +1956,11 @@ export const api = {
     sop.version += 1
     sop.updated_at = nowIso()
     sop.published_by = actorName(actor)
-
-    for (const staff of eligibleStaffFor(sop)) {
-      notify(
-        staff.id,
-        'sop_published',
-        `${sop.code} — ${sop.title} — has been updated to version ${sop.version}. Please read and sign it again.`,
-      )
-    }
+    sop.approval_status = 'draft'
+    sop.approval_trail = []
+    sop.submitted_by = null
+    sop.approval_note = null
+    // No staff notification yet — they're told when it's re-authorised.
     commit()
     return sop
   },

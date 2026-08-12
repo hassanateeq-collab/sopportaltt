@@ -125,10 +125,10 @@ Deno.serve(async (req) => {
         if (role.role !== 'manager') return json({ error: 'Only the author submits an SOP for review.' }, 403)
         if (sop.department_id !== role.department_id) return json({ error: 'You can only submit your own department’s SOPs.' }, 403)
       }
-      // draft = never reviewed; rejected = sent back; authorized = a live SOP the
-      // author wants re-approved. Anything else is already mid-chain.
-      if (status !== 'draft' && status !== 'rejected' && status !== 'authorized') {
-        return json({ error: 'This SOP is already in review.' }, 409)
+      // draft = never reviewed (new SOP or fresh version); rejected = sent back.
+      // A live SOP re-enters review only by starting a new version.
+      if (status !== 'draft' && status !== 'rejected') {
+        return json({ error: 'This SOP is already live or in review.' }, 409)
       }
       const trailRole = role.kind === 'admin' ? 'admin' : role.role
       // A fresh submission starts a new sign-off round, so the trail resets.

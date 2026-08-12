@@ -68,9 +68,9 @@ export function forwardNext(status: ApprovalStatus, target?: 'hr' | 'ceo'): Appr
 
 /** Statuses the author may (re)submit for review from. */
 export function canSubmit(status: ApprovalStatus): boolean {
-  // draft = never reviewed; rejected = sent back to fix; authorized = a live SOP
-  // the author wants re-approved (e.g. after an edit).
-  return status === 'draft' || status === 'rejected' || status === 'authorized'
+  // draft = never reviewed (a brand-new SOP or a fresh version); rejected = sent
+  // back to fix. A live SOP re-enters review only by starting a new version.
+  return status === 'draft' || status === 'rejected'
 }
 
 /** Statuses where the SOP is back with the Manager, awaiting a forward. */

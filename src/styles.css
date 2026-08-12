@@ -472,6 +472,44 @@ textarea {
   vertical-align: middle;
 }
 
+/* Reviewer/admin notification bell with a pending-approvals badge. */
+.reviewbell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  color: var(--pine);
+  cursor: pointer;
+}
+.reviewbell:hover {
+  border-color: var(--pine);
+}
+.reviewbell svg {
+  width: 19px;
+  height: 19px;
+}
+.reviewbell-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--exp);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--card);
+}
+
 /* Compact on-row sign-off summary: a chip per approver + the current reviewer. */
 .apstrip {
   display: flex;

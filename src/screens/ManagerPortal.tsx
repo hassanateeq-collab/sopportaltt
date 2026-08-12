@@ -52,6 +52,7 @@ import {
   ApprovalSectionIcon,
   SettingsSectionIcon,
   StatusSectionIcon,
+  BellIcon,
 } from '../components/icons'
 
 /**
@@ -160,7 +161,8 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
               ))}
             </select>
           </div>
-          <div className="field" style={{ flex: '0 0 auto', alignSelf: 'flex-end' }}>
+          <div className="field" style={{ flex: '0 0 auto', alignSelf: 'flex-end', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <ReviewBell count={pendingApprovals} onClick={() => setPage('approvals')} />
             <button className="btn" onClick={onLogout}>Sign out</button>
           </div>
         </div>
@@ -327,7 +329,8 @@ function ReviewerPortal({ actor, onLogout }: { actor: Actor & { kind: 'manager' 
         <span className="here">{actor.manager.name} — {MANAGER_ROLE_LABELS[role]}</span>
         <span className="sep">·</span>
         <span className="here">SOP review</span>
-        <span className="who">
+        <span className="who" style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+          <ReviewBell count={sops.length} onClick={reload} />
           <button onClick={onLogout} style={{ color: 'var(--pine)', fontWeight: 600 }}>Sign out</button>
         </span>
       </div>
@@ -633,7 +636,39 @@ function SopReader({ sop, onBack, onEdit }: { sop: Sop; onBack: () => void; onEd
         </div>
       )}
       <ApprovalTrail sop={sop} />
+      <SopReadStatus sop={sop} />
     </>
+  )
+}
+
+/**
+ * Who has read & signed this SOP — shown at the bottom of the opened SOP so a
+ * manager can see, per staff member, whether they've acknowledged the current
+ * version and when.
+ */
+function SopReadStatus({ sop }: { sop: Sop }) {
+  const eligible = eligibleStaffFor(sop)
+  if (eligible.length === 0) return null
+  const signed = eligible.filter((p) => hasSigned(p.id, sop)).length
+  return (
+    <section className="sop-approvals">
+      <div className={`sop-approvals-head ${signed === eligible.length ? 'done' : ''}`}>
+        Staff sign-off — {signed}/{eligible.length} have read v{sop.version}
+      </div>
+      <ol className="approval-trail">
+        {eligible.map((p) => {
+          const a = acknowledgmentFor(p.id, sop)
+          return (
+            <li key={p.id} className={`atr ${a ? 'atr-authorized' : ''}`}>
+              <span className="atr-mark" aria-hidden>{a ? '✓' : '•'}</span>
+              <span className="atr-role">{p.name}</span>
+              <span className="atr-action">{a ? 'Read &amp; signed' : 'Not read yet'}</span>
+              {a && <span className="atr-at">{fmtD(a.signed_at)}</span>}
+            </li>
+          )
+        })}
+      </ol>
+    </section>
   )
 }
 
@@ -931,6 +966,26 @@ function SopBoard({
   )
 }
 
+/**
+ * A bell that flags how many SOPs are waiting on the signed-in reviewer/admin.
+ * The badge count is the notification — it appears the moment an SOP reaches
+ * their stage of the chain.
+ */
+function ReviewBell({ count, onClick }: { count: number; onClick?: () => void }) {
+  return (
+    <button
+      type="button"
+      className="reviewbell"
+      onClick={onClick}
+      title={count ? `${count} SOP${count === 1 ? '' : 's'} awaiting your approval` : 'No approvals pending'}
+      aria-label={count ? `${count} SOPs awaiting your approval` : 'Approvals'}
+    >
+      <BellIcon />
+      {count > 0 && <span className="reviewbell-badge">{count > 9 ? '9+' : count}</span>}
+    </button>
+  )
+}
+
 /** A small coloured pill naming where an SOP sits on the review chain. */
 function ApprovalChip({ status }: { status: ApprovalStatus }) {
   if (status === 'authorized') return null
@@ -1066,21 +1121,13 @@ function RevalidateRow({ actor, sop }: { actor: Actor; sop: Sop }) {
         <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
           <button
             className="btn sm"
-            onClick={() => run(() => api.reviseSop(actor, sop.id, {}), `${sop.code} bumped to v${sop.version + 1}`)}
+            onClick={() => {
+              if (sop.approval_status === 'authorized' && !confirm(`Start a new version of ${sop.code}?\n\nIt drops to a draft and must go back through the approval chain (Branch Manager → Admin → HR/CEO) before it is live again.`)) return
+              run(() => api.reviseSop(actor, sop.id, {}), `${sop.code} — new draft v${sop.version + 1}, submit it for review`)
+            }}
           >
             ↑ New version of {sop.code}
           </button>
-          {sop.approval_status === 'authorized' && (
-            <button
-              className="btn sm"
-              onClick={() => {
-                if (!confirm(`Send ${sop.code} back through the approval chain?\n\nIt goes to the Branch Manager → Admin → HR/CEO and is hidden from staff until it is re-authorised.`)) return
-                run(() => api.submitSopForReview(actor, sop.id), `${sop.code} sent for re-approval`)
-              }}
-            >
-              ↻ Send for re-approval
-            </button>
-          )}
           <button
             className="btn sm danger"
             onClick={() => {
@@ -1091,11 +1138,9 @@ function RevalidateRow({ actor, sop }: { actor: Actor; sop: Sop }) {
             ✕ Delete SOP
           </button>
         </div>
-        {sop.approval_status === 'authorized' && (
-          <p className="demo-hint" style={{ margin: '4px 0 0' }}>
-            “Send for re-approval” takes this live SOP back through the review chain — use it after editing a published SOP.
-          </p>
-        )}
+        <p className="demo-hint" style={{ margin: '4px 0 0' }}>
+          A new version drops the SOP to a draft and re-opens the approval chain — the <strong>Submit for review</strong> button appears again on its row.
+        </p>
 
         <SopVideoControl sop={sop} />
       </div>
