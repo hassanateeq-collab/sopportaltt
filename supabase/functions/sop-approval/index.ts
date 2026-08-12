@@ -103,6 +103,16 @@ Deno.serve(async (req) => {
       return json({ sops })
     }
 
+    // ---- pipeline: every SOP's status, for the "Status" overview. A department
+    // manager sees only their department; admins and reviewers see all. ----
+    if (action === 'pipeline') {
+      let q = admin.from('sops').select('*').order('code', { ascending: true })
+      if (role.kind === 'manager' && role.role === 'manager') q = q.eq('department_id', role.department_id)
+      const { data, error } = await q
+      if (error) return json({ error: error.message }, 500)
+      return json({ sops: data ?? [] })
+    }
+
     const sopId = String(body.sop_id ?? '')
     if (!sopId) return json({ error: 'Which SOP?' }, 400)
     const { data: sop } = await admin.from('sops').select('*').eq('id', sopId).maybeSingle()

@@ -433,6 +433,29 @@ export async function approvalQueue(actor: Actor): Promise<Sop[]> {
   }
 }
 
+/**
+ * Every SOP with its approval status, for the "Status" overview. A department
+ * manager and an admin already hold what they may see in the cache (RLS scopes
+ * it); a reviewer has no SOPs cached, so theirs comes from the sop-approval
+ * pipeline action (service_role, org-wide).
+ */
+export async function sopStatusList(actor: Actor): Promise<Sop[]> {
+  const fromCache = () => {
+    if (actor.kind === 'manager' && actor.manager.role === 'manager') {
+      return read.sops().filter((s) => s.department_id === actor.manager.department_id)
+    }
+    return read.sops()
+  }
+  const isReviewer = actor.kind === 'manager' && actor.manager.role !== 'manager'
+  if (!isSupabaseEnabled || !isReviewer) return fromCache()
+  try {
+    const j = await callAdminFn('sop-approval', { action: 'pipeline' })
+    return (Array.isArray(j.sops) ? j.sops : []) as Sop[]
+  } catch {
+    return fromCache()
+  }
+}
+
 /* ------------------------------------------------------------ SOP format ---- */
 
 export interface SopFormat {

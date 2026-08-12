@@ -15,6 +15,7 @@ import {
   removeSopVideo,
   downloadTestReport,
   approvalQueue,
+  sopStatusList,
   orgStaffDirectory,
   listDriveFolders,
   createDriveFolder,
@@ -50,6 +51,7 @@ import {
   DepartmentSectionIcon,
   ApprovalSectionIcon,
   SettingsSectionIcon,
+  StatusSectionIcon,
 } from '../components/icons'
 
 /**
@@ -58,7 +60,7 @@ import {
  * and also manages the org. The boards and forms are the same; only the scope
  * and the extra admin sections differ.
  */
-type Page = 'home' | 'sops' | 'tests' | 'staff' | 'managers' | 'branches' | 'departments' | 'settings' | 'approvals'
+type Page = 'home' | 'sops' | 'tests' | 'staff' | 'managers' | 'branches' | 'departments' | 'settings' | 'approvals' | 'status'
 
 export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
   // Approval-chain reviewers (Branch Manager / HR / CEO) own no department, so
@@ -104,6 +106,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
   const settingsTile: TileDef = { key: 'settings', icon: <SettingsSectionIcon />, title: 'Settings', sub: 'Approval access · Drive folders · routing' }
   const pendingApprovals = read.sops().filter((s) => s.approval_status === 'admin_review').length
   const approvalsTile: TileDef = { key: 'approvals', icon: <ApprovalSectionIcon />, title: 'SOP approvals', sub: pendingApprovals ? `${pendingApprovals} awaiting your review` : 'review the SOP chain' }
+  const statusTile: TileDef = { key: 'status', icon: <StatusSectionIcon />, title: 'Status', sub: 'where every SOP & test stands' }
 
   const renderTile = (t: TileDef) => (
     <button key={t.key} className="mtile" onClick={() => setPage(t.key)}>
@@ -185,7 +188,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
                 branch/department setup are the same regardless of which branch
                 you're viewing, so they sit above the branch picker. */}
             <div className="mtiles">
-              {[sopTile, managerTile, approvalsTile].map(renderTile)}
+              {[sopTile, managerTile, approvalsTile, statusTile].map(renderTile)}
               {formatTile}
               {[branchTile, deptTile, settingsTile].map(renderTile)}
             </div>
@@ -200,6 +203,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
             <div className="mtiles">
               {[sopTile, testTile, staffTile].map(renderTile)}
               {formatTile}
+              {renderTile(statusTile)}
             </div>
             {branchSelect}
             <EmployeeResults dept={dept} branch={branch} />
@@ -250,6 +254,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
             </>
           )}
           {page === 'approvals' && isAdmin && <ApprovalsBoard actor={actor} />}
+          {page === 'status' && <StatusBoard actor={actor} />}
         </>
       )}
 
@@ -345,6 +350,9 @@ function ReviewerPortal({ actor, onLogout }: { actor: Actor & { kind: 'manager' 
           )}
         </div>
       </details>
+
+      {/* Every non-staff user can see where each SOP stands. */}
+      <StatusBoard actor={actor} />
     </>
   )
 }
@@ -404,6 +412,86 @@ function ApprovalsBoard({ actor }: { actor: Actor }) {
           )}
         </div>
       </details>
+    </>
+  )
+}
+
+/**
+ * The "Status" board (everyone except staff): where every SOP sits on the
+ * approval chain, plus each test's state. A department manager sees their own
+ * department; an admin and the reviewers see the whole organisation.
+ */
+function StatusBoard({ actor }: { actor: Actor }) {
+  const isAdmin = actor.kind === 'admin'
+  const [sops, setSops] = useState<Sop[]>([])
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    sopStatusList(actor)
+      .then((list) => { if (active) setSops(list) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [actor])
+
+  // Tests come from the cache — managers/admins hold them; reviewers have none.
+  const tests = read
+    .tests()
+    .filter((t) => isAdmin || (actor.kind === 'manager' && t.department_id === actor.manager.department_id))
+    .slice()
+    .sort((a, b) => a.title.localeCompare(b.title))
+
+  const deptCode = (id: string) => read.department(id)?.code ?? '—'
+
+  return (
+    <>
+      <details className="board" open>
+        <summary><StatusSectionIcon />SOP status<span className="hint">{loading ? 'loading…' : `${sops.length}`}</span></summary>
+        <div className="card-body">
+          {loading ? (
+            <div className="empty-row"><span className="spinner" /> Loading…</div>
+          ) : sops.length === 0 ? (
+            <div className="empty-row">No SOPs yet.</div>
+          ) : (
+            sops.map((s) => (
+              <div className="brow" key={s.id}>
+                <div className="brow-top">
+                  <span className="brow-title">
+                    <span className="ver">{s.code}</span> {s.title}{' '}
+                    {isAdmin && <span className="ver">{deptCode(s.department_id)}</span>}{' '}
+                    {s.approval_status === 'authorized' ? <span className="livechip">LIVE</span> : <ApprovalChip status={s.approval_status} />}
+                  </span>
+                  <span className="demo-hint" style={{ margin: 0 }}>{APPROVAL_STATUS_LABELS[s.approval_status]}</span>
+                </div>
+                <ApprovalStrip sop={s} />
+              </div>
+            ))
+          )}
+        </div>
+      </details>
+
+      {tests.length > 0 && (
+        <details className="board" open>
+          <summary><TestSectionIcon />Test status<span className="hint">{tests.length}</span></summary>
+          <div className="card-body">
+            {tests.map((t) => {
+              const qCount = read.questionsFor(t.id).length
+              const assigned = read.assignments().filter((a) => a.test_id === t.id).length
+              return (
+                <div className="brow" key={t.id}>
+                  <div className="brow-top">
+                    <span className="brow-title">
+                      {t.title} <span className="ver">{qCount} Qs</span>{' '}
+                      <span className={`apchip ${t.status === 'published' ? 'ap-authorized' : 'ap-draft'}`}>{t.status === 'published' ? 'Published' : 'Draft'}</span>
+                    </span>
+                    <span className="demo-hint" style={{ margin: 0 }}>{assigned} assigned</span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </details>
+      )}
     </>
   )
 }

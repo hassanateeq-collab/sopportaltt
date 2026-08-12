@@ -134,21 +134,33 @@ token — the files are owned by that account and use its 15 GB.
 ### SOP approval workflow (Branch Manager · HR · CEO)
 
 Migration `0009_sop_approvals.sql` adds three sign-in roles to `managers`
-(`branch_manager`, `hr`, `ceo` alongside the default `manager`) and an
-`approval_status` to `sops`. A department manager's new SOP now enters the chain
-as a **draft** and is invisible to staff until it is authorised:
+(`branch_manager`, `hr`, `ceo` alongside the default `manager`), plus
+`approval_status` / `approval_note` / `submitted_by` / `approval_trail` on
+`sops`. A department manager's new SOP enters the chain as a **draft** and is
+invisible to staff until it is authorised.
+
+The **Manager drives the chain**: each reviewer only Approves or Sends-back, and
+an approval hands the SOP back to the Manager, who forwards it on:
 
 ```
-draft → branch_review → admin_review → (hr_review) → ceo_review → authorized
+draft →[submit] branch_review →[Branch Mgr ✓] branch_approved
+      →[Manager forwards] admin_review →[Admin ✓] admin_approved
+      →[Manager picks HR or CEO] hr_review / ceo_review →[✓] authorized
 ```
 
-The **Admin** decides at their step whether the optional **HR** review is needed
-or the SOP goes straight to the **CEO**, whose approval authorises it (and
-notifies eligible staff, exactly like a publish). Any reviewer can **send it
-back** (`rejected`) with a note; the author fixes it and resubmits. Existing SOPs
-default to `authorized` (already live). The migration also makes the
-`manager_*()` helpers ignore the review roles, so a Branch Manager / HR / CEO
-never inherits a department manager's read/write access.
+**HR is optional and equivalent to the CEO here** — the Manager sends the
+admin-approved SOP to *either* HR *or* the CEO, and that single approval
+authorises it (notifying eligible staff, exactly like a publish). Any reviewer
+can **send it back** (`rejected`) with a note; the author fixes it and
+resubmits (restarting from the Branch Manager). Each step is recorded in
+`approval_trail`, shown as a "Sign-off:" strip on the SOP row and an
+"approved by all" record at the bottom of the opened SOP. Existing SOPs default
+to `authorized`. The migration also makes the `manager_*()` helpers ignore the
+review roles, so a Branch Manager / HR / CEO never inherits a department
+manager's read/write access.
+
+Everyone except staff also gets a **Status** tile — where every SOP (and, for
+managers/admins, every test) currently stands.
 
 Admins see, edit and create these accounts under **Settings → Approval access**
 (a **Branch Manager per branch**, HR, and the CEO). A Branch Manager only

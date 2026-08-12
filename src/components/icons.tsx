@@ -125,6 +125,20 @@ export function ApprovalSectionIcon() {
   )
 }
 
+export function StatusSectionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="sec-ico" aria-hidden>
+      <rect x="4" y="3.5" width="16" height="17" rx="2.6" fill={BRASS_SOFT} stroke={PINE} strokeWidth="1.6" />
+      <circle cx="8" cy="8" r="1.5" fill={BRASS} />
+      <path d="M11 8h6" stroke={PINE} strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="8" cy="12" r="1.5" fill={BRASS} />
+      <path d="M11 12h6" stroke={PINE} strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="8" cy="16" r="1.5" fill={BRASS} />
+      <path d="M11 16h4" stroke={PINE} strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export function SettingsSectionIcon() {
   return (
     <svg viewBox="0 0 24 24" className="sec-ico" aria-hidden>
