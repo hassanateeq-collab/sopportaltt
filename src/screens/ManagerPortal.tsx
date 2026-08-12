@@ -20,13 +20,10 @@ import {
   orgStaffDirectory,
   listDriveFolders,
   createDriveFolder,
-  getSopFormat,
-  setSopFormat,
-  clearSopFormat,
   driveFileViewLink,
   ApiError,
 } from '../data/store'
-import type { Actor, DraftQuestion, OrgStaff, SopFormat, HrOverview } from '../data/store'
+import type { Actor, DraftQuestion, OrgStaff, HrOverview } from '../data/store'
 import DOMPurify from 'dompurify'
 import { generateSopDocx, sopContentHtml, sopNumber, SOP_DOCX_MIME } from '../lib/sopdoc'
 import { SopEditor } from '../components/SopEditor'
@@ -83,7 +80,6 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
   const [reading, setReading] = useState<Sop | null>(null)
   const [editing, setEditing] = useState<Sop | null>(null)
   const [page, setPage] = useState<Page>('home')
-  const [formatOpen, setFormatOpen] = useState(false)
 
   const branch = read.branchByCode(aBranch)
   const dept = isAdmin ? read.department(aDept) : read.department(actor.manager.department_id ?? '')
@@ -118,19 +114,6 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
         <span className="mtile-sub">{t.sub}</span>
       </span>
       <span className="mtile-go" aria-hidden>›</span>
-    </button>
-  )
-
-  // Not a page — opens a popup. The one SOP format template is the same for
-  // every branch, so it sits with the branch-independent tiles.
-  const formatTile = (
-    <button className="mtile" onClick={() => setFormatOpen(true)}>
-      <span className="mtile-ico"><SopSectionIcon /></span>
-      <span className="mtile-body">
-        <span className="mtile-title">SOP format</span>
-        <span className="mtile-sub">{isAdmin ? 'upload the template managers write in' : 'the template to write your SOPs in'}</span>
-      </span>
-      <span className="mtile-go" aria-hidden>⤢</span>
     </button>
   )
 
@@ -192,7 +175,6 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
                 you're viewing, so they sit above the branch picker. */}
             <div className="mtiles">
               {[sopTile, managerTile, approvalsTile, statusTile].map(renderTile)}
-              {formatTile}
               {[branchTile, deptTile, settingsTile].map(renderTile)}
             </div>
             {branchSelect}
@@ -205,7 +187,6 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
           <>
             <div className="mtiles">
               {[sopTile, testTile, staffTile].map(renderTile)}
-              {formatTile}
               {renderTile(statusTile)}
             </div>
             {branchSelect}
@@ -273,7 +254,6 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
       {editing && (
         <EditSopForm actor={actor} sop={editing} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />
       )}
-      {formatOpen && <SopFormatModal actor={actor} onClose={() => setFormatOpen(false)} />}
     </>
   )
 }
@@ -826,117 +806,6 @@ function EditSopForm({ actor, sop, onClose, onSaved }: { actor: Actor; sop: Sop;
           <button className="btn primary block" disabled={busy} onClick={() => void save()}>
             {busy ? <><span className="spinner" /> Saving…</> : `Save changes to ${sop.code}`}
           </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/* ------------------------------------------------------------ SOP format -- */
-
-/**
- * A popup (not a page) for the one org-wide SOP format template. An admin can
- * upload, replace or remove it; a manager can only view/download it, so they
- * know which layout to write their SOPs in. Backed by the sop-format function.
- */
-function SopFormatModal({ actor, onClose }: { actor: Actor; onClose: () => void }) {
-  const isAdmin = actor.kind === 'admin'
-  const [format, setFormat] = useState<SopFormat | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState(false)
-  const [file, setFile] = useState<File | null>(null)
-
-  useEffect(() => {
-    let active = true
-    getSopFormat()
-      .then((f) => { if (active) setFormat(f) })
-      .catch((e) => { if (active) toast(e instanceof ApiError ? e.message : 'Could not load the format.') })
-      .finally(() => { if (active) setLoading(false) })
-    return () => { active = false }
-  }, [])
-
-  async function upload() {
-    if (!file) { toast('Choose a file first'); return }
-    setBusy(true)
-    try {
-      const f = await setSopFormat(file)
-      setFormat(f)
-      setFile(null)
-      toast('SOP format uploaded')
-    } catch (e) {
-      toast(e instanceof ApiError ? e.message : 'Could not upload the format.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function remove() {
-    if (!confirm('Remove the SOP format file? Managers will no longer see a template.')) return
-    setBusy(true)
-    try {
-      await clearSopFormat()
-      setFormat(null)
-      toast('SOP format removed')
-    } catch (e) {
-      toast(e instanceof ApiError ? e.message : 'Could not remove the format.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="modal-scrim" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <span><SopSectionIcon /> SOP format</span>
-          <button className="v-close" onClick={onClose} aria-label="Close">✕</button>
-        </div>
-        <div className="card-body">
-          <p className="demo-hint" style={{ marginTop: 0 }}>
-            The template document SOPs are written in.{' '}
-            {isAdmin ? 'Upload or replace it here — managers can only view it.' : 'Download it to see the required layout.'}
-          </p>
-
-          {loading ? (
-            <div className="empty-row"><span className="spinner" /> Loading…</div>
-          ) : format ? (
-            <div className="pdfchip" style={{ marginBottom: 4 }}>
-              <span className="mono">📄 {format.name}</span>
-              <a className="btn sm primary" href={driveFileViewLink(format.id)} target="_blank" rel="noopener noreferrer">
-                View / Download
-              </a>
-            </div>
-          ) : (
-            <div className="empty-row">No format uploaded yet{isAdmin ? ' — upload one below.' : '. Ask an admin to add it.'}</div>
-          )}
-
-          {isAdmin ? (
-            <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
-              <div className="field">
-                <label>{format ? 'Replace the format file' : 'Upload a format file'}</label>
-                <input
-                  type="file"
-                  accept=".doc,.docx,.pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
-                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                />
-              </div>
-              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-                <button className="btn sm primary" disabled={busy || !file} onClick={() => void upload()}>
-                  {busy ? <span className="spinner" /> : format ? 'Replace format' : 'Upload format'}
-                </button>
-                {format && (
-                  <button className="btn sm danger" disabled={busy} onClick={() => void remove()}>
-                    Remove format
-                  </button>
-                )}
-              </div>
-              <p className="demo-hint" style={{ marginTop: 8 }}>
-                Word (.doc/.docx) or PDF. Managers can view and download it but can't change it.
-              </p>
-            </div>
-          ) : (
-            <p className="demo-hint" style={{ marginTop: 8 }}>Only an admin can add or change this format.</p>
-          )}
         </div>
       </div>
     </div>
