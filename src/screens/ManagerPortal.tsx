@@ -28,9 +28,9 @@ import { generateSopDocx, sopContentHtml, sopNumber, SOP_DOCX_MIME } from '../li
 import { SopEditor } from '../components/SopEditor'
 import type { Editor } from '@tiptap/react'
 import type { Branch, BranchScope, Department, Difficulty, Language, Manager, Sop, Staff, Test } from '../types'
-import { LANGUAGE_NAMES, APPROVAL_STATUS_LABELS, APPROVAL_ACTION_LABELS } from '../types'
+import { LANGUAGE_NAMES, APPROVAL_STATUS_LABELS } from '../types'
 import type { ApprovalStatus, ApprovalEvent } from '../types'
-import { isInReview, reviewerForStage } from '../lib/approval'
+import { isInReview } from '../lib/approval'
 import { scopeIncludes } from '../lib/scope'
 import { certStatus, daysUntil } from '../lib/certs'
 import { fmtD } from '../lib/format'
@@ -471,31 +471,61 @@ function ReviewCard({ actor, sop, onDone }: { actor: Actor; sop: Sop; onDone: ()
 }
 
 /**
- * The sign-off record for an SOP's current review round — who submitted, who
- * approved, who authorised, and any notes. Shown at the bottom of the SOP page
- * and in each reviewer's card, and headed "approved by all" once it is live.
+ * The two-step sign-off record: the Manager who published (submitted) the SOP,
+ * and the Admin's decision (reviewing / approved / sent back). Derived from the
+ * status + trail so it stays clean even for SOPs from an older workflow.
  */
-function ApprovalTrail({ sop }: { sop: Sop }) {
+function approvalSummary(sop: Sop): { publisher: string | null; decision: ApprovalEvent | null } {
   const trail = sop.approval_trail ?? []
-  if (!trail.length) return null
-  const authorised = sop.approval_status === 'authorized'
-  const roleLabel = (r: ApprovalEvent['role']) => (r === 'admin' ? 'Admin' : 'Manager')
+  const publisher = sop.submitted_by || trail.find((e) => e.action === 'submitted')?.name || null
+  const decision = [...trail].reverse().find((e) => e.action === 'authorized' || e.action === 'rejected') ?? null
+  return { publisher, decision }
+}
+
+function ApprovalTrail({ sop }: { sop: Sop }) {
+  const status = sop.approval_status
+  if (status === 'draft') return null
+  const { publisher, decision } = approvalSummary(sop)
+  const authorised = status === 'authorized'
   return (
     <section className="sop-approvals">
       <div className={`sop-approvals-head ${authorised ? 'done' : ''}`}>
-        {authorised ? '✓ Authorised by the Admin' : 'Approval progress'}
+        {authorised ? '✓ Approved — visible to staff' : status === 'rejected' ? 'Sent back for changes' : 'Awaiting Admin review'}
       </div>
       <ol className="approval-trail">
-        {trail.map((e, i) => (
-          <li key={i} className={`atr atr-${e.action}`}>
-            <span className="atr-mark" aria-hidden>{e.action === 'rejected' ? '✕' : e.action === 'submitted' ? '↑' : '✓'}</span>
-            <span className="atr-role">{roleLabel(e.role)}</span>
-            <span className="atr-action">{APPROVAL_ACTION_LABELS[e.action]}</span>
-            <span className="atr-by">{e.name}</span>
-            <span className="atr-at">{fmtD(e.at)}</span>
-            {e.note && <span className="atr-note">“{e.note}”</span>}
+        {publisher && (
+          <li className="atr atr-authorized">
+            <span className="atr-mark" aria-hidden>✓</span>
+            <span className="atr-role">Manager</span>
+            <span className="atr-action">Published</span>
+            <span className="atr-by">{publisher}</span>
           </li>
-        ))}
+        )}
+        {status === 'admin_review' && (
+          <li className="atr">
+            <span className="atr-mark" aria-hidden>●</span>
+            <span className="atr-role">Admin</span>
+            <span className="atr-action">Reviewing…</span>
+          </li>
+        )}
+        {authorised && (
+          <li className="atr atr-authorized">
+            <span className="atr-mark" aria-hidden>✓</span>
+            <span className="atr-role">Admin</span>
+            <span className="atr-action">Reviewed &amp; approved</span>
+            <span className="atr-by">{decision?.name ?? 'Admin'}</span>
+            {decision && <span className="atr-at">{fmtD(decision.at)}</span>}
+          </li>
+        )}
+        {status === 'rejected' && (
+          <li className="atr atr-rejected">
+            <span className="atr-mark" aria-hidden>✕</span>
+            <span className="atr-role">Admin</span>
+            <span className="atr-action">Sent back</span>
+            <span className="atr-by">{decision?.name ?? 'Admin'}</span>
+            {decision?.note && <span className="atr-note">“{decision.note}”</span>}
+          </li>
+        )}
       </ol>
     </section>
   )
@@ -777,30 +807,21 @@ function ApprovalChip({ status }: { status: ApprovalStatus }) {
   return <span className={`apchip ap-${status}`}>{APPROVAL_STATUS_LABELS[status]}</span>
 }
 
-/** Short label for a trail role, for the compact on-row strip. */
-function shortRole(r: ApprovalEvent['role'] | 'admin'): string {
-  return r === 'admin' ? 'Admin' : 'Manager'
-}
-
 /**
- * A compact one-line summary of who has signed off, shown right on the SOP row:
- * a green ✓ chip per approver (✕ for a send-back), plus a "● with <role>" chip
- * for whoever is currently reviewing. Empty (renders nothing) until the SOP has
- * been through at least one review step.
+ * The compact on-row sign-off: "Manager published" and then the Admin's step —
+ * awaiting review, reviewed, or sent back. Hidden while the SOP is a draft.
  */
 function ApprovalStrip({ sop }: { sop: Sop }) {
-  const trail = (sop.approval_trail ?? []).filter((e) => e.action !== 'submitted')
-  const pending = reviewerForStage(sop.approval_status)
-  if (!trail.length && !pending) return null
+  const status = sop.approval_status
+  if (status === 'draft') return null
+  const { publisher, decision } = approvalSummary(sop)
   return (
     <div className="apstrip">
       <span className="apstrip-label">Sign-off:</span>
-      {trail.map((e, i) => (
-        <span key={i} className={`apstrip-chip ${e.action === 'rejected' ? 'no' : 'yes'}`} title={e.note ?? ''}>
-          {e.action === 'rejected' ? '✕' : '✓'} {shortRole(e.role)}
-        </span>
-      ))}
-      {pending && <span className="apstrip-chip wait">● with {shortRole(pending)}</span>}
+      {publisher && <span className="apstrip-chip yes">✓ Published by {publisher}</span>}
+      {status === 'admin_review' && <span className="apstrip-chip wait">● Awaiting Admin review</span>}
+      {status === 'authorized' && <span className="apstrip-chip yes">✓ Reviewed by {decision?.name ?? 'Admin'}</span>}
+      {status === 'rejected' && <span className="apstrip-chip no">✕ Sent back by {decision?.name ?? 'Admin'}</span>}
     </div>
   )
 }
@@ -845,20 +866,16 @@ function SopApprovalControl({ actor, sop }: { actor: Actor; sop: Sop }) {
     return (
       <div className="approw">
         <span className="demo-hint" style={{ margin: 0 }}>
-          With the Admin for review.{sop.submitted_by ? ` Submitted by ${sop.submitted_by}.` : ''} Hidden from staff until approved.
+          With the Admin for review.{sop.submitted_by ? ` Submitted by ${sop.submitted_by}.` : ''} Hidden from staff until the Admin approves it.
         </span>
       </div>
     )
   }
-  // Authorised = live to staff. If it went through the chain, say so; the
-  // re-review option lives in "Manage this SOP", not as a button here.
+  // Authorised = live to staff. The re-review option lives in "Manage this SOP".
   if (status === 'authorized') {
-    const approvedByAll = (sop.approval_trail ?? []).some((e) => e.action === 'authorized')
     return (
       <div className="approw">
-        <span className="demo-hint" style={{ margin: 0 }}>
-          {approvedByAll ? '✓ Live — approved by all and visible to staff.' : 'Live — visible to staff.'}
-        </span>
+        <span className="demo-hint" style={{ margin: 0 }}>✓ Live — reviewed by the Admin and visible to staff.</span>
       </div>
     )
   }
