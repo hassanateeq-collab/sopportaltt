@@ -18,9 +18,17 @@ alter table public.managers alter column branch_id drop not null;
 -- 'rejected' bounces it back to the author to fix and resubmit. Existing SOPs
 -- default to 'authorized' (already live). Only 'authorized' SOPs reach staff
 -- (enforced in the staff-data Edge Function).
-alter table public.sops
-  add column if not exists approval_status text not null default 'authorized'
-  check (approval_status in ('draft', 'branch_review', 'admin_review', 'hr_review', 'ceo_review', 'authorized', 'rejected'));
+alter table public.sops add column if not exists approval_status text not null default 'authorized';
+-- The Manager drives the chain: reviewer approvals hand back to the Manager
+-- (branch_approved / admin_approved) who forwards it on. Named + recreated so the
+-- allowed set can grow without a fresh column.
+alter table public.sops drop constraint if exists sops_approval_status_check;
+alter table public.sops add constraint sops_approval_status_check check (
+  approval_status in (
+    'draft', 'branch_review', 'branch_approved', 'admin_review', 'admin_approved',
+    'hr_review', 'ceo_review', 'authorized', 'rejected'
+  )
+);
 alter table public.sops add column if not exists approval_note text;
 alter table public.sops add column if not exists submitted_by text;
 -- The sign-off record for the current review round: an ordered list of

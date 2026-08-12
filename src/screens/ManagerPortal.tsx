@@ -341,7 +341,7 @@ function ReviewerPortal({ actor, onLogout }: { actor: Actor & { kind: 'manager' 
           ) : sops.length === 0 ? (
             <div className="empty-row">Nothing waiting on you right now. New submissions will appear here.</div>
           ) : (
-            sops.map((s) => <ReviewCard key={s.id} actor={actor} sop={s} isAdminStep={false} onDone={reload} />)
+            sops.map((s) => <ReviewCard key={s.id} actor={actor} sop={s} onDone={reload} />)
           )}
         </div>
       </details>
@@ -369,7 +369,7 @@ function ApprovalsBoard({ actor }: { actor: Actor }) {
         </summary>
         <div className="card-body">
           <p className="demo-hint" style={{ marginTop: 0 }}>
-            Approve to send the SOP onward — to <strong>HR</strong> for an optional review, or straight to the
+            Approve to hand the SOP back to the manager, who then sends it to <strong>HR</strong> or the
             <strong> CEO</strong> for final authorisation. Rejecting sends it back to the author with your note.
           </p>
           <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 8 }}>
@@ -380,7 +380,7 @@ function ApprovalsBoard({ actor }: { actor: Actor }) {
           ) : sops.length === 0 ? (
             <div className="empty-row">No SOPs are waiting on your review.</div>
           ) : (
-            sops.map((s) => <ReviewCard key={s.id} actor={actor} sop={s} isAdminStep onDone={reload} />)
+            sops.map((s) => <ReviewCard key={s.id} actor={actor} sop={s} onDone={reload} />)
           )}
         </div>
       </details>
@@ -409,18 +409,18 @@ function ApprovalsBoard({ actor }: { actor: Actor }) {
 }
 
 /** One SOP awaiting a decision: read it, add a note, approve or send it back. */
-function ReviewCard({ actor, sop, isAdminStep, onDone }: { actor: Actor; sop: Sop; isAdminStep: boolean; onDone: () => void }) {
+function ReviewCard({ actor, sop, onDone }: { actor: Actor; sop: Sop; onDone: () => void }) {
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [showVideo, setShowVideo] = useState(false)
   const html = useMemo(() => recomposeSopHtml(sop), [sop])
   const deptName = read.department(sop.department_id)?.name ?? '—'
 
-  async function act(decision: 'approve' | 'reject', target?: 'hr' | 'ceo') {
+  async function act(decision: 'approve' | 'reject') {
     if (decision === 'reject' && !note.trim()) { toast('Add a short note so the author knows what to change'); return }
     setBusy(true)
     try {
-      await api.reviewSop(actor, sop.id, { decision, note: note.trim() || undefined, target })
+      await api.reviewSop(actor, sop.id, { decision, note: note.trim() || undefined })
       toast(decision === 'approve' ? `${sop.code} approved` : `${sop.code} sent back`)
       onDone()
     } catch (e) {
@@ -463,21 +463,14 @@ function ReviewCard({ actor, sop, isAdminStep, onDone }: { actor: Actor; sop: So
       {sop.approval_trail && sop.approval_trail.length > 0 && <ApprovalTrail sop={sop} />}
 
       <div className="field" style={{ marginTop: 8 }}>
-        <label>Note to the author {isAdminStep ? '' : '(required to send back)'}</label>
+        <label>Note to the author (required to send back)</label>
         <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Tighten step 3, then resend." />
       </div>
 
       <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-        {isAdminStep ? (
-          <>
-            <button className="btn sm primary" disabled={busy} onClick={() => void act('approve', 'ceo')}>✓ Approve → CEO</button>
-            <button className="btn sm" disabled={busy} onClick={() => void act('approve', 'hr')}>→ Send to HR first</button>
-          </>
-        ) : (
-          <button className="btn sm primary" disabled={busy} onClick={() => void act('approve')}>
-            {busy ? <span className="spinner" /> : nextApproveLabel(sop.approval_status)}
-          </button>
-        )}
+        <button className="btn sm primary" disabled={busy} onClick={() => void act('approve')}>
+          {busy ? <span className="spinner" /> : nextApproveLabel(sop.approval_status)}
+        </button>
         <button className="btn sm danger" disabled={busy} onClick={() => void act('reject')}>✕ Send back</button>
       </div>
 
@@ -519,11 +512,10 @@ function ApprovalTrail({ sop }: { sop: Sop }) {
   )
 }
 
-/** The approve button label for a non-admin reviewer, naming what happens next. */
+/** The approve button label for a reviewer, naming what happens next. */
 function nextApproveLabel(status: ApprovalStatus): string {
-  if (status === 'branch_review') return '✓ Approve → Admin'
-  if (status === 'hr_review') return '✓ Approve → CEO'
-  if (status === 'ceo_review') return '✓ Authorise (make live)'
+  // HR and CEO are the final step — their approval publishes the SOP.
+  if (status === 'hr_review' || status === 'ceo_review') return '✓ Approve & publish'
   return '✓ Approve'
 }
 
@@ -914,10 +906,39 @@ function SopApprovalControl({ actor, sop }: { actor: Actor; sop: Sop }) {
     if (!mayAct) return null
     return (
       <div className="approw">
-        <span className="demo-hint" style={{ margin: 0 }}>This SOP is a draft — staff can’t see it until the CEO authorises it.</span>
+        <span className="demo-hint" style={{ margin: 0 }}>This SOP is a draft — staff can’t see it until it’s authorised.</span>
         <button className="btn sm primary" onClick={() => run(() => api.submitSopForReview(actor, sop.id), `${sop.code} submitted to the Branch Manager`)}>
-          ↑ Submit for review
+          ↑ Submit to Branch Manager
         </button>
+      </div>
+    )
+  }
+  // Back with the Manager after the Branch Manager approved — forward to Admin.
+  if (status === 'branch_approved') {
+    return (
+      <div className="approw">
+        <div className="notice info" style={{ margin: 0 }}><strong>Branch Manager approved.</strong> Send it to the Admin next.</div>
+        {mayAct && (
+          <button className="btn sm primary" onClick={() => run(() => api.forwardSop(actor, sop.id), `${sop.code} sent to the Admin`)}>
+            → Send to Admin for review
+          </button>
+        )}
+      </div>
+    )
+  }
+  // Back with the Manager after the Admin approved — the Manager picks HR or CEO.
+  if (status === 'admin_approved') {
+    return (
+      <div className="approw">
+        <div className="notice info" style={{ margin: 0 }}>
+          <strong>Admin approved.</strong> Send it to <strong>HR</strong> or the <strong>CEO</strong> — either one authorises &amp; publishes it.
+        </div>
+        {mayAct && (
+          <>
+            <button className="btn sm primary" onClick={() => run(() => api.forwardSop(actor, sop.id, 'hr'), `${sop.code} sent to HR`)}>→ Send to HR</button>
+            <button className="btn sm primary" onClick={() => run(() => api.forwardSop(actor, sop.id, 'ceo'), `${sop.code} sent to the CEO`)}>→ Send to CEO</button>
+          </>
+        )}
       </div>
     )
   }

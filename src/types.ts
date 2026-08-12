@@ -107,16 +107,24 @@ export interface Admin {
 export type BranchScope = { kind: 'ALL' } | { kind: 'LIST'; branch_codes: string[] }
 
 /**
- * Where an SOP sits on the approval chain:
- *   draft → branch_review → admin_review → (hr_review) → ceo_review → authorized
- * 'rejected' bounces it back to its author to fix and resubmit. Only an
- * 'authorized' SOP is ever served to staff. SOPs that pre-date the workflow
- * default to 'authorized' (already live).
+ * Where an SOP sits on the approval chain. The Manager drives it forward: after
+ * each reviewer approves, control returns to the Manager, who forwards it on.
+ *   draft
+ *     → (submit)          branch_review
+ *     → (Branch Mgr ✓)    branch_approved      ← Manager holds
+ *     → (forward)         admin_review
+ *     → (Admin ✓)         admin_approved       ← Manager holds; picks HR or CEO
+ *     → (forward to HR)   hr_review → (HR ✓)   authorized
+ *     → (forward to CEO)  ceo_review → (CEO ✓) authorized
+ * Either HR or CEO — one approval publishes. 'rejected' bounces it back to the
+ * author. Only 'authorized' is served to staff; pre-workflow SOPs default to it.
  */
 export type ApprovalStatus =
   | 'draft'
   | 'branch_review'
+  | 'branch_approved'
   | 'admin_review'
+  | 'admin_approved'
   | 'hr_review'
   | 'ceo_review'
   | 'authorized'
@@ -142,7 +150,9 @@ export const APPROVAL_ACTION_LABELS: Record<ApprovalEvent['action'], string> = {
 export const APPROVAL_STATUS_LABELS: Record<ApprovalStatus, string> = {
   draft: 'Draft',
   branch_review: 'With Branch Manager',
+  branch_approved: 'Branch Manager approved',
   admin_review: 'With Admin',
+  admin_approved: 'Admin approved',
   hr_review: 'With HR',
   ceo_review: 'With CEO',
   authorized: 'Authorised · live',

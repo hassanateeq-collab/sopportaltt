@@ -27,7 +27,7 @@ import { hashEmployeeCode, verifyEmployeeCode, generateEmployeeCode } from '../l
 import { addMonths } from '../lib/certs'
 import { nextDocCode, isDocCodeTaken, isValidDocCode } from '../lib/codes'
 import { appliesToStaff, scopeIncludes } from '../lib/scope'
-import { stageForReviewer, canSubmit, nextStatusOnApprove, reviewerForStage } from '../lib/approval'
+import { stageForReviewer, canSubmit, approveNext, forwardNext, reviewerForStage } from '../lib/approval'
 import { supabase, isSupabaseEnabled, functionsBase, anonPublicKey } from '../lib/supabase'
 import { DRIVE_DEPARTMENT_FOLDERS } from '../lib/drive'
 import type {
@@ -2009,21 +2009,21 @@ export const api = {
   },
 
   /**
-   * A reviewer clears (approve) or bounces (reject) the SOP currently sitting at
-   * their stage. The admin's approve carries `target` to route to HR or the CEO.
-   * A CEO approval authorises the SOP and notifies every eligible staff member.
+   * A reviewer clears (approve) or bounces (reject) the SOP at their stage. A
+   * Branch Manager / Admin approval hands the SOP back to the Manager to forward
+   * on; an HR or CEO approval authorises it and notifies every eligible staff
+   * member.
    */
   async reviewSop(
     actor: Actor,
     sopId: string,
-    input: { decision: 'approve' | 'reject'; note?: string; target?: 'hr' | 'ceo' },
+    input: { decision: 'approve' | 'reject'; note?: string },
   ): Promise<void> {
     if (isSupabaseEnabled) {
       await callAdminFn('sop-approval', {
         action: input.decision,
         sop_id: sopId,
         note: input.note ?? '',
-        target: input.target ?? '',
       })
       await hydrateFromSupabase()
       return
@@ -2044,7 +2044,7 @@ export const api = {
       sop.approval_note = note
       sop.approval_trail = [...prior, { role: trailRole, name: actorName(actor), action: 'rejected', note, at: nowIso() }]
     } else {
-      const next = nextStatusOnApprove(sop.approval_status, input.target)
+      const next = approveNext(sop.approval_status)
       if (!next) throw new ApiError('There is nothing to approve at this stage.')
       sop.approval_status = next
       sop.approval_note = note
@@ -2055,6 +2055,30 @@ export const api = {
         }
       }
     }
+    sop.updated_at = nowIso()
+    commit()
+  },
+
+  /**
+   * The Manager forwards an approved SOP to the next reviewer: from
+   * branch_approved to the Admin, or from admin_approved to HR or the CEO
+   * (the Manager's choice — either one publishes on approval).
+   */
+  async forwardSop(actor: Actor, sopId: string, target?: 'hr' | 'ceo'): Promise<void> {
+    if (isSupabaseEnabled) {
+      await callAdminFn('sop-approval', { action: 'forward', sop_id: sopId, target: target ?? '' })
+      await hydrateFromSupabase()
+      return
+    }
+    const sop = db.sops.find((s) => s.id === sopId)
+    if (!sop) throw new ApiError('That SOP no longer exists.')
+    if (actor.kind === 'manager') {
+      if (actor.manager.role !== 'manager') throw new ApiError('Only the author can forward an SOP.')
+      if (sop.department_id !== actor.manager.department_id) throw new ApiError('You can only forward your own department’s SOPs.')
+    }
+    const next = forwardNext(sop.approval_status, target)
+    if (!next) throw new ApiError('This SOP is not waiting to be forwarded.')
+    sop.approval_status = next
     sop.updated_at = nowIso()
     commit()
   },

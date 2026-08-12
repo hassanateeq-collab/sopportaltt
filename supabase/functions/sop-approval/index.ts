@@ -23,7 +23,9 @@ import { cors, json } from '../_shared/http.ts'
 import { scopeIncludes } from '../_shared/scope.ts'
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-type Status = 'draft' | 'branch_review' | 'admin_review' | 'hr_review' | 'ceo_review' | 'authorized' | 'rejected'
+type Status =
+  | 'draft' | 'branch_review' | 'branch_approved' | 'admin_review' | 'admin_approved'
+  | 'hr_review' | 'ceo_review' | 'authorized' | 'rejected'
 
 /** The branch code for a branch id (a Branch Manager reviews only their branch). */
 async function branchCodeFor(admin: SupabaseClient, branchId: string | null): Promise<string | null> {
@@ -55,12 +57,15 @@ function stageForCaller(role: CallerRole): Status | null {
   }
 }
 
-/** Where an approval moves the SOP. Admin forks to HR or the CEO. */
-function nextStatusOnApprove(status: Status, target?: string): Status | null {
+/**
+ * Where a reviewer's APPROVE moves the SOP. Branch Manager / Admin hand it back
+ * to the Manager (an *_approved hold); HR or CEO publish it.
+ */
+function approveNext(status: Status): Status | null {
   switch (status) {
-    case 'branch_review': return 'admin_review'
-    case 'admin_review': return target === 'hr' ? 'hr_review' : 'ceo_review'
-    case 'hr_review': return 'ceo_review'
+    case 'branch_review': return 'branch_approved'
+    case 'admin_review': return 'admin_approved'
+    case 'hr_review': return 'authorized'
     case 'ceo_review': return 'authorized'
     default: return null
   }
@@ -126,6 +131,25 @@ Deno.serve(async (req) => {
       return json({ ok: true })
     }
 
+    // ---- forward: the Manager sends an approved SOP on to the next reviewer ----
+    if (action === 'forward') {
+      if (role.kind === 'manager') {
+        if (role.role !== 'manager') return json({ error: 'Only the author forwards an SOP.' }, 403)
+        if (sop.department_id !== role.department_id) return json({ error: 'You can only forward your own department’s SOPs.' }, 403)
+      }
+      const target = String(body.target ?? '')
+      let next: Status | null = null
+      if (status === 'branch_approved') next = 'admin_review'
+      else if (status === 'admin_approved') next = target === 'hr' ? 'hr_review' : target === 'ceo' ? 'ceo_review' : null
+      if (!next) return json({ error: 'This SOP is not waiting to be forwarded.' }, 409)
+      const { error } = await admin
+        .from('sops')
+        .update({ approval_status: next, updated_at: new Date().toISOString() })
+        .eq('id', sopId)
+      if (error) return json({ error: error.message }, 500)
+      return json({ ok: true })
+    }
+
     // ---- approve / reject: only the reviewer who owns the current stage ----
     if (action === 'approve' || action === 'reject') {
       const owner = reviewerForStage(status)
@@ -153,7 +177,7 @@ Deno.serve(async (req) => {
         return json({ ok: true })
       }
 
-      const next = nextStatusOnApprove(status, String(body.target ?? ''))
+      const next = approveNext(status)
       if (!next) return json({ error: 'There is nothing to approve at this stage.' }, 409)
       const trail = [...priorTrail, { role: trailRole, name: role.name, action: next === 'authorized' ? 'authorized' : 'approved', note, at: now }]
       const { error } = await admin
