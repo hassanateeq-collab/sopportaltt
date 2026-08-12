@@ -456,6 +456,46 @@ export async function sopStatusList(actor: Actor): Promise<Sop[]> {
   }
 }
 
+/**
+ * The org-wide staff + test-results overview for HR (and admins). HR has no
+ * department scope, so this comes from the hr-overview Edge Function
+ * (service_role) which includes plaintext employee codes; in demo mode it reads
+ * the local cache.
+ */
+export interface HrOverview {
+  staff: Staff[]
+  departments: Department[]
+  branches: Branch[]
+  tests: Test[]
+  attempts: Attempt[]
+  certifications: Certification[]
+  assignments: TestAssignment[]
+}
+
+export async function hrOverview(): Promise<HrOverview> {
+  if (!isSupabaseEnabled) {
+    return {
+      staff: read.staff(),
+      departments: read.departments(),
+      branches: read.branches(),
+      tests: read.tests(),
+      attempts: read.attempts(),
+      certifications: read.certifications(),
+      assignments: read.assignments(),
+    }
+  }
+  const j = await callAdminFn('hr-overview', {})
+  return {
+    staff: ((j.staff as Record<string, unknown>[]) ?? []).map(mapStaffRow),
+    departments: (j.departments as Department[]) ?? [],
+    branches: (j.branches as Branch[]) ?? [],
+    tests: (j.tests as Test[]) ?? [],
+    attempts: (j.attempts as Attempt[]) ?? [],
+    certifications: (j.certifications as Certification[]) ?? [],
+    assignments: (j.assignments as TestAssignment[]) ?? [],
+  }
+}
+
 /* ------------------------------------------------------------ SOP format ---- */
 
 export interface SopFormat {

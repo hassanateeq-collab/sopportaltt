@@ -16,6 +16,7 @@ import {
   downloadTestReport,
   approvalQueue,
   sopStatusList,
+  hrOverview,
   orgStaffDirectory,
   listDriveFolders,
   createDriveFolder,
@@ -25,12 +26,12 @@ import {
   driveFileViewLink,
   ApiError,
 } from '../data/store'
-import type { Actor, DraftQuestion, OrgStaff, SopFormat } from '../data/store'
+import type { Actor, DraftQuestion, OrgStaff, SopFormat, HrOverview } from '../data/store'
 import DOMPurify from 'dompurify'
 import { generateSopDocx, sopContentHtml, sopNumber, SOP_DOCX_MIME } from '../lib/sopdoc'
 import { SopEditor } from '../components/SopEditor'
 import type { Editor } from '@tiptap/react'
-import type { Branch, BranchScope, Department, Difficulty, Language, Manager, Sop, Staff, Test } from '../types'
+import type { Attempt, Branch, BranchScope, Department, Difficulty, Language, Manager, Sop, Staff, Test } from '../types'
 import { LANGUAGE_NAMES, APPROVAL_STATUS_LABELS, APPROVAL_ACTION_LABELS, MANAGER_ROLE_LABELS } from '../types'
 import type { ApprovalStatus, ManagerRole, ApprovalEvent } from '../types'
 import { isReviewerRole, isInReview, reviewerForStage } from '../lib/approval'
@@ -354,9 +355,101 @@ function ReviewerPortal({ actor, onLogout }: { actor: Actor & { kind: 'manager' 
         </div>
       </details>
 
+      {/* HR sees every department's staff, their codes and test results. */}
+      {role === 'hr' && <HrStaffBoard />}
+
       {/* Every non-staff user can see where each SOP stands. */}
       <StatusBoard actor={actor} />
     </>
+  )
+}
+
+/**
+ * HR's org-wide view: every department's staff, their employee codes, and their
+ * test results. Fed by the hr-overview Edge Function (HR/admin only).
+ */
+function HrStaffBoard() {
+  const [data, setData] = useState<HrOverview | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [q, setQ] = useState('')
+  useEffect(() => {
+    let active = true
+    hrOverview()
+      .then((d) => { if (active) setData(d) })
+      .catch(() => { if (active) setData(null) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [])
+
+  const deptName = (id: string) => data?.departments.find((d) => d.id === id)?.name ?? '—'
+  const branchCode = (id: string) => data?.branches.find((b) => b.id === id)?.code ?? '—'
+  const testTitle = (id: string) => data?.tests.find((t) => t.id === id)?.title ?? 'Test'
+
+  const query = q.trim().toLowerCase()
+  const staff = (data?.staff ?? [])
+    .filter((s) => !query || s.name.toLowerCase().includes(query) || (s.employee_code ?? '').includes(query) || deptName(s.department_id).toLowerCase().includes(query))
+    .sort((a, b) => deptName(a.department_id).localeCompare(deptName(b.department_id)) || a.name.localeCompare(b.name))
+
+  const resultsFor = (staffId: string) => {
+    const byTest = new Map<string, Attempt>()
+    for (const a of (data?.attempts ?? []).filter((x) => x.staff_id === staffId).sort((x, y) => y.attempted_at.localeCompare(x.attempted_at))) {
+      if (!byTest.has(a.test_id)) byTest.set(a.test_id, a)
+    }
+    return [...byTest.entries()].map(([testId, att]) => {
+      const cert = (data?.certifications ?? [])
+        .filter((c) => c.staff_id === staffId && c.test_id === testId)
+        .sort((x, y) => y.issued_at.localeCompare(x.issued_at))[0] ?? null
+      return { testId, att, cert }
+    })
+  }
+
+  return (
+    <details className="board">
+      <summary><StaffSectionIcon />Staff, codes &amp; test results — all departments<span className="hint">{loading ? 'loading…' : `${data?.staff.length ?? 0}`}</span></summary>
+      <div className="card-body">
+        {loading ? (
+          <div className="empty-row"><span className="spinner" /> Loading…</div>
+        ) : !data ? (
+          <div className="empty-row">Couldn’t load the overview — deploy the hr-overview function (see supabase/SETUP.md).</div>
+        ) : (
+          <>
+            <div className="field"><input placeholder="Search name, code or department" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+            {staff.length === 0 ? (
+              <div className="empty-row">No staff match.</div>
+            ) : (
+              staff.map((s) => {
+                const results = resultsFor(s.id)
+                return (
+                  <div className="brow" key={s.id}>
+                    <div className="brow-top">
+                      <span className="brow-title">
+                        {s.name} <span className="ver mono">{s.employee_code ?? 'no code'}</span>{' '}
+                        <span className="ver">{deptName(s.department_id)} · {branchCode(s.branch_id)}</span>
+                      </span>
+                      <span className="demo-hint" style={{ margin: 0 }}>{s.job_title}</span>
+                    </div>
+                    {results.length === 0 ? (
+                      <div className="names"><span className="nm">No test attempts</span></div>
+                    ) : (
+                      <div className="names">
+                        {results.map(({ testId, att, cert }) => {
+                          const st = cert ? certStatus(cert) : 'none'
+                          const cls = st === 'valid' ? 'ok' : st === 'expiring_soon' ? 'warn' : (!att.passed || st === 'expired') ? 'bad' : ''
+                          const tail = cert
+                            ? st === 'valid' ? ` · valid until ${fmtD(cert.expires_at)}` : st === 'expiring_soon' ? ` · ${daysUntil(cert.expires_at)}d left` : ' · expired'
+                            : ''
+                          return <span key={testId} className={`nm ${cls}`}>{testTitle(testId)}: {att.percentage}% {att.passed ? 'PASS' : 'FAIL'}{tail}</span>
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            )}
+          </>
+        )}
+      </div>
+    </details>
   )
 }
 

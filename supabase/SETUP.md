@@ -160,7 +160,16 @@ review roles, so a Branch Manager / HR / CEO never inherits a department
 manager's read/write access.
 
 Everyone except staff also gets a **Status** tile — where every SOP (and, for
-managers/admins, every test) currently stands.
+managers/admins, every test) currently stands. Admins, Branch Managers, HR and
+the CEO each get a **notification bell** that shows how many SOPs are waiting on
+their approval, and the opened SOP shows a **staff sign-off** list (who has read
+the current version). **HR** additionally gets an org-wide **staff, codes & test
+results** board — served by a new `hr-overview` Edge Function (HR/admin only,
+service_role):
+
+```bash
+supabase functions deploy hr-overview
+```
 
 Admins see, edit and create these accounts under **Settings → Approval access**
 (a **Branch Manager per branch**, HR, and the CEO). A Branch Manager only
