@@ -117,8 +117,7 @@ export function Viewer({
             <div className="playph">
               <div className="pcirc">▶</div>
               <p style={{ textAlign: 'center', maxWidth: 420 }}>
-                The training video for this SOP plays here once a Google Drive or YouTube link is attached in Manager or
-                Admin. Staff watch inside the portal only.
+                The training video for this SOP plays here once it has been attached. Staff watch inside the portal only.
               </p>
             </div>
             <div className="ph-foot">CONTROLLED CONTENT · HAMSUN SOP PORTAL</div>
@@ -135,8 +134,8 @@ export function Viewer({
             <p>{sop.summary || 'Newly published — pending its full document.'}</p>
             <h2>2. Procedure</h2>
             <p>
-              The full step-by-step procedure appears here, streamed live from the controlled Google Drive file once a
-              document link is attached. It always shows the current version — no copies floating on WhatsApp.
+              The full step-by-step procedure appears here once the document has been attached. It always shows the
+              current version — no copies floating on WhatsApp.
             </p>
             <h2>3. Responsibility</h2>
             <p>Every {dept} team member covered by the scope above must read this document and sign the register below.</p>

@@ -55,7 +55,7 @@ export function ManagerLogin({ onLoggedIn }: { onLoggedIn: (actor: Actor) => voi
           {busy ? <span className="spinner" /> : 'Sign in'}
         </button>
         {isSupabaseEnabled ? (
-          <div className="demo-hint">Sign in with your real Supabase account — this portal is connected to your live database.</div>
+          <div className="demo-hint">Sign in with your work email and password.</div>
         ) : (
           <div className="demo-hint">
             Demo · admin@hamsun.example / admin123

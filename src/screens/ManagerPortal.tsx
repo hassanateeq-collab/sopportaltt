@@ -164,6 +164,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
       {reading ? (
         <SopReader
           sop={reading}
+          isAdmin={isAdmin}
           onBack={() => setReading(null)}
           onEdit={() => { setEditing(reading); setReading(null) }}
         />
@@ -390,7 +391,7 @@ function HrStaffBoard() {
         {loading ? (
           <div className="empty-row"><span className="spinner" /> Loading…</div>
         ) : !data ? (
-          <div className="empty-row">Couldn’t load the overview — deploy the hr-overview function (see supabase/SETUP.md).</div>
+          <div className="empty-row">Couldn’t load the overview right now. Please try again shortly.</div>
         ) : (
           <>
             <div className="field"><input placeholder="Search name, code or department" value={q} onChange={(e) => setQ(e.target.value)} /></div>
@@ -617,7 +618,7 @@ function ReviewCard({ actor, sop, onDone }: { actor: Actor; sop: Sop; onDone: ()
         ) : (
           <div className="notice" style={{ marginTop: 10 }}>
             This SOP has no in-portal content.
-            {isSupabaseEnabled && sop.document_file_id && (
+            {isSupabaseEnabled && actor.kind === 'admin' && sop.document_file_id && (
               <> Open the <a href={driveFileViewLink(sop.document_file_id)} target="_blank" rel="noopener noreferrer">Word file</a>.</>
             )}
           </div>
@@ -689,7 +690,7 @@ function nextApproveLabel(status: ApprovalStatus): string {
  * Read an SOP as an inline page — the document rendered right in the portal (in
  * the portal's theme), not a Drive preview or an overlay. Edit sits top-right.
  */
-function SopReader({ sop, onBack, onEdit }: { sop: Sop; onBack: () => void; onEdit: () => void }) {
+function SopReader({ sop, isAdmin, onBack, onEdit }: { sop: Sop; isAdmin: boolean; onBack: () => void; onEdit: () => void }) {
   const safeDoc = useMemo(() => recomposeSopHtml(sop), [sop])
 
   return (
@@ -703,7 +704,7 @@ function SopReader({ sop, onBack, onEdit }: { sop: Sop; onBack: () => void; onEd
       ) : (
         <div className="notice">
           This SOP isn't set up for the in-portal view yet — click <strong>✎ Edit</strong> to write its content here.
-          {isSupabaseEnabled && sop.document_file_id && (
+          {isSupabaseEnabled && isAdmin && sop.document_file_id && (
             <> The original Word file is <a href={driveFileViewLink(sop.document_file_id)} target="_blank" rel="noopener noreferrer">available here</a>.</>
           )}
         </div>
@@ -899,7 +900,7 @@ function SopBoard({
               <div className="brow-top">
                 <span className="brow-title">
                   <span className="ver">{s.code}</span> {s.title} <span className="ver">v{s.version}</span>{' '}
-                  {s.document_file_id && <span className="livechip">LIVE · DRIVE</span>}{' '}
+                  {s.document_file_id && <span className="livechip">{actor.kind === 'admin' ? 'LIVE · DRIVE' : 'LIVE'}</span>}{' '}
                   {s.video_file_id && <span className="vidchip">▶ VIDEO</span>}{' '}
                   <ApprovalChip status={s.approval_status} />
                 </span>
@@ -1078,7 +1079,7 @@ function RevalidateRow({ actor, sop }: { actor: Actor; sop: Sop }) {
       <div style={{ marginTop: 8 }}>
         <p className="demo-hint" style={{ marginTop: 0 }}>
           A new version reopens the register — everyone who signed v{sop.version} must sign it again. Deleting removes
-          the SOP and its sign-off records (the Drive file stays in your folder).
+          the SOP and its sign-off records (the stored file is kept).
         </p>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
           <button
@@ -1322,7 +1323,7 @@ function TestRow({
                 )
               })}
               <p className="demo-hint" style={{ marginTop: 6 }}>
-                A PDF is downloaded and a copy is filed in the department's Drive folder, named by SOP, date and person.
+                A PDF is downloaded and a copy is filed for the record, named by SOP, date and person.
               </p>
             </div>
           </details>
@@ -1364,7 +1365,7 @@ function ReportBtn({ testId, staffId, deptId, name }: { testId: string; staffId:
         setBusy(true)
         try {
           const { driveSaved } = await downloadTestReport(testId, staffId, folderId)
-          toast(driveSaved ? `Report for ${name} downloaded and filed in Drive` : `Report for ${name} downloaded`)
+          toast(driveSaved ? `Report for ${name} downloaded and filed` : `Report for ${name} downloaded`)
         } catch (e) {
           toast(e instanceof ApiError ? e.message : 'Could not generate the report.')
         } finally {
@@ -1680,9 +1681,9 @@ function AddSopForm({
 
   return (
     <details className="board">
-      <summary><SopSectionIcon />Write a new SOP<span className="hint">editor → Word file · to {dept.name}{lockBranch ? ` · ${branch.code} only` : forceAllBranches ? ' · all branches' : ''}</span></summary>
+      <summary><SopSectionIcon />Write a new SOP<span className="hint">to {dept.name}{lockBranch ? ` · ${branch.code} only` : forceAllBranches ? ' · all branches' : ''}</span></summary>
       <div className="card-body">
-        {isSupabaseEnabled && (
+        {isSupabaseEnabled && actor.kind === 'admin' && (
           <div className="notice info" style={{ marginBottom: 14 }}>
             The SOP saves to your Drive folder as an editable Word (.docx) file through the upload function — deploy it
             (see supabase/SETUP.md) to save against your live database.
@@ -1707,8 +1708,7 @@ function AddSopForm({
           <label>SOP document</label>
           <div className="demo-hint" style={{ marginTop: 0, marginBottom: 6 }}>
             Write the SOP below with full formatting — headings, fonts, bold, lists, tables. The Hamsun header (logo,
-            SOP no., title, department, effective date) and the confidential footer are added automatically, and it
-            saves to Drive as an editable Word (.docx) file.
+            SOP no., title, department, effective date) and the confidential footer are added automatically{actor.kind === 'admin' ? ', and it saves to Drive as an editable Word (.docx) file' : ''}.
           </div>
           <SopEditor onEditor={setEditor} />
         </div>
@@ -1726,13 +1726,15 @@ function AddSopForm({
           )}
         </div>
 
-        <div className="field">
-          <label>Destination folder in Drive</label>
-          <div style={{ fontSize: 13.5 }}>
-            Hamsun_SOP / <strong>{folderName}</strong>
-            <span className="demo-hint" style={{ marginTop: 4 }}>Set by the admin in Settings → Drive folders. Files land here view-only.</span>
+        {actor.kind === 'admin' && (
+          <div className="field">
+            <label>Destination folder in Drive</label>
+            <div style={{ fontSize: 13.5 }}>
+              Hamsun_SOP / <strong>{folderName}</strong>
+              <span className="demo-hint" style={{ marginTop: 4 }}>Set by the admin in Settings → Drive folders. Files land here view-only.</span>
+            </div>
           </div>
-        </div>
+        )}
 
         {forceAllBranches ? (
           <div className="field"><label>Scope</label>
@@ -1867,8 +1869,7 @@ function CreateTestForm({
           <div className="gh">✦ Generate the test from an SOP</div>
           <div className="gs">
             Claude reads the SOP and drafts the questions at your chosen level. You stay the examiner — review every
-            question and its marked answer before publishing. In production the portal fetches the document from Drive
-            itself.
+            question and its marked answer before publishing.
           </div>
           <div className="fieldrow">
             <div className="field"><label htmlFor="g-sop">Source SOP</label>
@@ -2343,7 +2344,7 @@ function AddManager({
           </div>
         )}
         <div className="field"><label>Name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Faisal" /></div>
-        <div className="field"><label>Email (their Supabase Auth login)</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@hamsun.example" /></div>
+        <div className="field"><label>Email (their sign-in login)</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@hamsun.example" /></div>
         <div className="field"><label>Temporary password — blank = auto-generate</label>
           <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="at least 8 characters, or leave blank" /></div>
         {(role === 'manager' || role === 'branch_manager') && (
