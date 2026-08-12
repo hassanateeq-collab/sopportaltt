@@ -16,22 +16,21 @@ import {
   downloadTestReport,
   approvalQueue,
   sopStatusList,
-  hrOverview,
   orgStaffDirectory,
   listDriveFolders,
   createDriveFolder,
   driveFileViewLink,
   ApiError,
 } from '../data/store'
-import type { Actor, DraftQuestion, OrgStaff, HrOverview } from '../data/store'
+import type { Actor, DraftQuestion, OrgStaff } from '../data/store'
 import DOMPurify from 'dompurify'
 import { generateSopDocx, sopContentHtml, sopNumber, SOP_DOCX_MIME } from '../lib/sopdoc'
 import { SopEditor } from '../components/SopEditor'
 import type { Editor } from '@tiptap/react'
-import type { Attempt, Branch, BranchScope, Department, Difficulty, Language, Manager, Sop, Staff, Test } from '../types'
-import { LANGUAGE_NAMES, APPROVAL_STATUS_LABELS, APPROVAL_ACTION_LABELS, MANAGER_ROLE_LABELS } from '../types'
-import type { ApprovalStatus, ManagerRole, ApprovalEvent } from '../types'
-import { isReviewerRole, isInReview, reviewerForStage } from '../lib/approval'
+import type { Branch, BranchScope, Department, Difficulty, Language, Manager, Sop, Staff, Test } from '../types'
+import { LANGUAGE_NAMES, APPROVAL_STATUS_LABELS, APPROVAL_ACTION_LABELS } from '../types'
+import type { ApprovalStatus, ApprovalEvent } from '../types'
+import { isInReview, reviewerForStage } from '../lib/approval'
 import { scopeIncludes } from '../lib/scope'
 import { certStatus, daysUntil } from '../lib/certs'
 import { fmtD } from '../lib/format'
@@ -62,11 +61,6 @@ import {
 type Page = 'home' | 'sops' | 'tests' | 'staff' | 'managers' | 'branches' | 'departments' | 'settings' | 'approvals' | 'status'
 
 export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
-  // Approval-chain reviewers (Branch Manager / HR / CEO) own no department, so
-  // they get a focused SOP review inbox instead of the department boards.
-  if (actor.kind === 'manager' && isReviewerRole(actor.manager.role)) {
-    return <ReviewerPortal actor={actor} onLogout={onLogout} />
-  }
   const isAdmin = actor.kind === 'admin'
   const branches = read.branches()
   const departments = read.departments()
@@ -101,7 +95,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
   const managerTile: TileDef = { key: 'managers', icon: <ManagerSectionIcon />, title: 'Managers', sub: `${mgrCount} · every branch · access` }
   const branchTile: TileDef = { key: 'branches', icon: <BranchSectionIcon />, title: 'Branches', sub: `${branches.length} · add, rename, status` }
   const deptTile: TileDef = { key: 'departments', icon: <DepartmentSectionIcon />, title: 'Departments', sub: `${departments.length} · add, rename, delete` }
-  const settingsTile: TileDef = { key: 'settings', icon: <SettingsSectionIcon />, title: 'Settings', sub: 'Approval access · Drive folders · routing' }
+  const settingsTile: TileDef = { key: 'settings', icon: <SettingsSectionIcon />, title: 'Settings', sub: 'Drive folders · SOP & test routing' }
   const pendingApprovals = read.sops().filter((s) => s.approval_status === 'admin_review').length
   const approvalsTile: TileDef = { key: 'approvals', icon: <ApprovalSectionIcon />, title: 'SOP approvals', sub: pendingApprovals ? `${pendingApprovals} awaiting your review` : 'review the SOP chain' }
   const statusTile: TileDef = { key: 'status', icon: <StatusSectionIcon />, title: 'Status', sub: 'where every SOP & test stands' }
@@ -226,18 +220,13 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
           {page === 'managers' && isAdmin && (
             <>
               <ManagerRoster actor={actor} dept={dept} />
-              <AddManager actor={actor} dept={dept} branch={branch} roles={['manager']} title="Add department manager" />
+              <AddManager actor={actor} dept={dept} branch={branch} />
             </>
           )}
 
           {page === 'branches' && isAdmin && <BranchAdmin actor={actor} />}
           {page === 'departments' && isAdmin && <DepartmentAdmin actor={actor} />}
-          {page === 'settings' && isAdmin && (
-            <>
-              <ApprovalAccessBoard actor={actor} />
-              <DriveSettings actor={actor} />
-            </>
-          )}
+          {page === 'settings' && isAdmin && <DriveSettings actor={actor} />}
           {page === 'approvals' && isAdmin && <ApprovalsBoard actor={actor} />}
           {page === 'status' && <StatusBoard actor={actor} />}
         </>
@@ -296,200 +285,35 @@ function useApprovalQueue(actor: Actor): { sops: Sop[]; loading: boolean; reload
 }
 
 /**
- * The review inbox for a Branch Manager / HR / CEO. Each shows only the SOPs
- * sitting at their own stage of the chain; approving passes it on, the CEO's
- * approval authorises it (making it live to staff), and rejecting sends it back
- * to the author with a note.
- */
-function ReviewerPortal({ actor, onLogout }: { actor: Actor & { kind: 'manager' }; onLogout: () => void }) {
-  const role = actor.manager.role
-  const { sops, loading, reload } = useApprovalQueue(actor)
-
-  return (
-    <>
-      <div className="crumbs">
-        <span className="here">{actor.manager.name} — {MANAGER_ROLE_LABELS[role]}</span>
-        <span className="sep">·</span>
-        <span className="here">SOP review</span>
-        <span className="who" style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-          <ReviewBell count={sops.length} onClick={reload} />
-          <button onClick={onLogout} style={{ color: 'var(--pine)', fontWeight: 600 }}>Sign out</button>
-        </span>
-      </div>
-
-      <details className="board" open>
-        <summary>
-          <SopSectionIcon />Awaiting your review
-          <span className="hint">{loading ? 'loading…' : `${sops.length} SOP${sops.length === 1 ? '' : 's'}`}</span>
-        </summary>
-        <div className="card-body">
-          <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 8 }}>
-            <button className="btn sm" onClick={reload} disabled={loading}>↻ Refresh</button>
-          </div>
-          {loading ? (
-            <div className="empty-row"><span className="spinner" /> Loading…</div>
-          ) : sops.length === 0 ? (
-            <div className="empty-row">Nothing waiting on you right now. New submissions will appear here.</div>
-          ) : (
-            sops.map((s) => <ReviewCard key={s.id} actor={actor} sop={s} onDone={reload} />)
-          )}
-        </div>
-      </details>
-
-      {/* HR sees every department's staff, their codes and test results. */}
-      {role === 'hr' && <HrStaffBoard />}
-
-      {/* Every non-staff user can see where each SOP stands. */}
-      <StatusBoard actor={actor} />
-    </>
-  )
-}
-
-/**
- * HR's org-wide view: every department's staff, their employee codes, and their
- * test results. Fed by the hr-overview Edge Function (HR/admin only).
- */
-function HrStaffBoard() {
-  const [data, setData] = useState<HrOverview | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [q, setQ] = useState('')
-  useEffect(() => {
-    let active = true
-    hrOverview()
-      .then((d) => { if (active) setData(d) })
-      .catch(() => { if (active) setData(null) })
-      .finally(() => { if (active) setLoading(false) })
-    return () => { active = false }
-  }, [])
-
-  const deptName = (id: string) => data?.departments.find((d) => d.id === id)?.name ?? '—'
-  const branchCode = (id: string) => data?.branches.find((b) => b.id === id)?.code ?? '—'
-  const testTitle = (id: string) => data?.tests.find((t) => t.id === id)?.title ?? 'Test'
-
-  const query = q.trim().toLowerCase()
-  const staff = (data?.staff ?? [])
-    .filter((s) => !query || s.name.toLowerCase().includes(query) || (s.employee_code ?? '').includes(query) || deptName(s.department_id).toLowerCase().includes(query))
-    .sort((a, b) => deptName(a.department_id).localeCompare(deptName(b.department_id)) || a.name.localeCompare(b.name))
-
-  const resultsFor = (staffId: string) => {
-    const byTest = new Map<string, Attempt>()
-    for (const a of (data?.attempts ?? []).filter((x) => x.staff_id === staffId).sort((x, y) => y.attempted_at.localeCompare(x.attempted_at))) {
-      if (!byTest.has(a.test_id)) byTest.set(a.test_id, a)
-    }
-    return [...byTest.entries()].map(([testId, att]) => {
-      const cert = (data?.certifications ?? [])
-        .filter((c) => c.staff_id === staffId && c.test_id === testId)
-        .sort((x, y) => y.issued_at.localeCompare(x.issued_at))[0] ?? null
-      return { testId, att, cert }
-    })
-  }
-
-  return (
-    <details className="board">
-      <summary><StaffSectionIcon />Staff, codes &amp; test results — all departments<span className="hint">{loading ? 'loading…' : `${data?.staff.length ?? 0}`}</span></summary>
-      <div className="card-body">
-        {loading ? (
-          <div className="empty-row"><span className="spinner" /> Loading…</div>
-        ) : !data ? (
-          <div className="empty-row">Couldn’t load the overview right now. Please try again shortly.</div>
-        ) : (
-          <>
-            <div className="field"><input placeholder="Search name, code or department" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-            {staff.length === 0 ? (
-              <div className="empty-row">No staff match.</div>
-            ) : (
-              staff.map((s) => {
-                const results = resultsFor(s.id)
-                return (
-                  <div className="brow" key={s.id}>
-                    <div className="brow-top">
-                      <span className="brow-title">
-                        {s.name} <span className="ver mono">{s.employee_code ?? 'no code'}</span>{' '}
-                        <span className="ver">{deptName(s.department_id)} · {branchCode(s.branch_id)}</span>
-                      </span>
-                      <span className="demo-hint" style={{ margin: 0 }}>{s.job_title}</span>
-                    </div>
-                    {results.length === 0 ? (
-                      <div className="names"><span className="nm">No test attempts</span></div>
-                    ) : (
-                      <div className="names">
-                        {results.map(({ testId, att, cert }) => {
-                          const st = cert ? certStatus(cert) : 'none'
-                          const cls = st === 'valid' ? 'ok' : st === 'expiring_soon' ? 'warn' : (!att.passed || st === 'expired') ? 'bad' : ''
-                          const tail = cert
-                            ? st === 'valid' ? ` · valid until ${fmtD(cert.expires_at)}` : st === 'expiring_soon' ? ` · ${daysUntil(cert.expires_at)}d left` : ' · expired'
-                            : ''
-                          return <span key={testId} className={`nm ${cls}`}>{testTitle(testId)}: {att.percentage}% {att.passed ? 'PASS' : 'FAIL'}{tail}</span>
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )
-              })
-            )}
-          </>
-        )}
-      </div>
-    </details>
-  )
-}
-
-/**
- * The admin's approvals board (a page inside the admin portal). Shows the SOPs
- * waiting on the admin's own review step, where the admin decides whether the
- * optional HR review is needed or the SOP goes straight to the CEO.
+ * The admin's approvals board. Shows the SOPs a manager has submitted; the admin
+ * approves (which publishes the SOP to staff) or sends it back with a note.
  */
 function ApprovalsBoard({ actor }: { actor: Actor }) {
   const { sops, loading, reload } = useApprovalQueue(actor)
-  // The admin already has every SOP in cache, so also show the wider pipeline
-  // (what's in review elsewhere) for visibility — read-only.
-  const pipeline = read.sops().filter((s) => isInReview(s.approval_status) && s.approval_status !== 'admin_review')
 
   return (
-    <>
-      <details className="board" open>
-        <summary>
-          <SopSectionIcon />Awaiting your review
-          <span className="hint">{loading ? 'loading…' : `${sops.length} SOP${sops.length === 1 ? '' : 's'}`}</span>
-        </summary>
-        <div className="card-body">
-          <p className="demo-hint" style={{ marginTop: 0 }}>
-            Approve to hand the SOP back to the manager, who then sends it to <strong>HR</strong> or the
-            <strong> CEO</strong> for final authorisation. Rejecting sends it back to the author with your note.
-          </p>
-          <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 8 }}>
-            <button className="btn sm" onClick={reload} disabled={loading}>↻ Refresh</button>
-          </div>
-          {loading ? (
-            <div className="empty-row"><span className="spinner" /> Loading…</div>
-          ) : sops.length === 0 ? (
-            <div className="empty-row">No SOPs are waiting on your review.</div>
-          ) : (
-            sops.map((s) => <ReviewCard key={s.id} actor={actor} sop={s} onDone={reload} />)
-          )}
+    <details className="board" open>
+      <summary>
+        <SopSectionIcon />Awaiting your review
+        <span className="hint">{loading ? 'loading…' : `${sops.length} SOP${sops.length === 1 ? '' : 's'}`}</span>
+      </summary>
+      <div className="card-body">
+        <p className="demo-hint" style={{ marginTop: 0 }}>
+          A manager submits an SOP here. <strong>Approve</strong> to publish it to staff, or <strong>Send back</strong>
+          {' '}with a note for the manager to fix and resubmit.
+        </p>
+        <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 8 }}>
+          <button className="btn sm" onClick={reload} disabled={loading}>↻ Refresh</button>
         </div>
-      </details>
-
-      <details className="board">
-        <summary><SopSectionIcon />Elsewhere in review<span className="hint">{pipeline.length}</span></summary>
-        <div className="card-body">
-          {pipeline.length === 0 ? (
-            <div className="empty-row">Nothing else is in the review pipeline.</div>
-          ) : (
-            pipeline.map((s) => (
-              <div className="brow" key={s.id}>
-                <div className="brow-top">
-                  <span className="brow-title">
-                    <span className="ver">{s.code}</span> {s.title} <ApprovalChip status={s.approval_status} />
-                  </span>
-                  <span className="demo-hint" style={{ margin: 0 }}>{s.submitted_by ? `by ${s.submitted_by}` : ''}</span>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </details>
-    </>
+        {loading ? (
+          <div className="empty-row"><span className="spinner" /> Loading…</div>
+        ) : sops.length === 0 ? (
+          <div className="empty-row">No SOPs are waiting on your review.</div>
+        ) : (
+          sops.map((s) => <ReviewCard key={s.id} actor={actor} sop={s} onDone={reload} />)
+        )}
+      </div>
+    </details>
   )
 }
 
@@ -511,7 +335,7 @@ function StatusBoard({ actor }: { actor: Actor }) {
     return () => { active = false }
   }, [actor])
 
-  // Tests come from the cache — managers/admins hold them; reviewers have none.
+  // Tests come from the cache — a manager sees their own department; admin all.
   const tests = read
     .tests()
     .filter((t) => isAdmin || (actor.kind === 'manager' && t.department_id === actor.manager.department_id))
@@ -655,11 +479,11 @@ function ApprovalTrail({ sop }: { sop: Sop }) {
   const trail = sop.approval_trail ?? []
   if (!trail.length) return null
   const authorised = sop.approval_status === 'authorized'
-  const roleLabel = (r: ApprovalEvent['role']) => (r === 'admin' ? 'Admin' : MANAGER_ROLE_LABELS[r])
+  const roleLabel = (r: ApprovalEvent['role']) => (r === 'admin' ? 'Admin' : 'Manager')
   return (
     <section className="sop-approvals">
       <div className={`sop-approvals-head ${authorised ? 'done' : ''}`}>
-        {authorised ? '✓ Authorised — approved by all' : 'Approval progress'}
+        {authorised ? '✓ Authorised by the Admin' : 'Approval progress'}
       </div>
       <ol className="approval-trail">
         {trail.map((e, i) => (
@@ -677,11 +501,9 @@ function ApprovalTrail({ sop }: { sop: Sop }) {
   )
 }
 
-/** The approve button label for a reviewer, naming what happens next. */
-function nextApproveLabel(status: ApprovalStatus): string {
-  // HR and CEO are the final step — their approval publishes the SOP.
-  if (status === 'hr_review' || status === 'ceo_review') return '✓ Approve & publish'
-  return '✓ Approve'
+/** The admin's approve button label — approving publishes the SOP to staff. */
+function nextApproveLabel(_status: ApprovalStatus): string {
+  return '✓ Approve & publish'
 }
 
 /* -------------------------------------------------------------- read SOP -- */
@@ -956,8 +778,8 @@ function ApprovalChip({ status }: { status: ApprovalStatus }) {
 }
 
 /** Short label for a trail role, for the compact on-row strip. */
-function shortRole(r: ApprovalEvent['role']): string {
-  return r === 'admin' ? 'Admin' : r === 'branch_manager' ? 'Branch Mgr' : r === 'hr' ? 'HR' : r === 'ceo' ? 'CEO' : 'Manager'
+function shortRole(r: ApprovalEvent['role'] | 'admin'): string {
+  return r === 'admin' ? 'Admin' : 'Manager'
 }
 
 /**
@@ -991,7 +813,7 @@ function ApprovalStrip({ sop }: { sop: Sop }) {
  */
 function SopApprovalControl({ actor, sop }: { actor: Actor; sop: Sop }) {
   const status = sop.approval_status
-  const mayAct = actor.kind === 'admin' || (actor.kind === 'manager' && actor.manager.role === 'manager' && sop.department_id === actor.manager.department_id)
+  const mayAct = actor.kind === 'admin' || (actor.kind === 'manager' && sop.department_id === actor.manager.department_id)
 
   if (status === 'rejected') {
     return (
@@ -1012,39 +834,10 @@ function SopApprovalControl({ actor, sop }: { actor: Actor; sop: Sop }) {
     if (!mayAct) return null
     return (
       <div className="approw">
-        <span className="demo-hint" style={{ margin: 0 }}>This SOP is a draft — staff can’t see it until it’s authorised.</span>
-        <button className="btn sm primary" onClick={() => run(() => api.submitSopForReview(actor, sop.id), `${sop.code} submitted to the Branch Manager`)}>
-          ↑ Submit to Branch Manager
+        <span className="demo-hint" style={{ margin: 0 }}>This SOP is a draft — staff can’t see it until it’s approved.</span>
+        <button className="btn sm primary" onClick={() => run(() => api.submitSopForReview(actor, sop.id), `${sop.code} submitted to the Admin`)}>
+          ↑ Submit for review
         </button>
-      </div>
-    )
-  }
-  // Back with the Manager after the Branch Manager approved — forward to Admin.
-  if (status === 'branch_approved') {
-    return (
-      <div className="approw">
-        <div className="notice info" style={{ margin: 0 }}><strong>Branch Manager approved.</strong> Send it to the Admin next.</div>
-        {mayAct && (
-          <button className="btn sm primary" onClick={() => run(() => api.forwardSop(actor, sop.id), `${sop.code} sent to the Admin`)}>
-            → Send to Admin for review
-          </button>
-        )}
-      </div>
-    )
-  }
-  // Back with the Manager after the Admin approved — the Manager picks HR or CEO.
-  if (status === 'admin_approved') {
-    return (
-      <div className="approw">
-        <div className="notice info" style={{ margin: 0 }}>
-          <strong>Admin approved.</strong> Send it to <strong>HR</strong> or the <strong>CEO</strong> — either one authorises &amp; publishes it.
-        </div>
-        {mayAct && (
-          <>
-            <button className="btn sm primary" onClick={() => run(() => api.forwardSop(actor, sop.id, 'hr'), `${sop.code} sent to HR`)}>→ Send to HR</button>
-            <button className="btn sm primary" onClick={() => run(() => api.forwardSop(actor, sop.id, 'ceo'), `${sop.code} sent to the CEO`)}>→ Send to CEO</button>
-          </>
-        )}
       </div>
     )
   }
@@ -1052,7 +845,7 @@ function SopApprovalControl({ actor, sop }: { actor: Actor; sop: Sop }) {
     return (
       <div className="approw">
         <span className="demo-hint" style={{ margin: 0 }}>
-          In review — {APPROVAL_STATUS_LABELS[status]}.{sop.submitted_by ? ` Submitted by ${sop.submitted_by}.` : ''} Hidden from staff until authorised.
+          With the Admin for review.{sop.submitted_by ? ` Submitted by ${sop.submitted_by}.` : ''} Hidden from staff until approved.
         </span>
       </div>
     )
@@ -1085,7 +878,7 @@ function RevalidateRow({ actor, sop }: { actor: Actor; sop: Sop }) {
           <button
             className="btn sm"
             onClick={() => {
-              if (sop.approval_status === 'authorized' && !confirm(`Start a new version of ${sop.code}?\n\nIt drops to a draft and must go back through the approval chain (Branch Manager → Admin → HR/CEO) before it is live again.`)) return
+              if (sop.approval_status === 'authorized' && !confirm(`Start a new version of ${sop.code}?\n\nIt drops to a draft and must be submitted for the Admin's approval again before it is live.`)) return
               run(() => api.reviseSop(actor, sop.id, {}), `${sop.code} — new draft v${sop.version + 1}, submit it for review`)
             }}
           >
@@ -2183,11 +1976,10 @@ function AddStaff({ actor, dept, branch }: { actor: Actor; dept: Department; bra
 
 function ManagerRoster({ actor, dept }: { actor: Actor; dept: Department }) {
   // A department manager runs her whole department across every branch, so the
-  // roster is department-wide (not filtered to a branch). The approval-chain
-  // roles (Branch Manager · HR · CEO) are managed by the admin under Settings.
+  // roster is department-wide (not filtered to a branch).
   const managers = read
     .managers()
-    .filter((m) => (m.role ?? 'manager') === 'manager' && m.department_id === dept.id)
+    .filter((m) => m.department_id === dept.id)
     .sort((a, b) => a.name.localeCompare(b.name))
 
   return (
@@ -2199,9 +1991,6 @@ function ManagerRoster({ actor, dept }: { actor: Actor; dept: Department }) {
         ) : (
           managers.map((m) => <ManagerRow key={m.id} actor={actor} manager={m} />)
         )}
-        <p className="demo-hint" style={{ marginTop: 8 }}>
-          Branch Manager, HR and CEO approval access is managed under <strong>Settings → Approval access</strong>.
-        </p>
       </div>
     </details>
   )
@@ -2210,14 +1999,9 @@ function ManagerRoster({ actor, dept }: { actor: Actor; dept: Department }) {
 function ManagerRow({ actor, manager }: { actor: Actor; manager: Manager }) {
   const [deptId, setDeptId] = useState(manager.department_id ?? read.departments()[0]?.id ?? '')
   const [branchId, setBranchId] = useState(manager.branch_id ?? read.branches()[0]?.id ?? '')
-  const [role, setRole] = useState<ManagerRole>(manager.role ?? 'manager')
   const [email, setEmail] = useState(manager.email)
   const [password, setPassword] = useState('')
-  // Only a department manager carries a department; a Branch Manager carries a
-  // branch but no department; HR / CEO are org-wide (both null).
-  const effDept = role === 'manager' ? deptId : null
-  const effBranch = role === 'manager' || role === 'branch_manager' ? branchId : null
-  const postingDirty = effDept !== manager.department_id || effBranch !== manager.branch_id || role !== (manager.role ?? 'manager')
+  const postingDirty = deptId !== manager.department_id || branchId !== manager.branch_id
   const loginDirty = email.trim().toLowerCase() !== manager.email || password.trim() !== ''
 
   return (
@@ -2225,36 +2009,21 @@ function ManagerRow({ actor, manager }: { actor: Actor; manager: Manager }) {
       <div className="brow-top">
         <span className="brow-title">
           {manager.name}
-          <span className="rolechip">{MANAGER_ROLE_LABELS[manager.role ?? 'manager']}</span>
-          {manager.role === 'branch_manager' && (
-            <span className="ver" style={{ marginLeft: 6 }}>{manager.branch_id ? read.branch(manager.branch_id)?.code ?? '—' : '—'}</span>
-          )}
           {!manager.active && <span className="vidchip" style={{ marginLeft: 6 }}>DISABLED</span>}
         </span>
       </div>
 
       <div className="fieldrow" style={{ marginTop: 6 }}>
-        <div className="field"><label>Access role</label>
-          <select value={role} onChange={(e) => setRole(e.target.value as ManagerRole)}>
-            {(Object.keys(MANAGER_ROLE_LABELS) as ManagerRole[]).map((r) => <option key={r} value={r}>{MANAGER_ROLE_LABELS[r]}</option>)}
-          </select></div>
-        {role === 'manager' && (
-          <div className="field"><label>Department</label>
-            <select value={deptId} onChange={(e) => setDeptId(e.target.value)}>{read.departments().map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
-        )}
-        {(role === 'manager' || role === 'branch_manager') && (
-          <div className="field"><label>{role === 'branch_manager' ? 'Branch (reviews)' : 'Branch (home)'}</label>
-            <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{read.branches().map((b) => <option key={b.id} value={b.id}>{b.code}</option>)}</select></div>
-        )}
-        {(role === 'hr' || role === 'ceo') && (
-          <div className="field" style={{ alignSelf: 'flex-end' }}><span className="demo-hint" style={{ margin: 0 }}>Org-wide — no department or branch.</span></div>
-        )}
+        <div className="field"><label>Department</label>
+          <select value={deptId} onChange={(e) => setDeptId(e.target.value)}>{read.departments().map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
+        <div className="field"><label>Branch (home)</label>
+          <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{read.branches().map((b) => <option key={b.id} value={b.id}>{b.code}</option>)}</select></div>
       </div>
       <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
         <button
           className="btn sm primary"
           disabled={!postingDirty}
-          onClick={() => run(() => api.updateManager(actor, manager.id, { department_id: effDept, branch_id: effBranch, role }), `${manager.name} updated`)}
+          onClick={() => run(() => api.updateManager(actor, manager.id, { department_id: deptId, branch_id: branchId }), `${manager.name} updated`)}
         >
           Save posting
         </button>
@@ -2303,70 +2072,34 @@ function ManagerRow({ actor, manager }: { actor: Actor; manager: Manager }) {
   )
 }
 
-function AddManager({
-  actor,
-  dept,
-  branch,
-  roles = ['manager', 'branch_manager', 'hr', 'ceo'],
-  title = 'Add manager or approval access',
-}: {
-  actor: Actor
-  dept: Department
-  branch: Branch
-  /** Which roles this form can create. */
-  roles?: ManagerRole[]
-  title?: string
-}) {
+function AddManager({ actor, dept, branch }: { actor: Actor; dept: Department; branch: Branch }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [role, setRole] = useState<ManagerRole>(roles[0])
   const [deptId, setDeptId] = useState(dept.id)
   const [branchId, setBranchId] = useState(branch.id)
   const [busy, setBusy] = useState(false)
-  const [issued, setIssued] = useState<{ name: string; email: string; password: string | null; role: ManagerRole } | null>(null)
+  const [issued, setIssued] = useState<{ name: string; email: string; password: string | null } | null>(null)
 
   return (
     <details className="board">
-      <summary><AddSectionIcon />{title}<span className="hint">creates their sign-in</span></summary>
+      <summary><AddSectionIcon />Add department manager<span className="hint">creates their sign-in</span></summary>
       <div className="card-body">
-        {roles.length > 1 && (
-          <div className="field"><label>Access role</label>
-            <select value={role} onChange={(e) => setRole(e.target.value as ManagerRole)}>
-              {roles.map((r) => <option key={r} value={r}>{MANAGER_ROLE_LABELS[r]}</option>)}
-            </select>
-            <span className="demo-hint">
-              {role === 'manager' && 'Creates and runs SOPs & tests for one department.'}
-              {role === 'branch_manager' && 'Reviews a submitted SOP first, before it reaches the Admin.'}
-              {role === 'hr' && 'An optional review step the Admin may route an SOP through.'}
-              {role === 'ceo' && 'Gives the final authorisation that makes an SOP live to staff.'}
-            </span>
-          </div>
-        )}
         <div className="field"><label>Name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Faisal" /></div>
         <div className="field"><label>Email (their sign-in login)</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@hamsun.example" /></div>
         <div className="field"><label>Temporary password — blank = auto-generate</label>
           <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="at least 8 characters, or leave blank" /></div>
-        {(role === 'manager' || role === 'branch_manager') && (
-          <div className="fieldrow">
-            {role === 'manager' && (
-              <div className="field"><label>Department</label>
-                <select value={deptId} onChange={(e) => setDeptId(e.target.value)}>{read.departments().map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
-            )}
-            <div className="field"><label>{role === 'branch_manager' ? 'Branch this manager reviews' : 'Branch'}</label>
-              <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{read.branches().map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}</select>
-              {role === 'branch_manager' && <span className="demo-hint">They only see SOPs whose branch scope includes {read.branch(branchId)?.code ?? 'this branch'}.</span>}
-            </div>
-          </div>
-        )}
-        {(role === 'hr' || role === 'ceo') && (
-          <div className="field"><span className="demo-hint" style={{ margin: 0 }}>{MANAGER_ROLE_LABELS[role]} is org-wide — no department or branch.</span></div>
-        )}
+        <div className="fieldrow">
+          <div className="field"><label>Department</label>
+            <select value={deptId} onChange={(e) => setDeptId(e.target.value)}>{read.departments().map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
+          <div className="field"><label>Branch (home)</label>
+            <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{read.branches().map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}</select></div>
+        </div>
         <button
           className="btn primary block"
           disabled={busy}
           onClick={async () => {
-            if (!name.trim()) { toast('Enter the person’s name'); return }
+            if (!name.trim()) { toast('Enter the manager’s name'); return }
             setBusy(true)
             try {
               const { password: pw } = await api.addManager(actor, {
@@ -2375,19 +2108,18 @@ function AddManager({
                 department_id: deptId,
                 branch_id: branchId,
                 password: password || undefined,
-                role,
               })
-              setIssued({ name: name.trim(), email: email.trim().toLowerCase(), password: pw, role })
-              toast(`${name} added — ${MANAGER_ROLE_LABELS[role]}`)
+              setIssued({ name: name.trim(), email: email.trim().toLowerCase(), password: pw })
+              toast(`${name} added as ${read.department(deptId)?.name} manager`)
               setName(''); setEmail(''); setPassword('')
             } catch (e) {
-              toast(e instanceof ApiError ? e.message : 'Could not add access.')
+              toast(e instanceof ApiError ? e.message : 'Could not add manager.')
             } finally {
               setBusy(false)
             }
           }}
         >
-          {busy ? <span className="spinner" /> : `Add ${MANAGER_ROLE_LABELS[role]}`}
+          {busy ? <span className="spinner" /> : 'Add manager'}
         </button>
         {issued && (
           <div className="notice info" style={{ marginTop: 12 }}>
@@ -2622,53 +2354,6 @@ function NewDepartment({ actor }: { actor: Actor }) {
         {busy ? <span className="spinner" /> : '＋ Add department'}
       </button>
     </div>
-  )
-}
-
-/* ---- settings: approval access — the SOP review chain (admin) ---- */
-
-/**
- * Admin-only management of the SOP review chain accounts, shown under Settings:
- * a Branch Manager per branch, HR, and the CEO — see, edit, add and remove.
- * (Department managers are managed on the Managers page.)
- */
-function ApprovalAccessBoard({ actor }: { actor: Actor }) {
-  const all = read.managers().slice().sort((a, b) => a.name.localeCompare(b.name))
-  const branchManagers = all.filter((m) => m.role === 'branch_manager')
-  const hr = all.filter((m) => m.role === 'hr')
-  const ceo = all.filter((m) => m.role === 'ceo')
-  const dept = read.departments()[0]
-  const branch = read.branches()[0]
-
-  const group = (label: string, list: Manager[], empty: string) => (
-    <>
-      <div className="subhead" style={{ marginTop: 12 }}>{label}</div>
-      {list.length === 0 ? (
-        <div className="empty-row">{empty}</div>
-      ) : (
-        list.map((m) => <ManagerRow key={m.id} actor={actor} manager={m} />)
-      )}
-    </>
-  )
-
-  return (
-    <>
-      <details className="board" open>
-        <summary><ManagerSectionIcon />Approval access — SOP review chain<span className="hint">{branchManagers.length + hr.length + ceo.length} accounts</span></summary>
-        <div className="card-body">
-          <p className="demo-hint" style={{ marginTop: 0 }}>
-            A manager submits an SOP → the <strong>Branch Manager</strong> for that branch reviews it → you (Admin) →
-            <strong> HR</strong> (optional) → the <strong>CEO</strong> authorises it, which makes it live to staff.
-          </p>
-          {group('Branch Managers — one per branch', branchManagers, 'No Branch Manager yet — add one below.')}
-          {group('HR', hr, 'No HR access yet — add one below.')}
-          {group('CEO', ceo, 'No CEO access yet — add one below.')}
-        </div>
-      </details>
-      {dept && branch && (
-        <AddManager actor={actor} dept={dept} branch={branch} roles={['branch_manager', 'hr', 'ceo']} title="Add approval access" />
-      )}
-    </>
   )
 }
 

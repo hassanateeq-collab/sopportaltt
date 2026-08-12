@@ -1,33 +1,34 @@
--- SOP approval chain + the review roles that drive it.
+-- SOP approval chain.
 --
--- Roles beyond the department 'manager': branch_manager, hr, ceo. They sign in
--- like managers but only review SOPs (they get no department write access —
--- the manager_* helpers below ignore them).
+-- Simple chain: a department manager writes an SOP and submits it; the admin
+-- reviews it, then approves (publishes) or sends it back. Only the department
+-- 'manager' role exists; the column is kept for legacy rows and any that carried
+-- the old review roles are removed below.
 alter table public.managers
-  add column if not exists role text not null default 'manager'
-  check (role in ('manager', 'branch_manager', 'hr', 'ceo'));
+  add column if not exists role text not null default 'manager';
+-- Retire the old review roles (branch_manager / hr / ceo) — remove those
+-- accounts so they can no longer sign in.
+delete from public.managers where role in ('branch_manager', 'hr', 'ceo');
 
--- Review roles are not tied to a department: a Branch Manager has a branch but
--- no department; HR and the CEO are org-wide (no department, no branch). Only a
--- department 'manager' carries both, so these columns can no longer be NOT NULL.
+-- department_id / branch_id were made nullable for the old org-wide review
+-- roles; keep them nullable (harmless for department managers, which always
+-- have both).
 alter table public.managers alter column department_id drop not null;
 alter table public.managers alter column branch_id drop not null;
 
 -- Approval workflow on each SOP:
---   draft -> branch_review -> admin_review -> (hr_review) -> ceo_review -> authorized
--- 'rejected' bounces it back to the author to fix and resubmit. Existing SOPs
--- default to 'authorized' (already live). Only 'authorized' SOPs reach staff
--- (enforced in the staff-data Edge Function).
+--   draft -> admin_review -> authorized  (admin approves)
+--                         -> rejected    (admin sends back)
+-- Existing SOPs default to 'authorized' (already live). Only 'authorized' SOPs
+-- reach staff (enforced in the staff-data Edge Function).
 alter table public.sops add column if not exists approval_status text not null default 'authorized';
--- The Manager drives the chain: reviewer approvals hand back to the Manager
--- (branch_approved / admin_approved) who forwards it on. Named + recreated so the
--- allowed set can grow without a fresh column.
+-- Collapse any SOP left mid-chain by the old multi-stage flow back to the admin
+-- review step, then constrain to the simple set.
+update public.sops set approval_status = 'admin_review'
+  where approval_status in ('branch_review', 'branch_approved', 'admin_approved', 'hr_review', 'ceo_review');
 alter table public.sops drop constraint if exists sops_approval_status_check;
 alter table public.sops add constraint sops_approval_status_check check (
-  approval_status in (
-    'draft', 'branch_review', 'branch_approved', 'admin_review', 'admin_approved',
-    'hr_review', 'ceo_review', 'authorized', 'rejected'
-  )
+  approval_status in ('draft', 'admin_review', 'authorized', 'rejected')
 );
 alter table public.sops add column if not exists approval_note text;
 alter table public.sops add column if not exists submitted_by text;

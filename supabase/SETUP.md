@@ -131,56 +131,32 @@ can't create files in a personal Gmail's My Drive (`storageQuotaExceeded`). So
 the function uploads **as the Hamsun Google account** using an OAuth refresh
 token — the files are owned by that account and use its 15 GB.
 
-### SOP approval workflow (Branch Manager · HR · CEO)
+### SOP approval workflow (Manager → Admin)
 
-Migration `0009_sop_approvals.sql` adds three sign-in roles to `managers`
-(`branch_manager`, `hr`, `ceo` alongside the default `manager`), plus
-`approval_status` / `approval_note` / `submitted_by` / `approval_trail` on
-`sops`. A department manager's new SOP enters the chain as a **draft** and is
-invisible to staff until it is authorised.
-
-The **Manager drives the chain**: each reviewer only Approves or Sends-back, and
-an approval hands the SOP back to the Manager, who forwards it on:
+Migration `0009_sop_approvals.sql` adds `approval_status` / `approval_note` /
+`submitted_by` / `approval_trail` to `sops`. A department manager writes an SOP
+(it starts as a **draft**, invisible to staff) and submits it; the **admin**
+reviews it and either approves — which publishes it to staff — or sends it back
+with a note:
 
 ```
-draft →[submit] branch_review →[Branch Mgr ✓] branch_approved
-      →[Manager forwards] admin_review →[Admin ✓] admin_approved
-      →[Manager picks HR or CEO] hr_review / ceo_review →[✓] authorized
+draft →[manager submits] admin_review →[Admin approves] authorized
+                                      →[Admin sends back] rejected → resubmit
 ```
 
-**HR is optional and equivalent to the CEO here** — the Manager sends the
-admin-approved SOP to *either* HR *or* the CEO, and that single approval
-authorises it (notifying eligible staff, exactly like a publish). Any reviewer
-can **send it back** (`rejected`) with a note; the author fixes it and
-resubmits (restarting from the Branch Manager). Each step is recorded in
-`approval_trail`, shown as a "Sign-off:" strip on the SOP row and an
-"approved by all" record at the bottom of the opened SOP. Existing SOPs default
-to `authorized`. The migration also makes the `manager_*()` helpers ignore the
-review roles, so a Branch Manager / HR / CEO never inherits a department
-manager's read/write access.
+Starting a **new version** of a live SOP drops it back to a draft so it goes
+through the admin's approval again. Each step is recorded in `approval_trail`,
+shown as a "Sign-off:" strip on the SOP row and at the bottom of the opened SOP.
+The admin gets a **notification bell** counting SOPs awaiting review, and a
+**Status** tile shows where every SOP (and, for managers/admins, every test)
+stands. Existing SOPs default to `authorized` (already live).
 
-Everyone except staff also gets a **Status** tile — where every SOP (and, for
-managers/admins, every test) currently stands. Admins, Branch Managers, HR and
-the CEO each get a **notification bell** that shows how many SOPs are waiting on
-their approval, and the opened SOP shows a **staff sign-off** list (who has read
-the current version). **HR** additionally gets an org-wide **staff, codes & test
-results** board — served by a new `hr-overview` Edge Function (HR/admin only,
-service_role):
-
-```bash
-supabase functions deploy hr-overview
-```
-
-Admins see, edit and create these accounts under **Settings → Approval access**
-(a **Branch Manager per branch**, HR, and the CEO). A Branch Manager only
-reviews SOPs whose branch scope includes their own branch; HR and the CEO are
-org-wide. Each reviewer signs in on Manager · Admin and gets a focused **review
-inbox**.
+The migration also **removes the old Branch Manager / HR / CEO roles and their
+accounts** and collapses any SOP left mid-chain back to `admin_review`.
 
 ```bash
 supabase db push
-supabase functions deploy sop-approval    # the review queue + submit/approve/reject
-supabase functions deploy manage-managers  # create accounts carry a role now
+supabase functions deploy sop-approval    # submit / approve / reject + the admin queue
 supabase functions deploy upload-sop       # a manager's SOP starts as a draft
 supabase functions deploy staff-data       # staff only ever see authorized SOPs
 ```

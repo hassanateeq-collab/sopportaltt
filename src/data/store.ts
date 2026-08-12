@@ -27,7 +27,7 @@ import { hashEmployeeCode, verifyEmployeeCode, generateEmployeeCode } from '../l
 import { addMonths } from '../lib/certs'
 import { nextDocCode, isDocCodeTaken, isValidDocCode } from '../lib/codes'
 import { appliesToStaff, scopeIncludes } from '../lib/scope'
-import { stageForReviewer, canSubmit, approveNext, forwardNext, reviewerForStage } from '../lib/approval'
+import { canSubmit, approveNext, reviewerForStage } from '../lib/approval'
 import { supabase, isSupabaseEnabled, functionsBase, anonPublicKey } from '../lib/supabase'
 import { DRIVE_DEPARTMENT_FOLDERS } from '../lib/drive'
 import type {
@@ -405,24 +405,13 @@ export async function uploadSopViaFunction(
 }
 
 /**
- * The SOPs awaiting the signed-in reviewer's action. An admin's queue is the
- * SOPs at admin_review; a branch_manager / hr / ceo see the SOPs sitting at
- * their own stage. In Supabase mode reviewers have no RLS read on in-review
- * SOPs, so this goes through the sop-approval Edge Function (service_role); in
- * demo mode it filters the local cache.
+ * The SOPs awaiting the admin's review (only the admin reviews). In Supabase
+ * mode this goes through the sop-approval Edge Function; in demo mode it filters
+ * the local cache. Anyone who is not an admin gets an empty queue.
  */
 export async function approvalQueue(actor: Actor): Promise<Sop[]> {
-  const stage = stageForReviewer(actor.kind === 'admin' ? 'admin' : actor.manager.role)
-  const localQueue = (): Sop[] => {
-    if (!stage) return []
-    let list = read.sops().filter((s) => s.approval_status === stage)
-    // A Branch Manager reviews only SOPs whose branch scope includes their branch.
-    if (actor.kind === 'manager' && actor.manager.role === 'branch_manager') {
-      const code = actor.manager.branch_id ? read.branch(actor.manager.branch_id)?.code : undefined
-      list = code ? list.filter((s) => scopeIncludes(s.branch_scope, code)) : []
-    }
-    return list
-  }
+  if (actor.kind !== 'admin') return [] // only the admin reviews
+  const localQueue = (): Sop[] => read.sops().filter((s) => s.approval_status === 'admin_review')
   if (!isSupabaseEnabled) return localQueue()
   try {
     const j = await callAdminFn('sop-approval', { action: 'queue' })
@@ -433,67 +422,14 @@ export async function approvalQueue(actor: Actor): Promise<Sop[]> {
   }
 }
 
-/**
- * Every SOP with its approval status, for the "Status" overview. A department
- * manager and an admin already hold what they may see in the cache (RLS scopes
- * it); a reviewer has no SOPs cached, so theirs comes from the sop-approval
- * pipeline action (service_role, org-wide).
- */
+/** Every SOP with its approval status, for the "Status" overview. */
 export async function sopStatusList(actor: Actor): Promise<Sop[]> {
-  const fromCache = () => {
-    if (actor.kind === 'manager' && actor.manager.role === 'manager') {
-      return read.sops().filter((s) => s.department_id === actor.manager.department_id)
-    }
-    return read.sops()
+  // A department manager sees their own department; the admin sees all. Both
+  // hold what they may see in the cache (RLS scopes it).
+  if (actor.kind === 'manager') {
+    return read.sops().filter((s) => s.department_id === actor.manager.department_id)
   }
-  const isReviewer = actor.kind === 'manager' && actor.manager.role !== 'manager'
-  if (!isSupabaseEnabled || !isReviewer) return fromCache()
-  try {
-    const j = await callAdminFn('sop-approval', { action: 'pipeline' })
-    return (Array.isArray(j.sops) ? j.sops : []) as Sop[]
-  } catch {
-    return fromCache()
-  }
-}
-
-/**
- * The org-wide staff + test-results overview for HR (and admins). HR has no
- * department scope, so this comes from the hr-overview Edge Function
- * (service_role) which includes plaintext employee codes; in demo mode it reads
- * the local cache.
- */
-export interface HrOverview {
-  staff: Staff[]
-  departments: Department[]
-  branches: Branch[]
-  tests: Test[]
-  attempts: Attempt[]
-  certifications: Certification[]
-  assignments: TestAssignment[]
-}
-
-export async function hrOverview(): Promise<HrOverview> {
-  if (!isSupabaseEnabled) {
-    return {
-      staff: read.staff(),
-      departments: read.departments(),
-      branches: read.branches(),
-      tests: read.tests(),
-      attempts: read.attempts(),
-      certifications: read.certifications(),
-      assignments: read.assignments(),
-    }
-  }
-  const j = await callAdminFn('hr-overview', {})
-  return {
-    staff: ((j.staff as Record<string, unknown>[]) ?? []).map(mapStaffRow),
-    departments: (j.departments as Department[]) ?? [],
-    branches: (j.branches as Branch[]) ?? [],
-    tests: (j.tests as Test[]) ?? [],
-    attempts: (j.attempts as Attempt[]) ?? [],
-    certifications: (j.certifications as Certification[]) ?? [],
-    assignments: (j.assignments as TestAssignment[]) ?? [],
-  }
+  return read.sops()
 }
 
 /* ------------------------------------------------------------ SOP format ---- */
@@ -2049,9 +1985,8 @@ export const api = {
   /* ---- SOP approval chain (sop-approval Edge Function) ---- */
 
   /**
-   * The author submits a draft (or a sent-back) SOP into the review chain. It
-   * moves to branch_review and stops being editable-as-draft. Everything the
-   * server enforces (author-only, right status) is mirrored in the demo path.
+   * The author submits a draft (or a sent-back) SOP to the admin for review.
+   * Everything the server enforces is mirrored in the demo path.
    */
   async submitSopForReview(actor: Actor, sopId: string): Promise<void> {
     if (isSupabaseEnabled) {
@@ -2061,25 +1996,22 @@ export const api = {
     }
     const sop = db.sops.find((s) => s.id === sopId)
     if (!sop) throw new ApiError('That SOP no longer exists.')
-    if (actor.kind === 'manager') {
-      if (actor.manager.role !== 'manager') throw new ApiError('Only the author can submit an SOP for review.')
-      if (sop.department_id !== actor.manager.department_id) throw new ApiError('You can only submit your own department’s SOPs.')
+    if (actor.kind === 'manager' && sop.department_id !== actor.manager.department_id) {
+      throw new ApiError('You can only submit your own department’s SOPs.')
     }
-    if (!canSubmit(sop.approval_status)) throw new ApiError('This SOP is already in review.')
-    sop.approval_status = 'branch_review'
+    if (!canSubmit(sop.approval_status)) throw new ApiError('This SOP is already live or in review.')
+    sop.approval_status = 'admin_review'
     sop.submitted_by = actorName(actor)
     sop.approval_note = null
     // A fresh submission starts a new sign-off round, so the trail resets.
-    sop.approval_trail = [{ role: actor.kind === 'admin' ? 'admin' : actor.manager.role, name: actorName(actor), action: 'submitted', note: null, at: nowIso() }]
+    sop.approval_trail = [{ role: actor.kind === 'admin' ? 'admin' : 'manager', name: actorName(actor), action: 'submitted', note: null, at: nowIso() }]
     sop.updated_at = nowIso()
     commit()
   },
 
   /**
-   * A reviewer clears (approve) or bounces (reject) the SOP at their stage. A
-   * Branch Manager / Admin approval hands the SOP back to the Manager to forward
-   * on; an HR or CEO approval authorises it and notifies every eligible staff
-   * member.
+   * The admin approves (authorises & publishes) or sends back (rejects) an SOP
+   * that is awaiting review. Only the admin reviews.
    */
   async reviewSop(
     actor: Actor,
@@ -2097,55 +2029,26 @@ export const api = {
     }
     const sop = db.sops.find((s) => s.id === sopId)
     if (!sop) throw new ApiError('That SOP no longer exists.')
-    const reviewer = reviewerForStage(sop.approval_status)
-    if (!reviewer) throw new ApiError('This SOP isn’t awaiting review.')
-    const callerRoleName = actor.kind === 'admin' ? 'admin' : actor.manager.role
-    if (callerRoleName !== reviewer) throw new ApiError('This SOP is waiting on a different reviewer.')
+    if (reviewerForStage(sop.approval_status) !== 'admin') throw new ApiError('This SOP isn’t awaiting review.')
+    if (actor.kind !== 'admin') throw new ApiError('Only the admin reviews SOPs.')
 
-    const trailRole = actor.kind === 'admin' ? 'admin' : actor.manager.role
     const prior = Array.isArray(sop.approval_trail) ? sop.approval_trail : []
     const note = input.note?.trim() || null
 
     if (input.decision === 'reject') {
       sop.approval_status = 'rejected'
       sop.approval_note = note
-      sop.approval_trail = [...prior, { role: trailRole, name: actorName(actor), action: 'rejected', note, at: nowIso() }]
+      sop.approval_trail = [...prior, { role: 'admin', name: actorName(actor), action: 'rejected', note, at: nowIso() }]
     } else {
       const next = approveNext(sop.approval_status)
       if (!next) throw new ApiError('There is nothing to approve at this stage.')
       sop.approval_status = next
       sop.approval_note = note
-      sop.approval_trail = [...prior, { role: trailRole, name: actorName(actor), action: next === 'authorized' ? 'authorized' : 'approved', note, at: nowIso() }]
-      if (next === 'authorized') {
-        for (const staff of eligibleStaffFor(sop)) {
-          notify(staff.id, 'sop_published', `New SOP ${sop.code} — ${sop.title} — has been published for your department.`)
-        }
+      sop.approval_trail = [...prior, { role: 'admin', name: actorName(actor), action: 'authorized', note, at: nowIso() }]
+      for (const staff of eligibleStaffFor(sop)) {
+        notify(staff.id, 'sop_published', `New SOP ${sop.code} — ${sop.title} — has been published for your department.`)
       }
     }
-    sop.updated_at = nowIso()
-    commit()
-  },
-
-  /**
-   * The Manager forwards an approved SOP to the next reviewer: from
-   * branch_approved to the Admin, or from admin_approved to HR or the CEO
-   * (the Manager's choice — either one publishes on approval).
-   */
-  async forwardSop(actor: Actor, sopId: string, target?: 'hr' | 'ceo'): Promise<void> {
-    if (isSupabaseEnabled) {
-      await callAdminFn('sop-approval', { action: 'forward', sop_id: sopId, target: target ?? '' })
-      await hydrateFromSupabase()
-      return
-    }
-    const sop = db.sops.find((s) => s.id === sopId)
-    if (!sop) throw new ApiError('That SOP no longer exists.')
-    if (actor.kind === 'manager') {
-      if (actor.manager.role !== 'manager') throw new ApiError('Only the author can forward an SOP.')
-      if (sop.department_id !== actor.manager.department_id) throw new ApiError('You can only forward your own department’s SOPs.')
-    }
-    const next = forwardNext(sop.approval_status, target)
-    if (!next) throw new ApiError('This SOP is not waiting to be forwarded.')
-    sop.approval_status = next
     sop.updated_at = nowIso()
     commit()
   },
@@ -2437,21 +2340,15 @@ export const api = {
     actor: Actor,
     input: { name: string; email: string; department_id: string; branch_id: string; password?: string; role?: Manager['role'] },
   ): Promise<{ manager: Manager; password: string | null }> {
-    const role = input.role ?? 'manager'
-    // Only a department manager is tied to a department; a Branch Manager keeps
-    // a branch but no department; HR and the CEO are org-wide (both null).
-    const departmentId = role === 'manager' ? input.department_id : null
-    const branchId = role === 'manager' || role === 'branch_manager' ? input.branch_id : null
-
     if (isSupabaseEnabled) {
       const j = await callAdminFn('manage-managers', {
         action: 'create',
         name: input.name,
         email: input.email,
-        department_id: departmentId,
-        branch_id: branchId,
+        department_id: input.department_id,
+        branch_id: input.branch_id,
         password: input.password ?? '',
-        role,
+        role: 'manager',
       })
       await hydrateFromSupabase()
       return { manager: j.manager as Manager, password: (j.password as string | null) ?? null }
@@ -2462,16 +2359,15 @@ export const api = {
     if (!input.name.trim()) throw new ApiError('A manager needs a name.')
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new ApiError('That email does not look right.')
     if (db.managers.some((m) => m.email === email)) throw new ApiError('That manager already exists.')
-    if ((role === 'manager' || role === 'branch_manager') && !branchId) throw new ApiError('Choose a branch.')
 
     const manager: Manager = {
       id: id('mg'),
       name: input.name.trim(),
       email,
-      department_id: departmentId,
-      branch_id: branchId,
+      department_id: input.department_id,
+      branch_id: input.branch_id,
       active: true,
-      role,
+      role: 'manager',
     }
     db.managers.push(manager)
     commit()

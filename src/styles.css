@@ -440,10 +440,7 @@ textarea {
   color: var(--ink-faint);
   white-space: nowrap;
 }
-.apchip.ap-branch_review,
-.apchip.ap-admin_review,
-.apchip.ap-hr_review,
-.apchip.ap-ceo_review {
+.apchip.ap-admin_review {
   color: var(--brass-deep);
   border-color: var(--brass-line);
   background: var(--brass-soft);

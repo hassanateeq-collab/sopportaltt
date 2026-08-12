@@ -62,9 +62,6 @@ export const MANAGERS: Manager[] = [
   { id: 'mg-01', name: 'Mehreen Qadir', email: 'mehreen.kitchen.fsl@hamsun.example', department_id: 'dp-kt', branch_id: 'br-fsl', active: true, role: 'manager' },
   { id: 'mg-02', name: 'Owais Bhatti', email: 'owais.housekeeping.clf@hamsun.example', department_id: 'dp-hk', branch_id: 'br-clf', active: true, role: 'manager' },
   { id: 'mg-03', name: 'Rabia Noor', email: 'rabia.frontdesk.fsl@hamsun.example', department_id: 'dp-fd', branch_id: 'br-fsl', active: true, role: 'manager' },
-  { id: 'mg-04', name: 'Junaid Farooq', email: 'junaid.branch.fsl@hamsun.example', department_id: null, branch_id: 'br-fsl', active: true, role: 'branch_manager' },
-  { id: 'mg-05', name: 'Sadia Iqbal', email: 'sadia.hr@hamsun.example', department_id: null, branch_id: null, active: true, role: 'hr' },
-  { id: 'mg-06', name: 'Hamsun Group CEO', email: 'ceo@hamsun.example', department_id: null, branch_id: null, active: true, role: 'ceo' },
 ]
 
 export const ADMINS: AdminType[] = [
@@ -77,9 +74,6 @@ export const DEMO_PASSWORDS: Record<string, string> = {
   'owais.housekeeping.clf@hamsun.example': 'housekeeping123',
   'rabia.frontdesk.fsl@hamsun.example': 'frontdesk123',
   'admin@hamsun.example': 'admin123',
-  'junaid.branch.fsl@hamsun.example': 'branch123',
-  'sadia.hr@hamsun.example': 'hr123',
-  'ceo@hamsun.example': 'ceo123',
 }
 
 const NOW = '2026-07-01T09:00:00.000Z'
