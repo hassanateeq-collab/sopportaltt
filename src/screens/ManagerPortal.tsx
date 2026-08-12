@@ -1039,22 +1039,15 @@ function SopApprovalControl({ actor, sop }: { actor: Actor; sop: Sop }) {
       </div>
     )
   }
-  // Authorised = live to staff. The owner can still push it back through the
-  // review chain (e.g. after editing it) to have it re-approved.
+  // Authorised = live to staff. If it went through the chain, say so; the
+  // re-review option lives in "Manage this SOP", not as a button here.
   if (status === 'authorized') {
-    if (!mayAct) return null
+    const approvedByAll = (sop.approval_trail ?? []).some((e) => e.action === 'authorized')
     return (
       <div className="approw">
-        <span className="demo-hint" style={{ margin: 0 }}>Live — visible to staff.</span>
-        <button
-          className="btn sm"
-          onClick={() => {
-            if (!confirm(`Send ${sop.code} into the review chain?\n\nIt goes to the Branch Manager, then Admin, then HR/CEO. It stays hidden from staff until the CEO re-authorises it.`)) return
-            run(() => api.submitSopForReview(actor, sop.id), `${sop.code} submitted for review`)
-          }}
-        >
-          ↑ Submit for review
-        </button>
+        <span className="demo-hint" style={{ margin: 0 }}>
+          {approvedByAll ? '✓ Live — approved by all and visible to staff.' : 'Live — visible to staff.'}
+        </span>
       </div>
     )
   }
@@ -1077,6 +1070,17 @@ function RevalidateRow({ actor, sop }: { actor: Actor; sop: Sop }) {
           >
             ↑ New version of {sop.code}
           </button>
+          {sop.approval_status === 'authorized' && (
+            <button
+              className="btn sm"
+              onClick={() => {
+                if (!confirm(`Send ${sop.code} back through the approval chain?\n\nIt goes to the Branch Manager → Admin → HR/CEO and is hidden from staff until it is re-authorised.`)) return
+                run(() => api.submitSopForReview(actor, sop.id), `${sop.code} sent for re-approval`)
+              }}
+            >
+              ↻ Send for re-approval
+            </button>
+          )}
           <button
             className="btn sm danger"
             onClick={() => {
@@ -1087,6 +1091,11 @@ function RevalidateRow({ actor, sop }: { actor: Actor; sop: Sop }) {
             ✕ Delete SOP
           </button>
         </div>
+        {sop.approval_status === 'authorized' && (
+          <p className="demo-hint" style={{ margin: '4px 0 0' }}>
+            “Send for re-approval” takes this live SOP back through the review chain — use it after editing a published SOP.
+          </p>
+        )}
 
         <SopVideoControl sop={sop} />
       </div>
