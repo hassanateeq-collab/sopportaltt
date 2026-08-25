@@ -7,20 +7,20 @@
  */
 
 :root {
-  --ground: #f2f4ef;
+  --ground: #f4f6f4;
   --card: #ffffff;
-  --line: #e2e6dc;
-  --line-strong: #c7cebf;
-  --ink: #182b25;
-  --ink-soft: #4e5d56;
-  --ink-faint: #8a948c;
-  --pine: #1e4d3f;
+  --line: #e7ebe4;
+  --line-strong: #d4dbcd;
+  --ink: #17251f;
+  --ink-soft: #52605a;
+  --ink-faint: #8b958d;
+  --pine: #1f5a45;
   --pine-deep: #143528;
-  --pine-tint: #e4ede7;
+  --pine-tint: #e7efe9;
   --brass: #a07e2c;
   --brass-deep: #83671f;
   --brass-soft: #f5eedb;
-  --brass-line: #dccb9c;
+  --brass-line: #e0d3ab;
   --pend: #8f5714;
   --pend-bg: #f7ead6;
   --pend-line: #e6d1a8;
@@ -28,8 +28,10 @@
   --exp-bg: #f6e0da;
   --exp-line: #e3bbb0;
   --focus: #2f6b57;
-  --r: 8px;
-  --r-sm: 6px;
+  --r: 12px;
+  --r-sm: 9px;
+  --shadow-sm: 0 1px 2px rgba(20, 53, 40, 0.05);
+  --shadow-md: 0 6px 20px rgba(20, 53, 40, 0.09);
   --mono: 'IBM Plex Mono', ui-monospace, monospace;
   --disp: 'Archivo', system-ui, sans-serif;
   --body: 'Public Sans', system-ui, sans-serif;
@@ -49,8 +51,8 @@ body {
   font-family: var(--body);
   color: var(--ink);
   background: var(--ground);
-  font-size: 14.5px;
-  line-height: 1.5;
+  font-size: 15px;
+  line-height: 1.55;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
@@ -800,11 +802,11 @@ h2.section {
 }
 
 .demo-hint {
-  font-family: var(--mono);
-  font-size: 10.5px;
+  font-family: var(--body);
+  font-size: 12px;
   color: var(--ink-faint);
   margin-top: 8px;
-  line-height: 1.6;
+  line-height: 1.55;
 }
 
 .code-input {
@@ -828,10 +830,12 @@ h2.section {
   background: var(--card);
   color: var(--ink);
   justify-content: center;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
 
 .btn:hover {
   border-color: var(--pine);
+  box-shadow: var(--shadow-sm);
 }
 
 .btn:disabled {
@@ -857,8 +861,8 @@ h2.section {
 }
 
 .btn.sm {
-  padding: 5px 11px;
-  font-size: 12px;
+  padding: 7px 13px;
+  font-size: 12.5px;
 }
 
 .btn.danger {
@@ -1431,49 +1435,60 @@ h2.section {
   border: 1px solid var(--line);
   border-radius: var(--r);
   overflow: hidden;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow-sm);
 }
 
 /* Manager / admin home: a grid of tiles, each opening its own page. */
 .mtiles {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 14px;
+  gap: 16px;
   margin-top: 6px;
 }
 
 .mtile {
   display: flex;
   align-items: center;
-  gap: 13px;
+  gap: 15px;
   text-align: left;
-  padding: 18px;
+  padding: 22px 20px;
   background: var(--card);
-  border: 1px solid var(--line-strong);
-  border-left: 3px solid var(--brass-line);
+  border: 1px solid var(--line);
   border-radius: var(--r);
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(20, 53, 40, 0.05);
-  transition: box-shadow 0.15s, border-color 0.15s, transform 0.05s;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.16s, border-color 0.16s, transform 0.1s;
 }
 
 .mtile:hover {
-  box-shadow: 0 6px 18px rgba(20, 53, 40, 0.11);
-  border-left-color: var(--brass);
+  box-shadow: var(--shadow-md);
+  border-color: var(--line-strong);
+  transform: translateY(-2px);
 }
 
 .mtile:active {
-  transform: translateY(1px);
+  transform: translateY(0);
 }
 
 .mtile-ico {
   flex: 0 0 auto;
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  background: var(--pine-tint);
 }
 
 .mtile-ico .sec-ico {
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
+}
+
+.mtile-ico span {
+  line-height: 1;
 }
 
 .mtile-body {
@@ -1529,7 +1544,7 @@ h2.section {
 }
 
 .brow {
-  padding: 13px 18px;
+  padding: 16px 20px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -1606,7 +1621,7 @@ h2.section {
 }
 
 .card-body {
-  padding: 16px 18px;
+  padding: 18px 20px;
 }
 
 .radio-row {
@@ -1774,12 +1789,12 @@ details.inline summary::-webkit-details-marker {
 /* Collapsible panels get a stronger, shaded border so each reads as its own
    distinct, expandable row — separate from the static boards above. */
 details.board {
-  border-color: var(--line-strong);
-  box-shadow: 0 1px 2px rgba(20, 53, 40, 0.06);
+  border-color: var(--line);
+  box-shadow: var(--shadow-sm);
 }
 
 details.board[open] {
-  box-shadow: 0 2px 8px rgba(20, 53, 40, 0.08);
+  box-shadow: var(--shadow-md);
 }
 
 /* Duotone pine-and-brass section icon at the start of each header. */
@@ -1791,25 +1806,20 @@ details.board[open] {
 
 details.board > summary {
   list-style: none;
-  padding: 13px 18px;
+  padding: 16px 20px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
   cursor: pointer;
   font-family: var(--disp);
-  font-size: 15px;
+  font-size: 15.5px;
   font-weight: 600;
-  /* A light wash + brass accent rail so these read as expandable panels,
-     distinct from the static boards above — theme-matching, not loud. The
-     3px-narrower left padding offsets the rail so the title stays aligned. */
-  padding-left: 15px;
-  background: var(--ground);
-  border-left: 3px solid var(--brass-line);
-  transition: background 0.15s, border-color 0.15s;
+  background: var(--card);
+  transition: background 0.15s;
 }
 
 details.board > summary:hover {
-  background: var(--pine-tint);
+  background: var(--ground);
 }
 
 details.board > summary::-webkit-details-marker {
@@ -1831,8 +1841,7 @@ details.board[open] > summary::after {
 
 details.board[open] > summary {
   border-bottom: 1px solid var(--line);
-  border-left-color: var(--brass);
-  background: var(--pine-tint);
+  background: var(--card);
 }
 
 details.board > summary .hint {
