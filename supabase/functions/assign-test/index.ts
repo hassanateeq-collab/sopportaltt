@@ -37,15 +37,23 @@ Deno.serve(async (req) => {
       return json({ error: 'You can only assign tests you created in your own department.' }, 403)
     }
 
+    // A manager may only assign/unassign to staff in their OWN department; an
+    // admin may act on anyone. Confine the target set here, server-side.
+    const { data: staffRows } = await admin.from('staff').select('id, department_id, active').in('id', staffIds)
+    const allowed = (staffRows ?? []).filter((s) => role.kind === 'admin' || s.department_id === role.department_id)
+    const allowedIds = allowed.map((s) => s.id as string)
+    if (allowedIds.length === 0) {
+      return json({ error: 'You can only assign to staff in your own department.' }, 403)
+    }
+
     if (action === 'unassign') {
-      const { error } = await admin.from('test_assignments').delete().eq('test_id', testId).in('staff_id', staffIds)
+      const { error } = await admin.from('test_assignments').delete().eq('test_id', testId).in('staff_id', allowedIds)
       if (error) return json({ error: error.message }, 500)
       return json({ ok: true })
     }
 
     // Assign only active staff; ignore anyone already assigned.
-    const { data: active } = await admin.from('staff').select('id').in('id', staffIds).eq('active', true)
-    const ids = (active ?? []).map((s) => s.id as string)
+    const ids = allowed.filter((s) => s.active).map((s) => s.id as string)
     if (ids.length === 0) return json({ ok: true, assigned: 0 })
 
     const { data: existing } = await admin.from('test_assignments').select('staff_id').eq('test_id', testId).in('staff_id', ids)

@@ -127,8 +127,13 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
     </div>
   )
 
+  const onSubPage = !reading && page !== 'home'
+
   return (
     <>
+      {onSubPage && (
+        <button className="btn backbtn" onClick={() => setPage('home')}>← Menu</button>
+      )}
       {isAdmin ? (
         <div className="filters">
           <div className="field">
@@ -159,6 +164,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
         <SopReader
           sop={reading}
           isAdmin={isAdmin}
+          canEdit={canEditSop(actor, reading)}
           onBack={() => setReading(null)}
           onEdit={() => { setEditing(reading); setReading(null) }}
         />
@@ -191,7 +197,6 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
       ) : (
         <>
           {showBranchOnPage && branchSelect}
-          <button className="btn backbtn" onClick={() => setPage('home')}>← Menu</button>
 
           {page === 'sops' && (
             <>
@@ -238,7 +243,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
           initialKind={viewer.kind}
           showViewOnly={false}
           onClose={() => setViewer(null)}
-          onEdit={() => { setEditing(viewer.sop); setViewer(null) }}
+          onEdit={canEditSop(actor, viewer.sop) ? () => { setEditing(viewer.sop); setViewer(null) } : undefined}
         />
       )}
       {editing && (
@@ -536,26 +541,37 @@ function nextApproveLabel(_status: ApprovalStatus): string {
   return '✓ Approve & publish'
 }
 
+/**
+ * May this actor change this SOP? An admin always may. A department manager may
+ * only while the SOP is a draft or was sent back — once it's submitted or
+ * approved (live), it's locked to the manager (the admin owns changes then).
+ */
+function canEditSop(actor: Actor, sop: Sop): boolean {
+  if (actor.kind === 'admin') return true
+  if (actor.manager.department_id !== sop.department_id) return false
+  return sop.approval_status === 'draft' || sop.approval_status === 'rejected'
+}
+
 /* -------------------------------------------------------------- read SOP -- */
 
 /**
  * Read an SOP as an inline page — the document rendered right in the portal (in
  * the portal's theme), not a Drive preview or an overlay. Edit sits top-right.
  */
-function SopReader({ sop, isAdmin, onBack, onEdit }: { sop: Sop; isAdmin: boolean; onBack: () => void; onEdit: () => void }) {
+function SopReader({ sop, isAdmin, canEdit, onBack, onEdit }: { sop: Sop; isAdmin: boolean; canEdit: boolean; onBack: () => void; onEdit: () => void }) {
   const safeDoc = useMemo(() => recomposeSopHtml(sop), [sop])
 
   return (
     <>
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
         <button className="btn backbtn" style={{ marginBottom: 0 }} onClick={onBack}>← Back to SOPs</button>
-        <button className="btn sm primary" onClick={onEdit}>✎ Edit</button>
+        {canEdit && <button className="btn sm primary" onClick={onEdit}>✎ Edit</button>}
       </div>
       {safeDoc ? (
         <article className="soppage" dangerouslySetInnerHTML={{ __html: safeDoc }} />
       ) : (
         <div className="notice">
-          This SOP isn't set up for the in-portal view yet — click <strong>✎ Edit</strong> to write its content here.
+          This SOP isn't set up for the in-portal view yet{canEdit ? <> — click <strong>✎ Edit</strong> to write its content here.</> : '.'}
           {isSupabaseEnabled && isAdmin && sop.document_file_id && (
             <> The original Word file is <a href={driveFileViewLink(sop.document_file_id)} target="_blank" rel="noopener noreferrer">available here</a>.</>
           )}
@@ -772,7 +788,7 @@ function SopBoard({
                   })}
                 </div>
               )}
-              <RevalidateRow actor={actor} sop={s} />
+              {canEditSop(actor, s) && <RevalidateRow actor={actor} sop={s} />}
             </div>
           )
         })
@@ -997,22 +1013,26 @@ function dayDate(iso: string): string {
 }
 
 function TestBoard({ dept, branch, actor, orgWide }: { dept: Department; branch: Branch; actor: Actor; orgWide: boolean }) {
-  // Every active staff member across all departments/branches — a test can be
-  // assigned beyond its own department, so the board and picker work over the
-  // whole org, not just this department's people.
+  // A manager works only within their own department, so the assign picker and
+  // the score rows are confined to their department's staff. An admin oversees
+  // the whole org, so they see everyone.
   const [everyone, setEveryone] = useState<OrgStaff[]>([])
   useEffect(() => {
     let active = true
-    orgStaffDirectory().then((list) => { if (active) setEveryone(list) })
+    orgStaffDirectory().then((list) => {
+      if (!active) return
+      const scoped = actor.kind === 'manager' ? list.filter((p) => p.department_id === actor.manager.department_id) : list
+      setEveryone(scoped)
+    })
     return () => { active = false }
-  }, [])
+  }, [actor])
   const tests = orgWide ? deptTestsAll(dept.id) : testsOf(dept.id, branch.code)
   // The manager sees scores for all branches; the admin sees just the branch
   // she has selected, so the score rows filter to that branch.
   const branchId = orgWide ? undefined : branch.id
   return (
     <details className="board" open>
-      <summary><TestSectionIcon />Tests &amp; scores — {orgWide ? dept.name : `${dept.name} · ${branch.code}`}<span className="hint">{orgWide ? 'Assign anyone · latest score shown' : `scores for ${branch.code}`}</span></summary>
+      <summary><TestSectionIcon />Tests &amp; scores — {orgWide ? dept.name : `${dept.name} · ${branch.code}`}<span className="hint">{orgWide ? `${dept.name} staff · latest score` : `scores for ${branch.code}`}</span></summary>
       {tests.length === 0 ? (
         <div className="empty-row">No tests for this department{orgWide ? '' : ' at this branch'} — create one below.</div>
       ) : (
@@ -1229,7 +1249,9 @@ function AssignPanel({
       </summary>
       <div style={{ marginTop: 8 }}>
         <p className="demo-hint" style={{ marginTop: 0 }}>
-          Assign this test to anyone — any department, any branch. Search by name, department or branch.
+          {actor.kind === 'admin'
+            ? 'Assign this test to anyone — any department, any branch. Search by name, department or branch.'
+            : 'Assign this test to your department’s staff. Search by name or branch.'}
         </p>
         <input
           type="text"

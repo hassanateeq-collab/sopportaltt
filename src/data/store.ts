@@ -1737,6 +1737,9 @@ export const api = {
     if (actor.kind === 'manager' && test.department_id !== actor.manager.department_id) {
       throw new ApiError('You can only assign tests you created in your own department.')
     }
+    if (actor.kind === 'manager' && staff.department_id !== actor.manager.department_id) {
+      throw new ApiError('You can only assign to staff in your own department.')
+    }
     if (db.assignments.some((a) => a.test_id === testId && a.staff_id === staffId)) return
 
     db.assignments.push({
@@ -1784,6 +1787,8 @@ export const api = {
     for (const staffId of ids) {
       const staff = db.staff.find((s) => s.id === staffId)
       if (!staff || !staff.active) continue
+      // A manager may only assign to their own department's staff.
+      if (actor.kind === 'manager' && staff.department_id !== actor.manager.department_id) continue
       if (db.assignments.some((a) => a.test_id === testId && a.staff_id === staffId)) continue
       db.assignments.push({ id: id('asg'), test_id: testId, staff_id: staffId, assigned_by: actorName(actor), assigned_at: nowIso() })
       notify(staffId, 'test_assigned', `${test.title} has been assigned to you by ${actorName(actor)}.`)
