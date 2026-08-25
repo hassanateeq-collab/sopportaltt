@@ -129,13 +129,21 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
 
   const onSubPage = !reading && page !== 'home'
 
+  const menuBtn = onSubPage ? (
+    <button
+      className="btn backbtn"
+      style={{ margin: 0, flex: '0 0 auto', alignSelf: 'flex-end' }}
+      onClick={() => setPage('home')}
+    >
+      ← Menu
+    </button>
+  ) : null
+
   return (
     <>
-      {onSubPage && (
-        <button className="btn backbtn" onClick={() => setPage('home')}>← Menu</button>
-      )}
       {isAdmin ? (
         <div className="filters">
+          {menuBtn}
           <div className="field">
             <label htmlFor="a-dept">Department</label>
             <select id="a-dept" value={aDept} onChange={(e) => setADept(e.target.value)}>
@@ -151,6 +159,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
         </div>
       ) : (
         <div className="crumbs">
+          {menuBtn}
           <span className="here">{actor.manager.name} — {dept.name} Manager</span>
           <span className="sep">·</span>
           <span className="here">all branches</span>
