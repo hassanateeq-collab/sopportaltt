@@ -54,11 +54,20 @@ export interface Staff {
 }
 
 /**
- * Sign-in role in the managers table. Only the department manager exists now —
- * they create SOPs and run tests; the admin reviews and approves. (The column is
- * kept for any legacy rows; the app treats every manager as a department manager.)
+ * Sign-in role in the managers table.
+ *  - 'manager'        — department manager: writes SOPs and runs tests for one
+ *                       department across every branch; the admin reviews/approves.
+ *  - 'branch_manager' — oversees one branch (no department). Read-only + comments:
+ *                       sees every SOP and can suggest changes on it, and sees the
+ *                       assessment results of the staff in their own branch. Never
+ *                       edits, approves, or assigns.
  */
-export type ManagerRole = 'manager'
+export type ManagerRole = 'manager' | 'branch_manager'
+
+export const MANAGER_ROLE_LABELS: Record<ManagerRole, string> = {
+  manager: 'Department Manager',
+  branch_manager: 'Branch Manager',
+}
 
 export interface Manager {
   id: Uuid
@@ -175,6 +184,23 @@ export interface SopDoc {
   body: string
   purpose: string
   appliesTo: string
+}
+
+/**
+ * A comment / change-suggestion left on an SOP. Branch managers raise these to
+ * flag changes for the owning department manager; the department manager and the
+ * admin can reply in the same thread. Authored by a manager/branch_manager/admin,
+ * never by staff.
+ */
+export interface SopComment {
+  id: Uuid
+  sop_id: Uuid
+  /** The managers-table id of the author, or null when the author is an admin. */
+  author_manager_id: Uuid | null
+  author_name: string
+  author_role: ManagerRole | 'admin'
+  body: string
+  created_at: Iso
 }
 
 export interface Acknowledgment {

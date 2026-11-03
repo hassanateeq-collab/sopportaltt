@@ -20,6 +20,7 @@ import {
   MANAGERS,
   ADMINS,
   SOPS,
+  SEED_SOP_COMMENTS,
   TESTS,
   QUESTIONS,
 } from './seed'
@@ -46,6 +47,7 @@ import type {
   Question,
   RetestGrant,
   Sop,
+  SopComment,
   SopDoc,
   Staff,
   StaffSession,
@@ -62,6 +64,7 @@ interface Db {
   managers: Manager[]
   admins: Admin[]
   sops: Sop[]
+  sopComments: SopComment[]
   acknowledgments: Acknowledgment[]
   tests: Test[]
   questions: Question[]
@@ -87,6 +90,7 @@ function emptyDb(): Db {
     managers: [],
     admins: [],
     sops: [],
+    sopComments: [],
     acknowledgments: [],
     tests: [],
     questions: [],
@@ -245,6 +249,20 @@ async function fetchStaffRows(): Promise<Record<string, unknown>[]> {
   return (first.data ?? []) as Record<string, unknown>[]
 }
 
+/**
+ * SOP comments, tolerant of the table not existing yet. If migration 0011 hasn't
+ * run, PostgREST answers "relation ... does not exist" (or a schema-cache 404) —
+ * fall back to an empty thread list so login and the boards still work.
+ */
+async function fetchSopComments(): Promise<SopComment[]> {
+  const { data, error } = await supabase!.from('sop_comments').select('*')
+  if (error) {
+    if (/sop_comments/.test(error.message) || /does not exist/i.test(error.message)) return []
+    throw new ApiError(`Could not load comments: ${error.message}`)
+  }
+  return (data ?? []) as SopComment[]
+}
+
 /** Load just the anon-readable org shell (branches + departments) for the login funnels. */
 async function hydratePublic(): Promise<void> {
   try {
@@ -278,6 +296,7 @@ async function hydrateFromSupabase(): Promise<void> {
     certifications,
     grants,
     notifications,
+    sopComments,
   ] = await Promise.all([
     fetchAll<Branch>('branches'),
     fetchAll<Department>('departments'),
@@ -293,6 +312,7 @@ async function hydrateFromSupabase(): Promise<void> {
     fetchAll<Certification>('certifications'),
     fetchAll<RetestGrant>('retest_grants'),
     fetchAll<Notification>('notifications'),
+    fetchSopComments(),
   ])
   db = {
     ...emptyDb(),
@@ -302,6 +322,7 @@ async function hydrateFromSupabase(): Promise<void> {
     managers,
     admins,
     sops,
+    sopComments,
     acknowledgments,
     tests,
     questions,
@@ -1092,6 +1113,7 @@ async function seed(): Promise<void> {
     managers: [...MANAGERS],
     admins: [...ADMINS],
     sops: [...SOPS],
+    sopComments: [...SEED_SOP_COMMENTS],
     tests: [...TESTS],
     questions: [...QUESTIONS],
   }
@@ -1215,6 +1237,7 @@ export const read = {
   managers: () => db.managers,
   admins: () => db.admins,
   sops: () => db.sops,
+  sopComments: () => db.sopComments,
   acknowledgments: () => db.acknowledgments,
   tests: () => db.tests,
   questions: () => db.questions,
@@ -1247,6 +1270,13 @@ export function acknowledgmentFor(staffId: string, sop: Sop): Acknowledgment | n
       (a) => a.staff_id === staffId && a.sop_id === sop.id && a.version === sop.version,
     ) ?? null
   )
+}
+
+/** The comment / suggestion thread on an SOP, oldest first. */
+export function commentsFor(sopId: string): SopComment[] {
+  return db.sopComments
+    .filter((c) => c.sop_id === sopId)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
 }
 
 export function attemptsFor(staffId: string, testId: string): Attempt[] {
@@ -2337,23 +2367,63 @@ export const api = {
   },
 
   /**
-   * Create a department manager. In Supabase mode this creates their Supabase
-   * Auth login (via the manage-managers function) and returns a generated
-   * password to share once, unless one was supplied.
+   * Post a comment / change-suggestion on an SOP thread. Allowed for branch
+   * managers (any SOP), the owning department manager, and the admin. The author
+   * is stamped server-side from the caller, never trusted from here.
+   */
+  async addSopComment(actor: Actor, sopId: string, body: string): Promise<void> {
+    const text = body.trim()
+    if (!text) throw new ApiError('Write something first.')
+    if (text.length > 4000) throw new ApiError('That comment is too long.')
+
+    if (isSupabaseEnabled) {
+      await callAdminFn('sop-comment', { sop_id: sopId, body: text })
+      await hydrateFromSupabase()
+      return
+    }
+
+    const sop = db.sops.find((s) => s.id === sopId)
+    if (!sop) throw new ApiError('That SOP no longer exists.')
+    const isBranchManager = actor.kind === 'manager' && actor.manager.role === 'branch_manager'
+    if (actor.kind === 'manager' && actor.manager.role === 'manager' && sop.department_id !== actor.manager.department_id) {
+      throw new ApiError('You can only comment on your own department’s SOPs.')
+    }
+    db.sopComments.push({
+      id: id('cmt'),
+      sop_id: sopId,
+      author_manager_id: actor.kind === 'admin' ? null : actor.manager.id,
+      author_name: actorName(actor),
+      author_role: actor.kind === 'admin' ? 'admin' : isBranchManager ? 'branch_manager' : 'manager',
+      body: text,
+      created_at: nowIso(),
+    })
+    commit()
+  },
+
+  /**
+   * Create a manager. A department manager gets a department + branch; a branch
+   * manager gets just a branch (role: 'branch_manager', no department). In
+   * Supabase mode this creates their Supabase Auth login (via the manage-managers
+   * function) and returns a generated password to share once, unless one was
+   * supplied.
    */
   async addManager(
     actor: Actor,
     input: { name: string; email: string; department_id: string; branch_id: string; password?: string; role?: Manager['role'] },
   ): Promise<{ manager: Manager; password: string | null }> {
+    const role: Manager['role'] = input.role === 'branch_manager' ? 'branch_manager' : 'manager'
+    // A branch manager has a branch but no department.
+    const departmentId = role === 'branch_manager' ? null : input.department_id
+
     if (isSupabaseEnabled) {
       const j = await callAdminFn('manage-managers', {
         action: 'create',
         name: input.name,
         email: input.email,
-        department_id: input.department_id,
+        department_id: departmentId,
         branch_id: input.branch_id,
         password: input.password ?? '',
-        role: 'manager',
+        role,
       })
       await hydrateFromSupabase()
       return { manager: j.manager as Manager, password: (j.password as string | null) ?? null }
@@ -2363,16 +2433,18 @@ export const api = {
     const email = input.email.trim().toLowerCase()
     if (!input.name.trim()) throw new ApiError('A manager needs a name.')
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new ApiError('That email does not look right.')
+    if (role === 'manager' && !departmentId) throw new ApiError('Choose a department.')
+    if (!input.branch_id) throw new ApiError('Choose a branch.')
     if (db.managers.some((m) => m.email === email)) throw new ApiError('That manager already exists.')
 
     const manager: Manager = {
       id: id('mg'),
       name: input.name.trim(),
       email,
-      department_id: input.department_id,
+      department_id: departmentId,
       branch_id: input.branch_id,
       active: true,
-      role: 'manager',
+      role,
     }
     db.managers.push(manager)
     commit()

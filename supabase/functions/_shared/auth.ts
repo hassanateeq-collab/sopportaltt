@@ -91,7 +91,16 @@ export type ManagerRole = 'manager' | 'branch_manager' | 'hr' | 'ceo'
 
 export type CallerRole =
   | { kind: 'admin'; id: string; name: string }
-  | { kind: 'manager'; id: string; name: string; department_id: string; branch_id: string; role: ManagerRole }
+  | {
+      kind: 'manager'
+      id: string
+      name: string
+      // A branch manager has a branch but no department, so department_id is null
+      // for them. A department manager has both.
+      department_id: string | null
+      branch_id: string | null
+      role: ManagerRole
+    }
   | null
 
 /** Resolve a manager/admin's Supabase Auth JWT to their directory row, or null. */
@@ -120,8 +129,8 @@ export async function callerRole(admin: SupabaseClient, jwt: string): Promise<Ca
       kind: 'manager',
       id: m.id as string,
       name: m.name as string,
-      department_id: m.department_id as string,
-      branch_id: m.branch_id as string,
+      department_id: (m.department_id as string | null) ?? null,
+      branch_id: (m.branch_id as string | null) ?? null,
       role: ((m.role as string) ?? 'manager') as ManagerRole,
     }
   }

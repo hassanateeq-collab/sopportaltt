@@ -23,8 +23,7 @@ import {
   ApiError,
 } from '../data/store'
 import type { Actor, DraftQuestion, OrgStaff } from '../data/store'
-import DOMPurify from 'dompurify'
-import { generateSopDocx, sopContentHtml, sopNumber, SOP_DOCX_MIME } from '../lib/sopdoc'
+import { generateSopDocx, sopNumber, SOP_DOCX_MIME } from '../lib/sopdoc'
 import { SopEditor } from '../components/SopEditor'
 import type { Editor } from '@tiptap/react'
 import type { Branch, BranchScope, Department, Difficulty, Language, Manager, Sop, Staff, Test } from '../types'
@@ -38,6 +37,9 @@ import { toast } from '../lib/toast'
 import { isSupabaseEnabled } from '../lib/supabase'
 import { DRIVE_DEPARTMENT_FOLDERS } from '../lib/drive'
 import { Viewer } from '../components/Viewer'
+import { SopComments } from '../components/SopComments'
+import { recomposeSopHtml } from '../components/SopPage'
+import { BranchManagerPortal } from './BranchManagerPortal'
 import {
   SopSectionIcon,
   TestSectionIcon,
@@ -61,6 +63,13 @@ import {
 type Page = 'home' | 'sops' | 'tests' | 'staff' | 'managers' | 'branches' | 'departments' | 'settings' | 'approvals' | 'status'
 
 export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
+  // A branch manager gets a trimmed, read-only + comment portal, scoped to their
+  // own branch. (Early return before any hooks — a mount is always one or the
+  // other, so hook order stays stable.)
+  if (actor.kind === 'manager' && actor.manager.role === 'branch_manager') {
+    return <BranchManagerPortal actor={actor} onLogout={onLogout} />
+  }
+
   const isAdmin = actor.kind === 'admin'
   const branches = read.branches()
   const departments = read.departments()
@@ -172,6 +181,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
       {reading ? (
         <SopReader
           sop={reading}
+          actor={actor}
           isAdmin={isAdmin}
           canEdit={canEditSop(actor, reading)}
           onBack={() => setReading(null)}
@@ -234,6 +244,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
           {page === 'managers' && isAdmin && (
             <>
               <ManagerRoster actor={actor} dept={dept} />
+              <BranchManagerRoster actor={actor} />
               <AddManager actor={actor} dept={dept} branch={branch} />
             </>
           )}
@@ -265,23 +276,6 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
 /* ------------------------------------------------------ SOP approval chain -- */
 
 /** Recompose an editor-authored SOP into sanitised, themed article HTML. */
-function recomposeSopHtml(sop: Sop): string {
-  if (!sop.sop_doc) return ''
-  const html = sopContentHtml(
-    {
-      title: sop.title,
-      code: sop.code,
-      version: sop.version,
-      department: read.department(sop.department_id)?.name ?? '',
-      effectiveDate: fmtD(sop.updated_at),
-      purpose: sop.sop_doc.purpose,
-      appliesTo: sop.sop_doc.appliesTo,
-    },
-    sop.sop_doc.body,
-  )
-  return DOMPurify.sanitize(html)
-}
-
 /** Load the SOPs awaiting the signed-in reviewer/admin, with a manual reload. */
 function useApprovalQueue(actor: Actor): { sops: Sop[]; loading: boolean; reload: () => void } {
   const [sops, setSops] = useState<Sop[]>([])
@@ -567,8 +561,11 @@ function canEditSop(actor: Actor, sop: Sop): boolean {
  * Read an SOP as an inline page — the document rendered right in the portal (in
  * the portal's theme), not a Drive preview or an overlay. Edit sits top-right.
  */
-function SopReader({ sop, isAdmin, canEdit, onBack, onEdit }: { sop: Sop; isAdmin: boolean; canEdit: boolean; onBack: () => void; onEdit: () => void }) {
+function SopReader({ sop, actor, isAdmin, canEdit, onBack, onEdit }: { sop: Sop; actor: Actor; isAdmin: boolean; canEdit: boolean; onBack: () => void; onEdit: () => void }) {
   const safeDoc = useMemo(() => recomposeSopHtml(sop), [sop])
+  // A department manager may only post on their own department's SOPs; the admin
+  // always may. (The server enforces the same rule.)
+  const canPost = actor.kind === 'admin' || actor.manager.department_id === sop.department_id
 
   return (
     <>
@@ -588,6 +585,7 @@ function SopReader({ sop, isAdmin, canEdit, onBack, onEdit }: { sop: Sop; isAdmi
       )}
       <ApprovalTrail sop={sop} />
       <SopReadStatus sop={sop} />
+      <SopComments actor={actor} sopId={sop.id} canPost={canPost} />
     </>
   )
 }
@@ -2044,6 +2042,102 @@ function ManagerRoster({ actor, dept }: { actor: Actor; dept: Department }) {
   )
 }
 
+/**
+ * Branch managers across the org (they have a branch but no department, so they
+ * don't belong to any department's roster). Shown once on the Managers page.
+ */
+function BranchManagerRoster({ actor }: { actor: Actor }) {
+  const managers = read
+    .managers()
+    .filter((m) => m.role === 'branch_manager')
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  return (
+    <details className="board">
+      <summary><ManagerSectionIcon />Branch managers<span className="hint">{managers.length} · review &amp; comment, one branch each</span></summary>
+      <div className="card-body">
+        {managers.length === 0 ? (
+          <div className="empty-row">No branch managers yet — add one below and pick “Branch Manager”.</div>
+        ) : (
+          managers.map((m) => <BranchManagerRow key={m.id} actor={actor} manager={m} />)
+        )}
+      </div>
+    </details>
+  )
+}
+
+function BranchManagerRow({ actor, manager }: { actor: Actor; manager: Manager }) {
+  const [branchId, setBranchId] = useState(manager.branch_id ?? read.branches()[0]?.id ?? '')
+  const [email, setEmail] = useState(manager.email)
+  const [password, setPassword] = useState('')
+  const postingDirty = branchId !== manager.branch_id
+  const loginDirty = email.trim().toLowerCase() !== manager.email || password.trim() !== ''
+
+  return (
+    <div className="brow">
+      <div className="brow-top">
+        <span className="brow-title">
+          {manager.name} <span className="rolechip">Branch Manager</span>
+          {!manager.active && <span className="vidchip" style={{ marginLeft: 6 }}>DISABLED</span>}
+        </span>
+      </div>
+
+      <div className="fieldrow" style={{ marginTop: 6 }}>
+        <div className="field"><label>Branch</label>
+          <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{read.branches().map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}</select></div>
+      </div>
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+        <button
+          className="btn sm primary"
+          disabled={!postingDirty}
+          onClick={() => run(() => api.updateManager(actor, manager.id, { branch_id: branchId }), `${manager.name} updated`)}
+        >
+          Save branch
+        </button>
+        <button
+          className="btn sm"
+          onClick={() => run(() => api.updateManager(actor, manager.id, { active: !manager.active }), manager.active ? `${manager.name} disabled` : `${manager.name} enabled`)}
+        >
+          {manager.active ? 'Disable login' : 'Enable login'}
+        </button>
+        <button
+          className="btn sm danger"
+          onClick={() => {
+            if (!confirm(`Delete branch manager ${manager.name} (${manager.email})?\n\nThis removes their login for good. It can't be undone.`)) return
+            run(() => api.deleteManager(actor, manager.id), `${manager.name} deleted`)
+          }}
+        >
+          ✕ Delete
+        </button>
+      </div>
+
+      <div className="fieldrow" style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)' }}>
+        <div className="field"><label>Sign-in email</label>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+        <div className="field"><label>New password — blank keeps current</label>
+          <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="set a new password" /></div>
+      </div>
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+        <button
+          className="btn sm primary"
+          disabled={!loginDirty}
+          onClick={() =>
+            run(async () => {
+              await api.updateManagerLogin(actor, manager.id, {
+                email: email.trim().toLowerCase() !== manager.email ? email : undefined,
+                password: password.trim() || undefined,
+              })
+              setPassword('')
+            }, `${manager.name}'s login updated`)
+          }
+        >
+          Save login
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function ManagerRow({ actor, manager }: { actor: Actor; manager: Manager }) {
   const [deptId, setDeptId] = useState(manager.department_id ?? read.departments()[0]?.id ?? '')
   const [branchId, setBranchId] = useState(manager.branch_id ?? read.branches()[0]?.id ?? '')
@@ -2124,25 +2218,40 @@ function AddManager({ actor, dept, branch }: { actor: Actor; dept: Department; b
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [role, setRole] = useState<Manager['role']>('manager')
   const [deptId, setDeptId] = useState(dept.id)
   const [branchId, setBranchId] = useState(branch.id)
   const [busy, setBusy] = useState(false)
   const [issued, setIssued] = useState<{ name: string; email: string; password: string | null } | null>(null)
+  const isBranchManager = role === 'branch_manager'
 
   return (
     <details className="board">
-      <summary><AddSectionIcon />Add department manager<span className="hint">creates their sign-in</span></summary>
+      <summary><AddSectionIcon />Add manager<span className="hint">department or branch manager · creates their sign-in</span></summary>
       <div className="card-body">
+        <div className="field"><label>Role</label>
+          <select value={role} onChange={(e) => setRole(e.target.value as Manager['role'])}>
+            <option value="manager">Department Manager — writes SOPs & runs tests for one department</option>
+            <option value="branch_manager">Branch Manager — reviews & comments, sees one branch’s results</option>
+          </select>
+        </div>
         <div className="field"><label>Name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Faisal" /></div>
         <div className="field"><label>Email (their sign-in login)</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@hamsun.example" /></div>
         <div className="field"><label>Temporary password — blank = auto-generate</label>
           <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="at least 8 characters, or leave blank" /></div>
         <div className="fieldrow">
-          <div className="field"><label>Department</label>
-            <select value={deptId} onChange={(e) => setDeptId(e.target.value)}>{read.departments().map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
-          <div className="field"><label>Branch (home)</label>
+          {!isBranchManager && (
+            <div className="field"><label>Department</label>
+              <select value={deptId} onChange={(e) => setDeptId(e.target.value)}>{read.departments().map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
+          )}
+          <div className="field"><label>Branch{isBranchManager ? '' : ' (home)'}</label>
             <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{read.branches().map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}</select></div>
         </div>
+        {isBranchManager && (
+          <p className="demo-hint" style={{ marginTop: -4, marginBottom: 10 }}>
+            A branch manager has no department. They read every SOP and suggest changes, and see the assessment results of their branch’s staff.
+          </p>
+        )}
         <button
           className="btn primary block"
           disabled={busy}
@@ -2156,9 +2265,12 @@ function AddManager({ actor, dept, branch }: { actor: Actor; dept: Department; b
                 department_id: deptId,
                 branch_id: branchId,
                 password: password || undefined,
+                role,
               })
               setIssued({ name: name.trim(), email: email.trim().toLowerCase(), password: pw })
-              toast(`${name} added as ${read.department(deptId)?.name} manager`)
+              toast(isBranchManager
+                ? `${name} added as ${read.branch(branchId)?.name} branch manager`
+                : `${name} added as ${read.department(deptId)?.name} manager`)
               setName(''); setEmail(''); setPassword('')
             } catch (e) {
               toast(e instanceof ApiError ? e.message : 'Could not add manager.')

@@ -11,7 +11,7 @@
  * derived, never assigned.
  */
 
-import type { Branch, Department, Manager, Admin, Sop, Staff, Test, Question, Admin as AdminType } from '../types'
+import type { Branch, Department, Manager, Admin, Sop, SopComment, Staff, Test, Question, Admin as AdminType } from '../types'
 
 export const BRANCHES: Branch[] = [
   { id: 'br-fsl', code: 'FSL', name: 'Shahrah-e-Faisal', status: 'open' },
@@ -62,6 +62,9 @@ export const MANAGERS: Manager[] = [
   { id: 'mg-01', name: 'Mehreen Qadir', email: 'mehreen.kitchen.fsl@hamsun.example', department_id: 'dp-kt', branch_id: 'br-fsl', active: true, role: 'manager' },
   { id: 'mg-02', name: 'Owais Bhatti', email: 'owais.housekeeping.clf@hamsun.example', department_id: 'dp-hk', branch_id: 'br-clf', active: true, role: 'manager' },
   { id: 'mg-03', name: 'Rabia Noor', email: 'rabia.frontdesk.fsl@hamsun.example', department_id: 'dp-fd', branch_id: 'br-fsl', active: true, role: 'manager' },
+  // A branch manager: oversees the Clifton branch, no department. Read-only +
+  // comments on SOPs, and the assessment results of Clifton staff.
+  { id: 'mg-04', name: 'Sadia Imran', email: 'sadia.branch.clf@hamsun.example', department_id: null, branch_id: 'br-clf', active: true, role: 'branch_manager' },
 ]
 
 export const ADMINS: AdminType[] = [
@@ -73,8 +76,22 @@ export const DEMO_PASSWORDS: Record<string, string> = {
   'mehreen.kitchen.fsl@hamsun.example': 'kitchen123',
   'owais.housekeeping.clf@hamsun.example': 'housekeeping123',
   'rabia.frontdesk.fsl@hamsun.example': 'frontdesk123',
+  'sadia.branch.clf@hamsun.example': 'branch123',
   'admin@hamsun.example': 'admin123',
 }
+
+/** A sample branch-manager suggestion so the SOP comment thread isn't empty. */
+export const SEED_SOP_COMMENTS: SopComment[] = [
+  {
+    id: 'cmt-seed-01',
+    sop_id: 'sop-fd-001',
+    author_manager_id: 'mg-04',
+    author_name: 'Sadia Imran',
+    author_role: 'branch_manager',
+    body: 'At Clifton the deposit step slows check-in at peak hours — can we add a line on taking the card imprint before the registration card is finished? Happy to walk the team through it.',
+    created_at: '2026-07-02T11:20:00.000Z',
+  },
+]
 
 const NOW = '2026-07-01T09:00:00.000Z'
 

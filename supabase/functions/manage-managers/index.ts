@@ -40,11 +40,14 @@ Deno.serve(async (req) => {
       const name = String(body.name ?? '').trim()
       const email = String(body.email ?? '').trim().toLowerCase()
       const supplied = String(body.password ?? '')
-      const departmentId = String(body.department_id ?? '') || null
+      const roleInput = body.role === 'branch_manager' ? 'branch_manager' : 'manager'
+      // A branch manager is tied to a branch and has NO department; a department
+      // manager needs both.
+      const departmentId = roleInput === 'branch_manager' ? null : (String(body.department_id ?? '') || null)
       const branchId = String(body.branch_id ?? '') || null
       if (!name) return json({ error: 'A manager needs a name.' }, 400)
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: 'That email does not look right.' }, 400)
-      if (!departmentId) return json({ error: 'Choose a department.' }, 400)
+      if (roleInput === 'manager' && !departmentId) return json({ error: 'Choose a department.' }, 400)
       if (!branchId) return json({ error: 'Choose a branch.' }, 400)
 
       const { data: existing } = await admin.from('managers').select('id').eq('email', email).maybeSingle()
@@ -69,7 +72,7 @@ Deno.serve(async (req) => {
           department_id: departmentId,
           branch_id: branchId,
           active: true,
-          role: 'manager',
+          role: roleInput,
         })
         .select('*')
         .single()

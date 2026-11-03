@@ -2374,3 +2374,102 @@ details.board > summary .hint {
     display: none;
   }
 }
+
+/* ------------------------------------------------- SOP comments / suggestions */
+
+.sopcomments {
+  margin-top: 22px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+.sopcomments-head {
+  font-family: var(--disp);
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--ink-soft);
+  margin-bottom: 12px;
+}
+.sopcomments-count {
+  color: var(--ink-faint);
+  font-weight: 600;
+}
+.sopcomments-empty {
+  font-size: 13px;
+  color: var(--ink-faint);
+  margin: 0 0 12px;
+}
+.sopcomment-list {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sopcomment {
+  background: var(--ground);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 11px 13px;
+}
+.sopcomment.mine {
+  background: var(--pine-tint);
+  border-color: var(--pine);
+}
+.sopcomment-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+.sopcomment-who {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--ink);
+}
+.sopcomment-role {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--brass-soft);
+  color: var(--brass-deep);
+}
+.sopcomment-role.role-branch_manager {
+  background: var(--pine-tint);
+  color: var(--pine-deep);
+}
+.sopcomment-role.role-admin {
+  background: var(--exp-bg);
+  color: var(--exp);
+}
+.sopcomment-at {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  font-family: var(--mono);
+}
+.sopcomment-body {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+.sopcomment-compose textarea {
+  width: 100%;
+  font: inherit;
+  font-size: 13.5px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--card);
+  margin-bottom: 8px;
+  resize: vertical;
+}
+.sopcomment-compose textarea:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
