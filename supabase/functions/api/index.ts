@@ -317,11 +317,7 @@ async function listPolicies(admin: SupabaseClient, req: Request): Promise<Respon
   const { data: staffRows } = await admin.from('staff').select('id, name, branch_id').eq('active', true)
   const staffList = (staffRows ?? []) as Row[]
   const staffBranch = new Map<string, string | null>()
-  const staffName = new Map<string, string>()
-  for (const s of staffList) {
-    staffBranch.set(s.id, branchCodeOf(s.branch_id))
-    staffName.set(s.id, s.name)
-  }
+  for (const s of staffList) staffBranch.set(s.id, branchCodeOf(s.branch_id))
 
   // Managers (their acks are management sign-offs) — for their branch.
   const { data: mgrRows } = await admin.from('managers').select('id, branch_id')
