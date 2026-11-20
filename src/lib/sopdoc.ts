@@ -20,6 +20,10 @@ export interface SopDocMeta {
   effectiveDate: string
   purpose: string
   appliesTo: string
+  /** Header banner — defaults to the SOP wording; policies pass 'POLICY'. */
+  docType?: string
+  /** The code's label — defaults to 'SOP No.'; policies pass 'Policy No.'. */
+  numberLabel?: string
 }
 
 export const SOP_DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
@@ -53,8 +57,8 @@ export function sopHeaderHtml(m: SopDocMeta): string {
     `<table style="width:100%;border-collapse:collapse;">` +
       `<tr>` +
         `<td rowspan="3" style="${cell}width:172px;text-align:center;vertical-align:middle;"><img src="${SOP_LOGO_DATA_URI}" width="140" height="140" alt="Hamsun"/></td>` +
-        `<td style="${cell}text-align:center;font-weight:bold;">STANDARD OPERATING PROCEDURE</td>` +
-        `<td style="${cell}"><b>SOP No.:</b> ${esc(m.code)}</td>` +
+        `<td style="${cell}text-align:center;font-weight:bold;">${esc(m.docType ?? 'STANDARD OPERATING PROCEDURE')}</td>` +
+        `<td style="${cell}"><b>${esc(m.numberLabel ?? 'SOP No.')}:</b> ${esc(m.code)}</td>` +
       `</tr>` +
       `<tr><td style="${cell}"><b>Title:</b> ${esc(m.title)}</td><td style="${cell}"><b>Version No.:</b> ${esc(String(m.version))}</td></tr>` +
       `<tr><td style="${cell}"><b>Department:</b> ${esc(m.department)}</td><td style="${cell}"><b>Effective Date:</b> ${esc(m.effectiveDate)}</td></tr>` +

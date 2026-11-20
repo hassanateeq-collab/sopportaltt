@@ -28,6 +28,8 @@ export interface Department {
   name: string
   /** Drive folder this department's SOPs upload to (admin-set in Settings). */
   drive_folder_id?: string | null
+  /** Drive folder this department's Policies upload to, inside the Policies root. */
+  policy_folder_id?: string | null
 }
 
 export interface Staff {
@@ -61,12 +63,17 @@ export interface Staff {
  *                       sees every SOP and can suggest changes on it, and sees the
  *                       assessment results of the staff in their own branch. Never
  *                       edits, approves, or assigns.
+ *  - 'hr'             — org-wide, Policies only (no department, no branch). Writes,
+ *                       publishes and tracks company policies for every department;
+ *                       the admin and the managers read & acknowledge them. HR does
+ *                       not touch SOPs, tests, or staff.
  */
-export type ManagerRole = 'manager' | 'branch_manager'
+export type ManagerRole = 'manager' | 'branch_manager' | 'hr'
 
 export const MANAGER_ROLE_LABELS: Record<ManagerRole, string> = {
   manager: 'Department Manager',
   branch_manager: 'Branch Manager',
+  hr: 'HR',
 }
 
 export interface Manager {
@@ -210,6 +217,54 @@ export interface Acknowledgment {
   /** Pinned at sign time, so a version bump correctly reopens the obligation. */
   version: number
   signed_at: Iso
+}
+
+/* -------------------------------------------------------------- policies ---- */
+
+export type PolicyStatus = 'draft' | 'published'
+
+export const POLICY_STATUS_LABELS: Record<PolicyStatus, string> = {
+  draft: 'Draft',
+  published: 'Published · live',
+}
+
+/**
+ * A company policy, owned by HR. HR writes and publishes it (per department,
+ * each in its own Drive folder); the admin and every manager read it and
+ * acknowledge it. Staff do not see policies. The inline document reuses the SOP
+ * document shape so the same editor and reader serve both.
+ */
+export interface Policy {
+  id: Uuid
+  /** Document-control code, e.g. POL-HK-001. */
+  code: string
+  title: string
+  summary: string | null
+  department_id: Uuid
+  /** Inline document (reuses the SOP body/purpose/appliesTo shape). */
+  policy_doc: SopDoc | null
+  /** Optional uploaded file in the department's Policies Drive folder. */
+  document_file_id: string | null
+  version: number
+  status: PolicyStatus
+  published_by: string
+  updated_at: Iso
+  created_at: Iso
+}
+
+/**
+ * An acknowledgment that a manager or the admin has read a published policy.
+ * Pinned to the policy version so a re-publish reopens the obligation.
+ */
+export interface PolicyAcknowledgment {
+  id: Uuid
+  policy_id: Uuid
+  /** The managers-table id of the acknowledger, or null when it's the admin. */
+  manager_id: Uuid | null
+  name: string
+  role: ManagerRole | 'admin'
+  version: number
+  acknowledged_at: Iso
 }
 
 /* ----------------------------------------------------------------- tests ---- */

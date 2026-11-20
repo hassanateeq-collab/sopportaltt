@@ -21,6 +21,7 @@ import {
   ADMINS,
   SOPS,
   SEED_SOP_COMMENTS,
+  SEED_POLICIES,
   TESTS,
   QUESTIONS,
 } from './seed'
@@ -45,6 +46,8 @@ import type {
   Notification,
   NotificationKind,
   Question,
+  Policy,
+  PolicyAcknowledgment,
   RetestGrant,
   Sop,
   SopComment,
@@ -65,6 +68,8 @@ interface Db {
   admins: Admin[]
   sops: Sop[]
   sopComments: SopComment[]
+  policies: Policy[]
+  policyAcknowledgments: PolicyAcknowledgment[]
   acknowledgments: Acknowledgment[]
   tests: Test[]
   questions: Question[]
@@ -91,6 +96,8 @@ function emptyDb(): Db {
     admins: [],
     sops: [],
     sopComments: [],
+    policies: [],
+    policyAcknowledgments: [],
     acknowledgments: [],
     tests: [],
     questions: [],
@@ -263,6 +270,30 @@ async function fetchSopComments(): Promise<SopComment[]> {
   return (data ?? []) as SopComment[]
 }
 
+/**
+ * Policies + their acknowledgments, tolerant of the tables not existing yet. If
+ * migration 0012 hasn't run, PostgREST answers "relation ... does not exist" (or
+ * a schema-cache 404) — fall back to empty lists so login and the boards still
+ * work.
+ */
+async function fetchPolicies(): Promise<Policy[]> {
+  const { data, error } = await supabase!.from('policies').select('*')
+  if (error) {
+    if (/policies/.test(error.message) || /does not exist/i.test(error.message)) return []
+    throw new ApiError(`Could not load policies: ${error.message}`)
+  }
+  return (data ?? []) as Policy[]
+}
+
+async function fetchPolicyAcks(): Promise<PolicyAcknowledgment[]> {
+  const { data, error } = await supabase!.from('policy_acknowledgments').select('*')
+  if (error) {
+    if (/policy_acknowledgments/.test(error.message) || /does not exist/i.test(error.message)) return []
+    throw new ApiError(`Could not load policy acknowledgments: ${error.message}`)
+  }
+  return (data ?? []) as PolicyAcknowledgment[]
+}
+
 /** Load just the anon-readable org shell (branches + departments) for the login funnels. */
 async function hydratePublic(): Promise<void> {
   try {
@@ -297,6 +328,8 @@ async function hydrateFromSupabase(): Promise<void> {
     grants,
     notifications,
     sopComments,
+    policies,
+    policyAcknowledgments,
   ] = await Promise.all([
     fetchAll<Branch>('branches'),
     fetchAll<Department>('departments'),
@@ -313,6 +346,8 @@ async function hydrateFromSupabase(): Promise<void> {
     fetchAll<RetestGrant>('retest_grants'),
     fetchAll<Notification>('notifications'),
     fetchSopComments(),
+    fetchPolicies(),
+    fetchPolicyAcks(),
   ])
   db = {
     ...emptyDb(),
@@ -323,6 +358,8 @@ async function hydrateFromSupabase(): Promise<void> {
     admins,
     sops,
     sopComments,
+    policies,
+    policyAcknowledgments,
     acknowledgments,
     tests,
     questions,
@@ -1114,6 +1151,7 @@ async function seed(): Promise<void> {
     admins: [...ADMINS],
     sops: [...SOPS],
     sopComments: [...SEED_SOP_COMMENTS],
+    policies: [...SEED_POLICIES],
     tests: [...TESTS],
     questions: [...QUESTIONS],
   }
@@ -1238,6 +1276,8 @@ export const read = {
   admins: () => db.admins,
   sops: () => db.sops,
   sopComments: () => db.sopComments,
+  policies: () => db.policies,
+  policyAcknowledgments: () => db.policyAcknowledgments,
   acknowledgments: () => db.acknowledgments,
   tests: () => db.tests,
   questions: () => db.questions,
@@ -1277,6 +1317,33 @@ export function commentsFor(sopId: string): SopComment[] {
   return db.sopComments
     .filter((c) => c.sop_id === sopId)
     .sort((a, b) => a.created_at.localeCompare(b.created_at))
+}
+
+/* ---------------------------------------------------------------- policies -- */
+
+/** Acknowledgments on a policy's CURRENT version, newest first. */
+export function policyAcksFor(policy: Policy): PolicyAcknowledgment[] {
+  return db.policyAcknowledgments
+    .filter((a) => a.policy_id === policy.id && a.version === policy.version)
+    .sort((a, b) => b.acknowledged_at.localeCompare(a.acknowledged_at))
+}
+
+/** Has this manager/admin acknowledged the current version of this policy? */
+export function hasAckedPolicy(actor: Actor, policy: Policy): boolean {
+  const managerId = actor.kind === 'admin' ? null : actor.manager.id
+  return db.policyAcknowledgments.some(
+    (a) => a.policy_id === policy.id && a.version === policy.version && a.manager_id === managerId,
+  )
+}
+
+/**
+ * Who is expected to acknowledge a policy: the admin plus every active
+ * department/branch manager. (HR publishes; staff don't see policies.) Used for
+ * the "x of N acknowledged" sign-off board.
+ */
+export function policyAckAudienceCount(): number {
+  const managers = db.managers.filter((m) => m.active && (m.role === 'manager' || m.role === 'branch_manager')).length
+  return managers + db.admins.length
 }
 
 export function attemptsFor(staffId: string, testId: string): Attempt[] {
@@ -2211,7 +2278,7 @@ export const api = {
   },
 
   /** Rename a department. Its code is fixed (it prefixes its SOP codes). */
-  async updateDepartment(actor: Actor, deptId: string, changes: { name?: string; code?: string; drive_folder_id?: string | null }): Promise<void> {
+  async updateDepartment(actor: Actor, deptId: string, changes: { name?: string; code?: string; drive_folder_id?: string | null; policy_folder_id?: string | null }): Promise<void> {
     const patch: Record<string, unknown> = {}
     if (changes.name !== undefined) {
       if (!changes.name.trim()) throw new ApiError('A department needs a name.')
@@ -2223,6 +2290,7 @@ export const api = {
       patch.code = code
     }
     if (changes.drive_folder_id !== undefined) patch.drive_folder_id = changes.drive_folder_id || null
+    if (changes.policy_folder_id !== undefined) patch.policy_folder_id = changes.policy_folder_id || null
     if (Object.keys(patch).length === 0) return
 
     if (isSupabaseEnabled) {
@@ -2400,9 +2468,175 @@ export const api = {
     commit()
   },
 
+  /* ------------------------------------------------------------- policies -- */
+
+  /** HR creates a policy (draft) for a department. */
+  async createPolicy(
+    actor: Actor,
+    input: { title: string; summary?: string; department_id: string; policy_doc?: SopDoc | null },
+  ): Promise<Policy> {
+    if (!input.title.trim()) throw new ApiError('Give the policy a title.')
+    const dept = db.departments.find((d) => d.id === input.department_id)
+    if (!dept) throw new ApiError('Pick a department.')
+    const code = nextPolicyCode(dept.code)
+
+    if (isSupabaseEnabled) {
+      const { data, error } = await supabase!
+        .from('policies')
+        .insert({
+          code,
+          title: input.title.trim(),
+          summary: input.summary?.trim() || null,
+          department_id: input.department_id,
+          policy_doc: input.policy_doc ?? null,
+          version: 1,
+          status: 'draft',
+          published_by: actorName(actor),
+        })
+        .select('*')
+        .single()
+      if (error) throw new ApiError(error.message)
+      await hydrateFromSupabase()
+      return data as Policy
+    }
+
+    assertHr(actor)
+    const policy: Policy = {
+      id: id('pol'),
+      code,
+      title: input.title.trim(),
+      summary: input.summary?.trim() || null,
+      department_id: input.department_id,
+      policy_doc: input.policy_doc ?? null,
+      document_file_id: null,
+      version: 1,
+      status: 'draft',
+      published_by: actorName(actor),
+      updated_at: nowIso(),
+      created_at: nowIso(),
+    }
+    db.policies.push(policy)
+    commit()
+    return policy
+  },
+
+  /** HR edits a policy's title / summary / inline document. */
+  async savePolicy(
+    actor: Actor,
+    policyId: string,
+    changes: { title?: string; summary?: string | null; policy_doc?: SopDoc | null },
+  ): Promise<void> {
+    if (isSupabaseEnabled) {
+      const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
+      if (changes.title !== undefined && changes.title.trim()) patch.title = changes.title.trim()
+      if (changes.summary !== undefined) patch.summary = (changes.summary ?? '').trim() || null
+      if (changes.policy_doc !== undefined) patch.policy_doc = changes.policy_doc
+      const { error } = await supabase!.from('policies').update(patch).eq('id', policyId)
+      if (error) throw new ApiError(error.message)
+      await hydrateFromSupabase()
+      return
+    }
+    assertHr(actor)
+    const policy = db.policies.find((p) => p.id === policyId)
+    if (!policy) throw new ApiError('That policy no longer exists.')
+    if (changes.title !== undefined && changes.title.trim()) policy.title = changes.title.trim()
+    if (changes.summary !== undefined) policy.summary = (changes.summary ?? '').trim() || null
+    if (changes.policy_doc !== undefined) policy.policy_doc = changes.policy_doc
+    policy.updated_at = nowIso()
+    commit()
+  },
+
+  /** HR publishes a draft policy — it becomes live for the admin and managers. */
+  async publishPolicy(actor: Actor, policyId: string): Promise<void> {
+    if (isSupabaseEnabled) {
+      const { error } = await supabase!
+        .from('policies')
+        .update({ status: 'published', published_by: actorName(actor), updated_at: new Date().toISOString() })
+        .eq('id', policyId)
+      if (error) throw new ApiError(error.message)
+      await hydrateFromSupabase()
+      return
+    }
+    assertHr(actor)
+    const policy = db.policies.find((p) => p.id === policyId)
+    if (!policy) throw new ApiError('That policy no longer exists.')
+    policy.status = 'published'
+    policy.published_by = actorName(actor)
+    policy.updated_at = nowIso()
+    commit()
+  },
+
+  /**
+   * HR re-issues a published policy after an edit: bumps the version, which
+   * reopens everyone's acknowledgment (acks are pinned to the version).
+   */
+  async reissuePolicy(actor: Actor, policyId: string): Promise<void> {
+    if (isSupabaseEnabled) {
+      const current = read.policies().find((p) => p.id === policyId)
+      if (!current) throw new ApiError('That policy no longer exists.')
+      const { error } = await supabase!
+        .from('policies')
+        .update({ version: current.version + 1, status: 'published', updated_at: new Date().toISOString() })
+        .eq('id', policyId)
+      if (error) throw new ApiError(error.message)
+      await hydrateFromSupabase()
+      return
+    }
+    assertHr(actor)
+    const policy = db.policies.find((p) => p.id === policyId)
+    if (!policy) throw new ApiError('That policy no longer exists.')
+    policy.version += 1
+    policy.status = 'published'
+    policy.updated_at = nowIso()
+    commit()
+  },
+
+  /** HR deletes a policy (and its acknowledgments). */
+  async deletePolicy(actor: Actor, policyId: string): Promise<void> {
+    if (isSupabaseEnabled) {
+      const { error } = await supabase!.from('policies').delete().eq('id', policyId)
+      if (error) throw new ApiError(error.message)
+      await hydrateFromSupabase()
+      return
+    }
+    assertHr(actor)
+    db.policies = db.policies.filter((p) => p.id !== policyId)
+    db.policyAcknowledgments = db.policyAcknowledgments.filter((a) => a.policy_id !== policyId)
+    commit()
+  },
+
+  /** The admin or a manager acknowledges that they've read a published policy. */
+  async acknowledgePolicy(actor: Actor, policyId: string): Promise<void> {
+    if (actor.kind === 'manager' && actor.manager.role === 'hr') {
+      throw new ApiError('HR publishes policies — there’s nothing to acknowledge.')
+    }
+    if (isSupabaseEnabled) {
+      await callAdminFn('policy-ack', { policy_id: policyId })
+      await hydrateFromSupabase()
+      return
+    }
+    const policy = db.policies.find((p) => p.id === policyId)
+    if (!policy) throw new ApiError('That policy no longer exists.')
+    if (policy.status !== 'published') throw new ApiError('That policy isn’t published yet.')
+    const managerId = actor.kind === 'admin' ? null : actor.manager.id
+    if (db.policyAcknowledgments.some((a) => a.policy_id === policyId && a.version === policy.version && a.manager_id === managerId)) {
+      return
+    }
+    db.policyAcknowledgments.push({
+      id: id('pack'),
+      policy_id: policyId,
+      manager_id: managerId,
+      name: actorName(actor),
+      role: actor.kind === 'admin' ? 'admin' : actor.manager.role,
+      version: policy.version,
+      acknowledged_at: nowIso(),
+    })
+    commit()
+  },
+
   /**
    * Create a manager. A department manager gets a department + branch; a branch
-   * manager gets just a branch (role: 'branch_manager', no department). In
+   * manager gets just a branch; HR gets neither (org-wide, Policies-only). In
    * Supabase mode this creates their Supabase Auth login (via the manage-managers
    * function) and returns a generated password to share once, unless one was
    * supplied.
@@ -2411,9 +2645,12 @@ export const api = {
     actor: Actor,
     input: { name: string; email: string; department_id: string; branch_id: string; password?: string; role?: Manager['role'] },
   ): Promise<{ manager: Manager; password: string | null }> {
-    const role: Manager['role'] = input.role === 'branch_manager' ? 'branch_manager' : 'manager'
-    // A branch manager has a branch but no department.
-    const departmentId = role === 'branch_manager' ? null : input.department_id
+    const role: Manager['role'] =
+      input.role === 'branch_manager' ? 'branch_manager' : input.role === 'hr' ? 'hr' : 'manager'
+    // A department manager has a department + branch; a branch manager a branch
+    // only; HR is org-wide (neither).
+    const departmentId = role === 'manager' ? input.department_id : null
+    const branchId = role === 'hr' ? null : input.branch_id
 
     if (isSupabaseEnabled) {
       const j = await callAdminFn('manage-managers', {
@@ -2421,7 +2658,7 @@ export const api = {
         name: input.name,
         email: input.email,
         department_id: departmentId,
-        branch_id: input.branch_id,
+        branch_id: branchId,
         password: input.password ?? '',
         role,
       })
@@ -2434,7 +2671,7 @@ export const api = {
     if (!input.name.trim()) throw new ApiError('A manager needs a name.')
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new ApiError('That email does not look right.')
     if (role === 'manager' && !departmentId) throw new ApiError('Choose a department.')
-    if (!input.branch_id) throw new ApiError('Choose a branch.')
+    if (role === 'branch_manager' && !branchId) throw new ApiError('Choose a branch.')
     if (db.managers.some((m) => m.email === email)) throw new ApiError('That manager already exists.')
 
     const manager: Manager = {
@@ -2442,7 +2679,7 @@ export const api = {
       name: input.name.trim(),
       email,
       department_id: departmentId,
-      branch_id: input.branch_id,
+      branch_id: branchId,
       active: true,
       role,
     }
@@ -2765,6 +3002,25 @@ function requireAdmin(actor: Actor): void {
   if (actor.kind !== 'admin') {
     throw new ApiError('Only an admin can do that.')
   }
+}
+
+/** Demo-mode guard: only HR may write policies (RLS enforces it in Supabase). */
+function assertHr(actor: Actor): void {
+  assertLocalWrite()
+  if (!(actor.kind === 'manager' && actor.manager.role === 'hr')) {
+    throw new ApiError('Only HR can manage policies.')
+  }
+}
+
+/** The next POL-<dept>-NNN code for a department, from what's already in cache. */
+function nextPolicyCode(deptCode: string): string {
+  const prefix = `POL-${deptCode}-`
+  const nums = db.policies
+    .filter((p) => p.code.startsWith(prefix))
+    .map((p) => parseInt(p.code.slice(prefix.length), 10))
+    .filter((n) => !Number.isNaN(n))
+  const next = (nums.length ? Math.max(...nums) : 0) + 1
+  return `${prefix}${String(next).padStart(3, '0')}`
 }
 
 /** Everyone the derivation says this SOP or test applies to. */

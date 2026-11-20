@@ -55,6 +55,15 @@ export function SopSectionIcon() {
   )
 }
 
+export function PolicySectionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="sec-ico" aria-hidden>
+      <path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z" fill={BRASS_SOFT} stroke={PINE} strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M9 12l2 2 4-4.5" fill="none" stroke={BRASS} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 export function TestSectionIcon() {
   return (
     <svg viewBox="0 0 24 24" className="sec-ico" aria-hidden>

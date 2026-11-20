@@ -16,6 +16,7 @@ import {
   downloadTestReport,
   approvalQueue,
   sopStatusList,
+  hasAckedPolicy,
   orgStaffDirectory,
   listDriveFolders,
   createDriveFolder,
@@ -40,8 +41,11 @@ import { Viewer } from '../components/Viewer'
 import { SopComments } from '../components/SopComments'
 import { recomposeSopHtml } from '../components/SopPage'
 import { BranchManagerPortal } from './BranchManagerPortal'
+import { HrPortal } from './HrPortal'
+import { PoliciesReadBoard } from '../components/PoliciesReadBoard'
 import {
   SopSectionIcon,
+  PolicySectionIcon,
   TestSectionIcon,
   StaffSectionIcon,
   ManagerSectionIcon,
@@ -60,14 +64,17 @@ import {
  * and also manages the org. The boards and forms are the same; only the scope
  * and the extra admin sections differ.
  */
-type Page = 'home' | 'sops' | 'tests' | 'staff' | 'managers' | 'branches' | 'departments' | 'settings' | 'approvals' | 'status'
+type Page = 'home' | 'sops' | 'policies' | 'tests' | 'staff' | 'managers' | 'branches' | 'departments' | 'settings' | 'approvals' | 'status'
 
 export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
-  // A branch manager gets a trimmed, read-only + comment portal, scoped to their
-  // own branch. (Early return before any hooks — a mount is always one or the
-  // other, so hook order stays stable.)
+  // A branch manager gets a trimmed, read-only + comment portal; HR gets the
+  // Policies-only portal. (Early returns before any hooks — a mount is always one
+  // kind of actor, so hook order stays stable.)
   if (actor.kind === 'manager' && actor.manager.role === 'branch_manager') {
     return <BranchManagerPortal actor={actor} onLogout={onLogout} />
+  }
+  if (actor.kind === 'manager' && actor.manager.role === 'hr') {
+    return <HrPortal actor={actor} onLogout={onLogout} />
   }
 
   const isAdmin = actor.kind === 'admin'
@@ -108,6 +115,9 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
   const pendingApprovals = read.sops().filter((s) => s.approval_status === 'admin_review').length
   const approvalsTile: TileDef = { key: 'approvals', icon: <ApprovalSectionIcon />, title: 'SOP approvals', sub: pendingApprovals ? `${pendingApprovals} awaiting your review` : 'review the SOP chain' }
   const statusTile: TileDef = { key: 'status', icon: <StatusSectionIcon />, title: 'Status', sub: 'where every SOP & test stands' }
+  const publishedPolicies = read.policies().filter((p) => p.status === 'published')
+  const policiesPending = publishedPolicies.filter((p) => !hasAckedPolicy(actor, p)).length
+  const policyTile: TileDef = { key: 'policies', icon: <PolicySectionIcon />, title: 'Policies', sub: policiesPending ? `${policiesPending} to acknowledge` : `${publishedPolicies.length} · read & acknowledge` }
 
   const renderTile = (t: TileDef) => (
     <button key={t.key} className="mtile" onClick={() => setPage(t.key)}>
@@ -194,8 +204,8 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
                 branch/department setup are the same regardless of which branch
                 you're viewing, so they sit above the branch picker. */}
             <div className="mtiles">
-              {[sopTile, managerTile, approvalsTile, statusTile].map(renderTile)}
-              {[branchTile, deptTile, settingsTile].map(renderTile)}
+              {[sopTile, policyTile, managerTile, approvalsTile].map(renderTile)}
+              {[statusTile, branchTile, deptTile, settingsTile].map(renderTile)}
             </div>
             {branchSelect}
             {/* Branch-dependent: staff and test scores for the selected branch. */}
@@ -206,7 +216,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
         ) : (
           <>
             <div className="mtiles">
-              {[sopTile, testTile, staffTile].map(renderTile)}
+              {[sopTile, policyTile, testTile, staffTile].map(renderTile)}
               {renderTile(statusTile)}
             </div>
             {branchSelect}
@@ -223,6 +233,8 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
               <AddSopForm dept={dept} branch={branch} actor={actor} lockBranch={false} forceAllBranches />
             </>
           )}
+
+          {page === 'policies' && <PoliciesReadBoard actor={actor} />}
 
           {page === 'tests' && (
             <>
@@ -245,6 +257,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
             <>
               <ManagerRoster actor={actor} dept={dept} />
               <BranchManagerRoster actor={actor} />
+              <HrRoster actor={actor} />
               <AddManager actor={actor} dept={dept} branch={branch} />
             </>
           )}
@@ -2138,6 +2151,80 @@ function BranchManagerRow({ actor, manager }: { actor: Actor; manager: Manager }
   )
 }
 
+/** HR logins (org-wide, Policies only — no department or branch). */
+function HrRoster({ actor }: { actor: Actor }) {
+  const hrs = read.managers().filter((m) => m.role === 'hr').sort((a, b) => a.name.localeCompare(b.name))
+  return (
+    <details className="board">
+      <summary><ManagerSectionIcon />HR access<span className="hint">{hrs.length} · publishes &amp; tracks company policies</span></summary>
+      <div className="card-body">
+        {hrs.length === 0 ? (
+          <div className="empty-row">No HR login yet — add one below and pick “HR”.</div>
+        ) : (
+          hrs.map((m) => <HrRow key={m.id} actor={actor} manager={m} />)
+        )}
+      </div>
+    </details>
+  )
+}
+
+function HrRow({ actor, manager }: { actor: Actor; manager: Manager }) {
+  const [email, setEmail] = useState(manager.email)
+  const [password, setPassword] = useState('')
+  const loginDirty = email.trim().toLowerCase() !== manager.email || password.trim() !== ''
+
+  return (
+    <div className="brow">
+      <div className="brow-top">
+        <span className="brow-title">
+          {manager.name} <span className="rolechip">HR</span>
+          {!manager.active && <span className="vidchip" style={{ marginLeft: 6 }}>DISABLED</span>}
+        </span>
+      </div>
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 4, marginTop: 6 }}>
+        <button
+          className="btn sm"
+          onClick={() => run(() => api.updateManager(actor, manager.id, { active: !manager.active }), manager.active ? `${manager.name} disabled` : `${manager.name} enabled`)}
+        >
+          {manager.active ? 'Disable login' : 'Enable login'}
+        </button>
+        <button
+          className="btn sm danger"
+          onClick={() => {
+            if (!confirm(`Delete HR login ${manager.name} (${manager.email})?\n\nThis removes their login for good. It can't be undone.`)) return
+            run(() => api.deleteManager(actor, manager.id), `${manager.name} deleted`)
+          }}
+        >
+          ✕ Delete
+        </button>
+      </div>
+      <div className="fieldrow" style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)' }}>
+        <div className="field"><label>Sign-in email</label>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+        <div className="field"><label>New password — blank keeps current</label>
+          <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="set a new password" /></div>
+      </div>
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+        <button
+          className="btn sm primary"
+          disabled={!loginDirty}
+          onClick={() =>
+            run(async () => {
+              await api.updateManagerLogin(actor, manager.id, {
+                email: email.trim().toLowerCase() !== manager.email ? email : undefined,
+                password: password.trim() || undefined,
+              })
+              setPassword('')
+            }, `${manager.name}'s login updated`)
+          }
+        >
+          Save login
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function ManagerRow({ actor, manager }: { actor: Actor; manager: Manager }) {
   const [deptId, setDeptId] = useState(manager.department_id ?? read.departments()[0]?.id ?? '')
   const [branchId, setBranchId] = useState(manager.branch_id ?? read.branches()[0]?.id ?? '')
@@ -2224,32 +2311,41 @@ function AddManager({ actor, dept, branch }: { actor: Actor; dept: Department; b
   const [busy, setBusy] = useState(false)
   const [issued, setIssued] = useState<{ name: string; email: string; password: string | null } | null>(null)
   const isBranchManager = role === 'branch_manager'
+  const isHr = role === 'hr'
 
   return (
     <details className="board">
-      <summary><AddSectionIcon />Add manager<span className="hint">department or branch manager · creates their sign-in</span></summary>
+      <summary><AddSectionIcon />Add manager<span className="hint">department / branch manager or HR · creates their sign-in</span></summary>
       <div className="card-body">
         <div className="field"><label>Role</label>
           <select value={role} onChange={(e) => setRole(e.target.value as Manager['role'])}>
             <option value="manager">Department Manager — writes SOPs & runs tests for one department</option>
             <option value="branch_manager">Branch Manager — reviews & comments, sees one branch’s results</option>
+            <option value="hr">HR — publishes & tracks company policies (org-wide)</option>
           </select>
         </div>
         <div className="field"><label>Name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Faisal" /></div>
         <div className="field"><label>Email (their sign-in login)</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@hamsun.example" /></div>
         <div className="field"><label>Temporary password — blank = auto-generate</label>
           <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="at least 8 characters, or leave blank" /></div>
-        <div className="fieldrow">
-          {!isBranchManager && (
-            <div className="field"><label>Department</label>
-              <select value={deptId} onChange={(e) => setDeptId(e.target.value)}>{read.departments().map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
-          )}
-          <div className="field"><label>Branch{isBranchManager ? '' : ' (home)'}</label>
-            <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{read.branches().map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}</select></div>
-        </div>
+        {!isHr && (
+          <div className="fieldrow">
+            {!isBranchManager && (
+              <div className="field"><label>Department</label>
+                <select value={deptId} onChange={(e) => setDeptId(e.target.value)}>{read.departments().map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
+            )}
+            <div className="field"><label>Branch{isBranchManager ? '' : ' (home)'}</label>
+              <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{read.branches().map((b) => <option key={b.id} value={b.id}>{b.code} — {b.name}</option>)}</select></div>
+          </div>
+        )}
         {isBranchManager && (
           <p className="demo-hint" style={{ marginTop: -4, marginBottom: 10 }}>
             A branch manager has no department. They read every SOP and suggest changes, and see the assessment results of their branch’s staff.
+          </p>
+        )}
+        {isHr && (
+          <p className="demo-hint" style={{ marginTop: -4, marginBottom: 10 }}>
+            HR is org-wide and has no department or branch. They write and publish company policies; the admin and the managers acknowledge them.
           </p>
         )}
         <button
@@ -2268,7 +2364,9 @@ function AddManager({ actor, dept, branch }: { actor: Actor; dept: Department; b
                 role,
               })
               setIssued({ name: name.trim(), email: email.trim().toLowerCase(), password: pw })
-              toast(isBranchManager
+              toast(isHr
+                ? `${name} added as HR`
+                : isBranchManager
                 ? `${name} added as ${read.branch(branchId)?.name} branch manager`
                 : `${name} added as ${read.department(deptId)?.name} manager`)
               setName(''); setEmail(''); setPassword('')
@@ -2590,7 +2688,7 @@ function DriveSettings({ actor }: { actor: Actor }) {
       </details>
 
       <details className="board" open>
-        <summary><DepartmentSectionIcon />SOP &amp; test routing<span className="hint">{departments.length} departments</span></summary>
+        <summary><DepartmentSectionIcon />SOP, test &amp; policy routing<span className="hint">{departments.length} departments</span></summary>
         <div className="card-body">
           {departments.map((d) => <DeptFolderRow key={d.id} actor={actor} dept={d} folders={folders} />)}
         </div>
@@ -2601,7 +2699,8 @@ function DriveSettings({ actor }: { actor: Actor }) {
 
 function DeptFolderRow({ actor, dept, folders }: { actor: Actor; dept: Department; folders: Array<{ id: string; name: string }> }) {
   const [folderId, setFolderId] = useState(dept.drive_folder_id ?? '')
-  const dirty = folderId !== (dept.drive_folder_id ?? '')
+  const [policyFolderId, setPolicyFolderId] = useState(dept.policy_folder_id ?? '')
+  const dirty = folderId !== (dept.drive_folder_id ?? '') || policyFolderId !== (dept.policy_folder_id ?? '')
   const current = folders.find((f) => f.id === (dept.drive_folder_id ?? ''))
 
   return (
@@ -2616,13 +2715,18 @@ function DeptFolderRow({ actor, dept, folders }: { actor: Actor; dept: Departmen
             <option value="">— match by department name (default) —</option>
             {folders.map((f) => <option key={f.id} value={f.id}>Hamsun_SOP / {f.name}</option>)}
           </select></div>
+        <div className="field"><label>Policy folder in Drive</label>
+          <select value={policyFolderId} onChange={(e) => setPolicyFolderId(e.target.value)}>
+            <option value="">— none set —</option>
+            {folders.map((f) => <option key={f.id} value={f.id}>Hamsun_SOP / {f.name}</option>)}
+          </select></div>
       </div>
       <button
         className="btn sm primary"
         disabled={!dirty}
-        onClick={() => run(() => api.updateDepartment(actor, dept.id, { drive_folder_id: folderId || null }), `${dept.code} route saved`)}
+        onClick={() => run(() => api.updateDepartment(actor, dept.id, { drive_folder_id: folderId || null, policy_folder_id: policyFolderId || null }), `${dept.code} routes saved`)}
       >
-        Save route
+        Save routes
       </button>
     </div>
   )

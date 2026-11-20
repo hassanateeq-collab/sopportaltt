@@ -11,7 +11,7 @@
  * derived, never assigned.
  */
 
-import type { Branch, Department, Manager, Admin, Sop, SopComment, Staff, Test, Question, Admin as AdminType } from '../types'
+import type { Branch, Department, Manager, Admin, Sop, SopComment, Policy, Staff, Test, Question, Admin as AdminType } from '../types'
 
 export const BRANCHES: Branch[] = [
   { id: 'br-fsl', code: 'FSL', name: 'Shahrah-e-Faisal', status: 'open' },
@@ -65,6 +65,8 @@ export const MANAGERS: Manager[] = [
   // A branch manager: oversees the Clifton branch, no department. Read-only +
   // comments on SOPs, and the assessment results of Clifton staff.
   { id: 'mg-04', name: 'Sadia Imran', email: 'sadia.branch.clf@hamsun.example', department_id: null, branch_id: 'br-clf', active: true, role: 'branch_manager' },
+  // HR: org-wide, Policies only (no department, no branch).
+  { id: 'mg-05', name: 'Nida Farooq', email: 'nida.hr@hamsun.example', department_id: null, branch_id: null, active: true, role: 'hr' },
 ]
 
 export const ADMINS: AdminType[] = [
@@ -77,8 +79,49 @@ export const DEMO_PASSWORDS: Record<string, string> = {
   'owais.housekeeping.clf@hamsun.example': 'housekeeping123',
   'rabia.frontdesk.fsl@hamsun.example': 'frontdesk123',
   'sadia.branch.clf@hamsun.example': 'branch123',
+  'nida.hr@hamsun.example': 'hr123',
   'admin@hamsun.example': 'admin123',
 }
+
+/** Sample policies so HR's board and the acknowledge view aren't empty. */
+export const SEED_POLICIES: Policy[] = [
+  {
+    id: 'pol-01',
+    code: 'POL-HK-001',
+    title: 'Code of Conduct & Grooming Standard',
+    summary: 'Company-wide standards of conduct, uniform and grooming for all front-of-house and housekeeping staff.',
+    department_id: 'dp-hk',
+    policy_doc: {
+      purpose: 'Set one clear standard of professional conduct and appearance across every Hamsun property.',
+      appliesTo: 'All housekeeping and front-of-house staff, every branch.',
+      body: '<h2>1. Conduct</h2><p>Treat every guest and colleague with courtesy and discretion. Guest information is confidential.</p><h2>2. Uniform</h2><p>Wear the issued, pressed uniform and name badge on every shift. Closed, non-slip shoes are required.</p><h2>3. Grooming</h2><p>Hair neatly tied back, minimal jewellery, no strong fragrance. Hands and nails clean at all times.</p>',
+    },
+    document_file_id: null,
+    version: 1,
+    status: 'published',
+    published_by: 'Nida Farooq',
+    updated_at: '2026-07-05T10:00:00.000Z',
+    created_at: '2026-07-05T09:00:00.000Z',
+  },
+  {
+    id: 'pol-02',
+    code: 'POL-FD-001',
+    title: 'Guest Data & Privacy Policy',
+    summary: 'How guest identity documents and contact details must be handled, stored, and disposed of.',
+    department_id: 'dp-fd',
+    policy_doc: {
+      purpose: 'Protect guest personal data and meet the group’s privacy obligations.',
+      appliesTo: 'All front desk and reservations staff.',
+      body: '<h2>1. Collection</h2><p>Only collect the identity and contact details needed to complete a booking.</p><h2>2. Storage</h2><p>Never leave CNIC/passport copies on the desk. Store them in the locked drawer and shred on checkout + 30 days.</p>',
+    },
+    document_file_id: null,
+    version: 1,
+    status: 'draft',
+    published_by: 'Nida Farooq',
+    updated_at: '2026-07-06T11:00:00.000Z',
+    created_at: '2026-07-06T11:00:00.000Z',
+  },
+]
 
 /** A sample branch-manager suggestion so the SOP comment thread isn't empty. */
 export const SEED_SOP_COMMENTS: SopComment[] = [

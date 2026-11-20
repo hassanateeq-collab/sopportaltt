@@ -15,9 +15,10 @@ import { certStatus, daysUntil } from '../lib/certs'
 import { fmtD } from '../lib/format'
 import { SopPage } from '../components/SopPage'
 import { SopComments, sopCommentCount } from '../components/SopComments'
-import { SopSectionIcon, StatusSectionIcon, StaffSectionIcon } from '../components/icons'
+import { PoliciesReadBoard } from '../components/PoliciesReadBoard'
+import { SopSectionIcon, PolicySectionIcon, StatusSectionIcon, StaffSectionIcon } from '../components/icons'
 
-type Page = 'home' | 'sops' | 'results'
+type Page = 'home' | 'sops' | 'policies' | 'results'
 
 /**
  * The Branch Manager's portal. Branch managers oversee ONE branch and are
@@ -55,8 +56,10 @@ export function BranchManagerPortal({ actor, onLogout }: { actor: Actor; onLogou
     )
   }
 
+  const pubPolicies = read.policies().filter((p) => p.status === 'published').length
   const tiles: Array<{ key: Page; icon: ReactNode; title: string; sub: string }> = [
     { key: 'sops', icon: <SopSectionIcon />, title: 'SOPs', sub: `${sopCount} · read & suggest changes` },
+    { key: 'policies', icon: <PolicySectionIcon />, title: 'Policies', sub: `${pubPolicies} · read & acknowledge` },
     { key: 'results', icon: <StatusSectionIcon />, title: 'Assessment results', sub: `${staffCount} staff at ${branch.name}` },
   ]
 
@@ -96,6 +99,8 @@ export function BranchManagerPortal({ actor, onLogout }: { actor: Actor; onLogou
         </>
       ) : page === 'sops' ? (
         <SopBrowse onOpen={(s) => setReading(s)} />
+      ) : page === 'policies' ? (
+        <PoliciesReadBoard actor={actor} />
       ) : (
         <BranchResults branch={branch} />
       )}
