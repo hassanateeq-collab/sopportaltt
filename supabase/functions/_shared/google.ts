@@ -150,6 +150,20 @@ export async function downloadFromDrive(token: string, fileId: string): Promise<
   return await res.arrayBuffer()
 }
 
+/** Download a file's bytes AND its content type (so the portal can stream it
+ * through itself, without ever exposing a Google Drive URL to the browser). */
+export async function downloadFromDriveTyped(
+  token: string,
+  fileId: string,
+): Promise<{ bytes: ArrayBuffer; contentType: string }> {
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Drive download failed: ${await res.text()}`)
+  const contentType = res.headers.get('content-type') ?? 'application/octet-stream'
+  return { bytes: await res.arrayBuffer(), contentType }
+}
+
 /** Delete a file from Drive. A missing file (404) is treated as already gone. */
 export async function deleteFromDrive(token: string, fileId: string): Promise<void> {
   const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`, {

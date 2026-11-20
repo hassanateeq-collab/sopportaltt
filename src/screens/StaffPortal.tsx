@@ -24,6 +24,8 @@ import { playChime, showBanner, unlockAudio, ensureNotifyPermission, notifyEnabl
 import { DocIcon, TestIcon } from '../components/icons'
 import { PolicySectionIcon } from '../components/icons'
 import { PolicyPage } from '../components/PolicyPage'
+import { PolicyDocFrame } from '../components/DocFrame'
+import { isSupabaseEnabled } from '../lib/supabase'
 import { Viewer } from '../components/Viewer'
 import { TestRunner } from './TestRunner'
 
@@ -193,7 +195,9 @@ export function StaffPortal({ staff, token, onLogout }: { staff: Staff; token: s
               <button className="v-close" onClick={() => setPolicyView(null)} aria-label="Close">✕</button>
             </div>
             <div className="card-body">
-              <PolicyPage policy={policyView} />
+              {isSupabaseEnabled && policyView.document_file_id
+                ? <PolicyDocFrame policyId={policyView.id} staffToken={token} title={`${policyView.code} document`} />
+                : <PolicyPage policy={policyView} />}
               <StaffPolicyAck policy={policyView} staff={staff} token={token} />
             </div>
           </div>

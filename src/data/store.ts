@@ -1294,6 +1294,42 @@ async function callAdminFn(name: string, body: Record<string, unknown>): Promise
   return j
 }
 
+/**
+ * Fetch a policy's uploaded document as an in-portal object URL. The bytes are
+ * streamed through the policy-view Edge Function (as the signed-in manager/admin),
+ * so the browser never sees a Google Drive URL — only a local `blob:` the inline
+ * viewer renders. The caller revokes the URL when done.
+ */
+export async function fetchPolicyDocUrl(policyId: string): Promise<string> {
+  const headers = await adminFnHeaders()
+  const res = await fetch(`${functionsBase}/policy-view`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ id: policyId }),
+  })
+  if (res.status === 404) throw new ApiError('Deploy the policy-view function first (see supabase/SETUP.md).')
+  if (!res.ok) {
+    const j = (await res.json().catch(() => ({}))) as Record<string, unknown>
+    throw new ApiError((j.error as string) ?? 'Could not load the document.')
+  }
+  return URL.createObjectURL(await res.blob())
+}
+
+/** Staff variant of fetchPolicyDocUrl — carries the opaque staff token. */
+export async function fetchStaffPolicyDocUrl(policyId: string, token: string): Promise<string> {
+  const res = await fetch(`${functionsBase}/policy-view`, {
+    method: 'POST',
+    headers: staffFnHeaders(),
+    body: JSON.stringify({ id: policyId, token }),
+  })
+  if (res.status === 404) throw new ApiError('Deploy the policy-view function first (see supabase/SETUP.md).')
+  if (!res.ok) {
+    const j = (await res.json().catch(() => ({}))) as Record<string, unknown>
+    throw new ApiError((j.error as string) ?? 'Could not load the document.')
+  }
+  return URL.createObjectURL(await res.blob())
+}
+
 async function seed(): Promise<void> {
   const created_at = nowIso()
   const staff: Staff[] = []

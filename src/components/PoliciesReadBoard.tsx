@@ -14,11 +14,7 @@ import { PolicyReader } from './PolicyReader'
 export function PoliciesReadBoard({ actor }: { actor: Actor }) {
   useStore()
   const [reading, setReading] = useState<Policy | null>(null)
-
-  if (reading) {
-    const fresh = read.policies().find((p) => p.id === reading.id) ?? reading
-    return <PolicyReader actor={actor} policy={fresh} onBack={() => setReading(null)} />
-  }
+  const fresh = reading ? read.policies().find((p) => p.id === reading.id) ?? reading : null
 
   const departments = read.departments().slice().sort((a, b) => a.code.localeCompare(b.code))
   const published = read.policies().filter((p) => p.status === 'published')
@@ -60,6 +56,20 @@ export function PoliciesReadBoard({ actor }: { actor: Actor }) {
           </details>
         )
       })}
+
+      {fresh && (
+        <div className="modal-scrim" onClick={() => setReading(null)}>
+          <div className="modal-card" style={{ maxWidth: 940 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <span><SopSectionIcon /> {fresh.code} — {fresh.title}</span>
+              <button className="v-close" onClick={() => setReading(null)} aria-label="Close">✕</button>
+            </div>
+            <div className="card-body">
+              <PolicyReader actor={actor} policy={fresh} onBack={() => setReading(null)} inModal />
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

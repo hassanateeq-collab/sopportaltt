@@ -304,7 +304,39 @@ async function listPolicies(admin: SupabaseClient, req: Request): Promise<Respon
   if (status) q = q.eq('status', status)
   const { data, error } = await q.order('code')
   if (error) return json({ error: error.message }, 500)
-  return json({ policies: ((data ?? []) as Row[]).map((p) => shapePolicy(p, dById)) })
+
+  const rows = (data ?? []) as Row[]
+
+  // Attach who has acknowledged each policy's CURRENT version (name, role, when).
+  const acksByPolicy = new Map<string, Row[]>()
+  const ids = rows.map((r) => r.id)
+  if (ids.length) {
+    const { data: acks, error: ackErr } = await admin
+      .from('policy_acknowledgments')
+      .select('policy_id, name, role, version, acknowledged_at')
+      .in('policy_id', ids)
+    if (!ackErr) {
+      for (const a of (acks ?? []) as Row[]) {
+        if (!acksByPolicy.has(a.policy_id)) acksByPolicy.set(a.policy_id, [])
+        acksByPolicy.get(a.policy_id)!.push(a)
+      }
+    }
+  }
+
+  const policies = rows.map((p) => {
+    const current = (acksByPolicy.get(p.id) ?? [])
+      .filter((a) => a.version === p.version)
+      .sort((a, b) => new Date(a.acknowledged_at).getTime() - new Date(b.acknowledged_at).getTime())
+    return {
+      ...shapePolicy(p, dById),
+      acknowledgments: {
+        version: p.version,
+        count: current.length,
+        people: current.map((a) => ({ name: a.name, role: a.role, acknowledged_at: a.acknowledged_at })),
+      },
+    }
+  })
+  return json({ policies })
 }
 
 async function createPolicy(admin: SupabaseClient, req: Request): Promise<Response> {
@@ -358,14 +390,8 @@ async function createPolicy(admin: SupabaseClient, req: Request): Promise<Respon
   const docId = await uploadToDrive(token, folderId!, `${code} — ${title}.${ext}`, mime, await file.arrayBuffer())
   await makeViewOnly(token, docId)
 
-  // Give the in-portal reader something to show (the real document is the file).
-  const link = driveUrl(docId)
-  const policyDoc = {
-    body: `<p>This policy was published from the connected portal. <a href="${link}">Open the policy document</a>.</p>`,
-    purpose: summary,
-    appliesTo: '',
-  }
-
+  // The uploaded file IS the policy document; the portal streams it inline
+  // (policy-view) with no Drive/external link, so no stub content is stored.
   const { data: policy, error } = await admin
     .from('policies')
     .insert({
@@ -373,7 +399,7 @@ async function createPolicy(admin: SupabaseClient, req: Request): Promise<Respon
       title,
       summary,
       department_id: dept.id,
-      policy_doc: policyDoc,
+      policy_doc: null,
       document_file_id: docId,
       version: 1,
       status: 'published',

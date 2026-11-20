@@ -1022,6 +1022,25 @@ h2.section {
   display: block;
 }
 
+/* In-portal document viewer (policy-view blob): no Google Drive / external chrome. */
+.docframe {
+  width: 100%;
+  height: 70vh;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: #fff;
+  display: block;
+}
+
+.docframe-load {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 40vh;
+  color: var(--ink-soft);
+}
+
 .v-frame-wrap {
   position: relative;
   height: 100%;
@@ -1953,6 +1972,29 @@ details.board > summary .hint {
   padding: 16px 14px;
   font-size: 12.5px;
   color: var(--ink-soft);
+}
+
+/* Clickable notification rows (management bell jumps to the item). */
+.np-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.np-item:hover .np-item-title {
+  color: var(--brass-deep);
+}
+
+.np-item-title {
+  display: block;
+  font-weight: 600;
 }
 
 /* --------------------------------------------------------------- toast -- */

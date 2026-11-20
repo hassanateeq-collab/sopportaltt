@@ -158,11 +158,26 @@ curl -s "$BASE/policies?status=published" -H "x-api-key: $KEY"
       "document_url": "https://drive.google.com/file/d/<id>/view",
       "published_by": "Nida Farooq",
       "updated_at": "2026-02-11T10:00:00.000Z",
-      "created_at": "2026-02-11T10:00:00.000Z"
+      "created_at": "2026-02-11T10:00:00.000Z",
+      "acknowledgments": {
+        "version": 1,
+        "count": 1,
+        "people": [
+          { "name": "Altamash", "role": "manager", "acknowledged_at": "2026-02-12T07:30:00.000Z" }
+        ]
+      }
     }
   ]
 }
 ```
+
+**Acknowledgments.** Each policy carries who has read & acknowledged its **current
+version** — `count` plus a `people` array of `{ name, role, acknowledged_at }`.
+`role` is one of `admin`, `hr`, `manager`, `branch_manager`, or `staff`. When
+someone clicks **Read & acknowledge** in this portal, they appear here on the
+next read, so the other portal can display e.g. "Altamash has acknowledged." (A
+re‑issue bumps `version` and reopens the obligation, so the list resets.) The
+other portal sees changes by re‑reading this endpoint — there is no push/webhook.
 
 ### `POST /policies` — publish a policy
 

@@ -6,7 +6,9 @@ import { MANAGER_ROLE_LABELS, POLICY_STATUS_LABELS } from '../types'
 import { useStore } from '../lib/useStore'
 import { fmt } from '../lib/format'
 import { toast } from '../lib/toast'
+import { isSupabaseEnabled } from '../lib/supabase'
 import { PolicyPage } from './PolicyPage'
+import { PolicyDocFrame } from './DocFrame'
 
 /**
  * Read a policy inline, with the acknowledgment controls. The admin and managers
@@ -14,7 +16,7 @@ import { PolicyPage } from './PolicyPage'
  * current version. `canAcknowledge` is false for HR (they publish, they don't
  * sign) and for drafts.
  */
-export function PolicyReader({ actor, policy, onBack }: { actor: Actor; policy: Policy; onBack: () => void }) {
+export function PolicyReader({ actor, policy, onBack, inModal }: { actor: Actor; policy: Policy; onBack: () => void; inModal?: boolean }) {
   useStore()
   const [busy, setBusy] = useState(false)
   const dept = read.department(policy.department_id)
@@ -41,16 +43,20 @@ export function PolicyReader({ actor, policy, onBack }: { actor: Actor; policy: 
 
   return (
     <>
-      <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <button className="btn backbtn" style={{ margin: 0 }} onClick={onBack}>← Back to Policies</button>
-        <span className="brow-title" style={{ fontSize: 16 }}>
-          <span className="ver">{policy.code}</span> {policy.title} <span className="ver">v{policy.version}</span>
-        </span>
-        <span className={`apchip ap-${policy.status === 'published' ? 'authorized' : 'draft'}`}>{POLICY_STATUS_LABELS[policy.status]}</span>
-        {dept && <span className="ver">{dept.name}</span>}
-      </div>
+      {!inModal && (
+        <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button className="btn backbtn" style={{ margin: 0 }} onClick={onBack}>← Back to Policies</button>
+          <span className="brow-title" style={{ fontSize: 16 }}>
+            <span className="ver">{policy.code}</span> {policy.title} <span className="ver">v{policy.version}</span>
+          </span>
+          <span className={`apchip ap-${policy.status === 'published' ? 'authorized' : 'draft'}`}>{POLICY_STATUS_LABELS[policy.status]}</span>
+          {dept && <span className="ver">{dept.name}</span>}
+        </div>
+      )}
 
-      <PolicyPage policy={policy} />
+      {isSupabaseEnabled && policy.document_file_id
+        ? <PolicyDocFrame policyId={policy.id} title={`${policy.code} document`} />
+        : <PolicyPage policy={policy} />}
 
       {canAcknowledge && (
         <div className="row" style={{ marginTop: 16, gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>

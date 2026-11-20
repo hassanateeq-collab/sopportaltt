@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { initStore, api, read, getResumedActor, actorName, hasAckedPolicy } from './data/store'
+import { initStore, api, read, getResumedActor, actorName } from './data/store'
 import type { Actor } from './data/store'
 import type { Staff } from './types'
 import { useStore } from './lib/useStore'
@@ -8,21 +8,11 @@ import { StaffPortal } from './screens/StaffPortal'
 import { ManagerLogin } from './screens/ManagerLogin'
 import { ManagerPortal } from './screens/ManagerPortal'
 import { NotificationBell } from './components/NotificationBell'
-import { BellIcon } from './components/icons'
+import { MgmtNotificationBell } from './components/MgmtNotificationBell'
 import { Toaster } from './lib/toast'
 
 type Section = 'staff' | 'mgmt'
 const STAFF_TOKEN_KEY = 'hamsun-sop-portal/staff-token'
-
-/** What the management notification bell counts, and where it jumps to. */
-function mgmtBell(actor: Actor): { count: number; target: string; title: string } {
-  // HR publishes policies and reviews SOPs; nothing for them to acknowledge.
-  if (actor.kind === 'manager' && actor.manager.role === 'hr') {
-    return { count: 0, target: 'approvals', title: 'SOP review' }
-  }
-  const n = read.policies().filter((p) => p.status === 'published' && !hasAckedPolicy(actor, p)).length
-  return { count: n, target: 'policies', title: n ? `${n} polic${n === 1 ? 'y' : 'ies'} to acknowledge` : 'Policies' }
-}
 
 export function App() {
   const [ready, setReady] = useState(false)
@@ -81,25 +71,16 @@ export function App() {
             {ready && section === 'staff' && staffSession && (
               <span className="bell-slot"><NotificationBell staffId={staffSession.staff.id} token={staffSession.token} /></span>
             )}
-            {ready && section === 'mgmt' && actor && (() => {
-              const b = mgmtBell(actor)
-              return (
-                <>
-                  <span className="topuser">{actorName(actor)}</span>
-                  <button
-                    type="button"
-                    className="reviewbell"
-                    title={b.title}
-                    aria-label={b.title}
-                    onClick={() => setMgmtNav({ page: b.target, nonce: Date.now() })}
-                  >
-                    <BellIcon />
-                    {b.count > 0 && <span className="reviewbell-badge">{b.count}</span>}
-                  </button>
-                  <button className="btn sm" onClick={logoutMgmt}>Sign out</button>
-                </>
-              )
-            })()}
+            {ready && section === 'mgmt' && actor && (
+              <>
+                <span className="topuser">{actorName(actor)}</span>
+                <MgmtNotificationBell
+                  actor={actor}
+                  onNavigate={(page) => setMgmtNav({ page, nonce: Date.now() })}
+                />
+                <button className="btn sm" onClick={logoutMgmt}>Sign out</button>
+              </>
+            )}
           </div>
         </div>
       </header>
