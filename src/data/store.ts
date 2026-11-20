@@ -1302,12 +1302,17 @@ async function callAdminFn(name: string, body: Record<string, unknown>): Promise
  */
 export async function fetchPolicyDocUrl(policyId: string): Promise<string> {
   const headers = await adminFnHeaders()
-  const res = await fetch(`${functionsBase}/policy-view`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ id: policyId }),
-  })
-  if (res.status === 404) throw new ApiError('Deploy the policy-view function first (see supabase/SETUP.md).')
+  let res: Response
+  try {
+    res = await fetch(`${functionsBase}/policy-view`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ id: policyId }),
+    })
+  } catch {
+    throw new ApiError('Couldn’t reach the policy-view function — deploy it (see supabase/SETUP.md), then reload.')
+  }
+  if (res.status === 404) throw new ApiError('The policy-view function isn’t deployed yet (see supabase/SETUP.md).')
   if (!res.ok) {
     const j = (await res.json().catch(() => ({}))) as Record<string, unknown>
     throw new ApiError((j.error as string) ?? 'Could not load the document.')
@@ -1317,12 +1322,17 @@ export async function fetchPolicyDocUrl(policyId: string): Promise<string> {
 
 /** Staff variant of fetchPolicyDocUrl — carries the opaque staff token. */
 export async function fetchStaffPolicyDocUrl(policyId: string, token: string): Promise<string> {
-  const res = await fetch(`${functionsBase}/policy-view`, {
-    method: 'POST',
-    headers: staffFnHeaders(),
-    body: JSON.stringify({ id: policyId, token }),
-  })
-  if (res.status === 404) throw new ApiError('Deploy the policy-view function first (see supabase/SETUP.md).')
+  let res: Response
+  try {
+    res = await fetch(`${functionsBase}/policy-view`, {
+      method: 'POST',
+      headers: staffFnHeaders(),
+      body: JSON.stringify({ id: policyId, token }),
+    })
+  } catch {
+    throw new ApiError('Couldn’t reach the policy-view function — deploy it (see supabase/SETUP.md), then reload.')
+  }
+  if (res.status === 404) throw new ApiError('The policy-view function isn’t deployed yet (see supabase/SETUP.md).')
   if (!res.ok) {
     const j = (await res.json().catch(() => ({}))) as Record<string, unknown>
     throw new ApiError((j.error as string) ?? 'Could not load the document.')

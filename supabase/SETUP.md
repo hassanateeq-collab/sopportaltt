@@ -466,3 +466,23 @@ supabase link --project-ref ruqnjxxzeaazqohlpacx
 
 You can do Stage 1 entirely in the dashboard — the CLI isn't needed until we
 deploy Edge Functions.
+
+---
+
+## Policies & the Integration API (latest functions)
+
+```bash
+# Policies: HR authoring, acknowledgments, and the in-portal document viewer
+supabase functions deploy policy-publish   # HR publishes / re-issues a policy (+ notifies staff)
+supabase functions deploy policy-ack        # record a manager/admin acknowledgment
+supabase functions deploy policy-sign       # record a staff acknowledgment
+supabase functions deploy policy-view       # stream a policy's uploaded document INSIDE the portal (no Drive UI)
+
+# Integration API — a second portal reads/writes via x-api-key (deploy with --no-verify-jwt)
+supabase functions deploy api --no-verify-jwt
+```
+
+`policy-view` is deployed normally (it is called with a manager/admin JWT or, for
+staff, the anon key + their token). `api` must be deployed with `--no-verify-jwt`
+so the other portal only needs its `x-api-key`. The integration API and its setup
+are documented in `supabase/INTEGRATION_API.md`.
