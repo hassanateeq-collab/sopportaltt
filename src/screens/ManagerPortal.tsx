@@ -34,6 +34,7 @@ import { isInReview } from '../lib/approval'
 import { scopeIncludes } from '../lib/scope'
 import { certStatus, daysUntil } from '../lib/certs'
 import { fmtD } from '../lib/format'
+import { useBackNav } from '../lib/useBackNav'
 import { toast } from '../lib/toast'
 import { isSupabaseEnabled } from '../lib/supabase'
 import { DRIVE_DEPARTMENT_FOLDERS } from '../lib/drive'
@@ -56,7 +57,6 @@ import {
   ApprovalSectionIcon,
   SettingsSectionIcon,
   StatusSectionIcon,
-  BellIcon,
 } from '../components/icons'
 
 /**
@@ -67,15 +67,15 @@ import {
  */
 type Page = 'home' | 'sops' | 'policies' | 'training' | 'tests' | 'staff' | 'managers' | 'branches' | 'departments' | 'settings' | 'approvals' | 'status'
 
-export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
+export function ManagerPortal({ actor, navTo }: { actor: Actor; navTo: { page: string; nonce: number } | null }) {
   // A branch manager gets a trimmed, read-only + comment portal; HR gets the
   // Policies-only portal. (Early returns before any hooks — a mount is always one
   // kind of actor, so hook order stays stable.)
   if (actor.kind === 'manager' && actor.manager.role === 'branch_manager') {
-    return <BranchManagerPortal actor={actor} onLogout={onLogout} />
+    return <BranchManagerPortal actor={actor} navTo={navTo} />
   }
   if (actor.kind === 'manager' && actor.manager.role === 'hr') {
-    return <HrPortal actor={actor} onLogout={onLogout} />
+    return <HrPortal actor={actor} navTo={navTo} />
   }
 
   const isAdmin = actor.kind === 'admin'
@@ -91,6 +91,21 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
   const [reading, setReading] = useState<Sop | null>(null)
   const [editing, setEditing] = useState<Sop | null>(null)
   const [page, setPage] = useState<Page>('home')
+
+  // The header's notification bell jumps here via a nav signal.
+  useEffect(() => {
+    if (navTo) setPage(navTo.page as Page)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navTo?.nonce])
+
+  // Browser Back unwinds the deepest open view.
+  const navDepth = (page !== 'home' ? 1 : 0) + (reading ? 1 : 0) + (editing ? 1 : 0) + (viewer ? 1 : 0)
+  useBackNav(navDepth, () => {
+    if (viewer) setViewer(null)
+    else if (editing) setEditing(null)
+    else if (reading) setReading(null)
+    else if (page !== 'home') setPage('home')
+  })
 
   const branch = read.branchByCode(aBranch)
   const dept = isAdmin ? read.department(aDept) : read.department(actor.manager.department_id ?? '')
@@ -134,7 +149,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
 
   // The "Viewing branch" picker only matters for branch-dependent views: the
   // staff roster (staff belong to a branch) and, for an admin, test scores.
-  const showBranchOnPage = page !== 'home' && (page === 'staff' || (isAdmin && page === 'tests'))
+  const showBranchOnPage = page !== 'home' && (page === 'staff' || page === 'training' || (isAdmin && page === 'tests'))
   const branchSelect = (
     <div className="filters">
       <div className="field">
@@ -148,23 +163,10 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
     </div>
   )
 
-  const onSubPage = !reading && page !== 'home'
-
-  const menuBtn = onSubPage ? (
-    <button
-      className="btn backbtn"
-      style={{ margin: 0, flex: '0 0 auto', alignSelf: 'flex-end' }}
-      onClick={() => setPage('home')}
-    >
-      ← Menu
-    </button>
-  ) : null
-
   return (
     <>
       {isAdmin ? (
         <div className="filters">
-          {menuBtn}
           <div className="field">
             <label htmlFor="a-dept">Department</label>
             <select id="a-dept" value={aDept} onChange={(e) => setADept(e.target.value)}>
@@ -173,20 +175,12 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
               ))}
             </select>
           </div>
-          <div className="field" style={{ flex: '0 0 auto', alignSelf: 'flex-end', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <ReviewBell count={pendingApprovals} onClick={() => setPage('approvals')} />
-            <button className="btn" onClick={onLogout}>Sign out</button>
-          </div>
         </div>
       ) : (
         <div className="crumbs">
-          {menuBtn}
-          <span className="here">{actor.manager.name} — {dept.name} Manager</span>
+          <span className="here">{dept.name} Manager</span>
           <span className="sep">·</span>
           <span className="here">all branches</span>
-          <span className="who">
-            <button onClick={onLogout} style={{ color: 'var(--pine)', fontWeight: 600 }}>Sign out</button>
-          </span>
         </div>
       )}
 
@@ -218,7 +212,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
         ) : (
           <>
             <div className="mtiles">
-              {[sopTile, policyTile, testTile, staffTile].map(renderTile)}
+              {[sopTile, policyTile, trainingTile, testTile, staffTile].map(renderTile)}
               {renderTile(statusTile)}
             </div>
             {branchSelect}
@@ -238,7 +232,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
 
           {page === 'policies' && <PoliciesReadBoard actor={actor} />}
 
-          {page === 'training' && isAdmin && <TrainingRecordsBoard actor={actor} />}
+          {page === 'training' && <TrainingRecordsBoard actor={actor} deptId={dept.id} branchId={branch.id} />}
 
           {page === 'tests' && (
             <>
@@ -818,26 +812,6 @@ function SopBoard({
         })
       )}
     </details>
-  )
-}
-
-/**
- * A bell that flags how many SOPs are waiting on the signed-in reviewer/admin.
- * The badge count is the notification — it appears the moment an SOP reaches
- * their stage of the chain.
- */
-function ReviewBell({ count, onClick }: { count: number; onClick?: () => void }) {
-  return (
-    <button
-      type="button"
-      className="reviewbell"
-      onClick={onClick}
-      title={count ? `${count} SOP${count === 1 ? '' : 's'} awaiting your approval` : 'No approvals pending'}
-      aria-label={count ? `${count} SOPs awaiting your approval` : 'Approvals'}
-    >
-      <BellIcon />
-      {count > 0 && <span className="reviewbell-badge">{count > 9 ? '9+' : count}</span>}
-    </button>
   )
 }
 

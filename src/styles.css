@@ -2473,3 +2473,30 @@ details.board > summary .hint {
   outline: 2px solid var(--focus);
   outline-offset: 1px;
 }
+
+/* ------------------------------------------------- top-bar right cluster */
+
+.topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.topbar-right .seg {
+  margin-left: 0;
+}
+.topuser {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 560px) {
+  .topuser {
+    display: none;
+  }
+}

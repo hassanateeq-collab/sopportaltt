@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { initStore, api, read, getResumedActor } from './data/store'
+import { initStore, api, read, getResumedActor, actorName, hasAckedPolicy } from './data/store'
 import type { Actor } from './data/store'
 import type { Staff } from './types'
 import { useStore } from './lib/useStore'
@@ -8,17 +8,34 @@ import { StaffPortal } from './screens/StaffPortal'
 import { ManagerLogin } from './screens/ManagerLogin'
 import { ManagerPortal } from './screens/ManagerPortal'
 import { NotificationBell } from './components/NotificationBell'
+import { BellIcon } from './components/icons'
 import { Toaster } from './lib/toast'
 
 type Section = 'staff' | 'mgmt'
 const STAFF_TOKEN_KEY = 'hamsun-sop-portal/staff-token'
+
+/** What the management notification bell counts, and where it jumps to. */
+function mgmtBell(actor: Actor): { count: number; target: string; title: string } {
+  if (actor.kind === 'admin' || actor.manager.role === 'hr') {
+    const n = read.sops().filter((s) => s.approval_status === 'admin_review').length
+    return { count: n, target: 'approvals', title: n ? `${n} SOP${n === 1 ? '' : 's'} awaiting review` : 'SOP approvals' }
+  }
+  const n = read.policies().filter((p) => p.status === 'published' && !hasAckedPolicy(actor, p)).length
+  return { count: n, target: 'policies', title: n ? `${n} polic${n === 1 ? 'y' : 'ies'} to acknowledge` : 'Policies' }
+}
 
 export function App() {
   const [ready, setReady] = useState(false)
   const [section, setSection] = useState<Section>('staff')
   const [staffSession, setStaffSession] = useState<{ staff: Staff; token: string } | null>(null)
   const [actor, setActor] = useState<Actor | null>(null)
+  const [mgmtNav, setMgmtNav] = useState<{ page: string; nonce: number } | null>(null)
   useStore()
+
+  const logoutMgmt = () => {
+    void api.managerLogout()
+    setActor(null)
+  }
 
   useEffect(() => {
     let active = true
@@ -52,19 +69,38 @@ export function App() {
             <span className="brand">HAMSUN</span>
             <span className="app">SOP Portal</span>
           </div>
-          <div className="seg" role="group" aria-label="View">
-            <button aria-pressed={section === 'staff'} onClick={() => setSection('staff')}>
-              Staff
-            </button>
-            <button aria-pressed={section === 'mgmt'} onClick={() => setSection('mgmt')}>
-              {mgmtLabel}
-            </button>
-          </div>
-          <span className="bell-slot">
+          <div className="topbar-right">
+            <div className="seg" role="group" aria-label="View">
+              <button aria-pressed={section === 'staff'} onClick={() => setSection('staff')}>
+                Staff
+              </button>
+              <button aria-pressed={section === 'mgmt'} onClick={() => setSection('mgmt')}>
+                {mgmtLabel}
+              </button>
+            </div>
             {ready && section === 'staff' && staffSession && (
-              <NotificationBell staffId={staffSession.staff.id} token={staffSession.token} />
+              <span className="bell-slot"><NotificationBell staffId={staffSession.staff.id} token={staffSession.token} /></span>
             )}
-          </span>
+            {ready && section === 'mgmt' && actor && (() => {
+              const b = mgmtBell(actor)
+              return (
+                <>
+                  <span className="topuser">{actorName(actor)}</span>
+                  <button
+                    type="button"
+                    className="reviewbell"
+                    title={b.title}
+                    aria-label={b.title}
+                    onClick={() => setMgmtNav({ page: b.target, nonce: Date.now() })}
+                  >
+                    <BellIcon />
+                    {b.count > 0 && <span className="reviewbell-badge">{b.count}</span>}
+                  </button>
+                  <button className="btn sm" onClick={logoutMgmt}>Sign out</button>
+                </>
+              )
+            })()}
+          </div>
         </div>
       </header>
 
@@ -93,13 +129,7 @@ export function App() {
             />
           )
         ) : actor ? (
-          <ManagerPortal
-            actor={actor}
-            onLogout={() => {
-              void api.managerLogout()
-              setActor(null)
-            }}
-          />
+          <ManagerPortal actor={actor} navTo={mgmtNav} />
         ) : (
           <ManagerLogin onLoggedIn={(a) => setActor(a)} />
         )}

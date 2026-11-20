@@ -6,6 +6,7 @@ import type { Actor } from '../data/store'
 import type { Policy, Sop, SopDoc } from '../types'
 import { POLICY_STATUS_LABELS, APPROVAL_STATUS_LABELS } from '../types'
 import { useStore } from '../lib/useStore'
+import { useBackNav } from '../lib/useBackNav'
 import { fmtD } from '../lib/format'
 import { toast } from '../lib/toast'
 import { SopEditor } from '../components/SopEditor'
@@ -20,37 +21,32 @@ type Page = 'home' | 'policies' | 'approvals' | 'training'
  * they can SEE — read-only — every department's SOP approvals and every branch's
  * assessment results (the training records). HR never writes SOPs, tests or staff.
  */
-export function HrPortal({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
+export function HrPortal({ actor, navTo }: { actor: Actor; navTo: { page: string; nonce: number } | null }) {
   useStore()
   const [page, setPage] = useState<Page>('home')
   const [reading, setReading] = useState<Policy | null>(null)
   const [composing, setComposing] = useState<'new' | Policy | null>(null)
-  const name = actor.kind === 'manager' ? actor.manager.name : ''
 
-  const header = (back?: () => void) => (
-    <div className="crumbs">
-      {back && <button className="btn backbtn" style={{ margin: 0 }} onClick={back}>← {reading ? 'Back' : 'Menu'}</button>}
-      <span className="here">{name} — HR</span>
-      <span className="who">
-        <button onClick={onLogout} style={{ color: 'var(--pine)', fontWeight: 600 }}>Sign out</button>
-      </span>
-    </div>
-  )
+  useEffect(() => {
+    if (navTo) setPage(navTo.page as Page)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navTo?.nonce])
+
+  const navDepth = (page !== 'home' ? 1 : 0) + (reading ? 1 : 0) + (composing ? 1 : 0)
+  useBackNav(navDepth, () => {
+    if (composing) setComposing(null)
+    else if (reading) setReading(null)
+    else if (page !== 'home') setPage('home')
+  })
 
   if (reading) {
     const fresh = read.policies().find((p) => p.id === reading.id) ?? reading
-    return (
-      <>
-        {header()}
-        <PolicyReader actor={actor} policy={fresh} onBack={() => setReading(null)} />
-      </>
-    )
+    return <PolicyReader actor={actor} policy={fresh} onBack={() => setReading(null)} />
   }
 
   if (page !== 'home') {
     return (
       <>
-        {header(() => setPage('home'))}
         {page === 'policies' && (
           <HrPolicies actor={actor} onRead={(p) => setReading(p)} onCompose={(c) => setComposing(c)} />
         )}
@@ -78,7 +74,6 @@ export function HrPortal({ actor, onLogout }: { actor: Actor; onLogout: () => vo
 
   return (
     <>
-      {header()}
       <p className="demo-hint" style={{ marginBottom: 14 }}>
         Write and publish company policies, and review SOP approvals and training records across every branch.
       </p>

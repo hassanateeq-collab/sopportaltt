@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   read,
@@ -11,6 +11,7 @@ import type { Sop, Staff, Department } from '../types'
 import { APPROVAL_STATUS_LABELS } from '../types'
 import type { ApprovalStatus } from '../types'
 import { useStore } from '../lib/useStore'
+import { useBackNav } from '../lib/useBackNav'
 import { certStatus, daysUntil } from '../lib/certs'
 import { fmtD } from '../lib/format'
 import { SopPage } from '../components/SopPage'
@@ -27,10 +28,21 @@ type Page = 'home' | 'sops' | 'policies' | 'results'
  * their own branch (across every department). They never author, approve, assign,
  * or manage anyone.
  */
-export function BranchManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
+export function BranchManagerPortal({ actor, navTo }: { actor: Actor; navTo: { page: string; nonce: number } | null }) {
   useStore()
   const [page, setPage] = useState<Page>('home')
   const [reading, setReading] = useState<Sop | null>(null)
+
+  useEffect(() => {
+    if (navTo) setPage(navTo.page as Page)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navTo?.nonce])
+
+  const navDepth = (page !== 'home' ? 1 : 0) + (reading ? 1 : 0)
+  useBackNav(navDepth, () => {
+    if (reading) setReading(null)
+    else if (page !== 'home') setPage('home')
+  })
 
   const branchId = actor.kind === 'manager' ? actor.manager.branch_id : null
   const branch = branchId ? read.branch(branchId) : null
@@ -45,10 +57,7 @@ export function BranchManagerPortal({ actor, onLogout }: { actor: Actor; onLogou
       <>
         <div className="crumbs">
           <button className="btn backbtn" style={{ margin: 0 }} onClick={() => setReading(null)}>← Back to SOPs</button>
-          <span className="here">{actor.kind === 'manager' ? actor.manager.name : ''} — {branch.name} Branch Manager</span>
-          <span className="who">
-            <button onClick={onLogout} style={{ color: 'var(--pine)', fontWeight: 600 }}>Sign out</button>
-          </span>
+          <span className="here">{branch.name} Branch Manager</span>
         </div>
         <SopReadOnly sop={reading} />
         <SopComments actor={actor} sopId={reading.id} />
@@ -63,19 +72,10 @@ export function BranchManagerPortal({ actor, onLogout }: { actor: Actor; onLogou
     { key: 'results', icon: <StatusSectionIcon />, title: 'Assessment results', sub: `${staffCount} staff at ${branch.name}` },
   ]
 
-  const onSubPage = page !== 'home'
-  const menuBtn = onSubPage ? (
-    <button className="btn backbtn" style={{ margin: 0 }} onClick={() => setPage('home')}>← Menu</button>
-  ) : null
-
   return (
     <>
       <div className="crumbs">
-        {menuBtn}
-        <span className="here">{actor.kind === 'manager' ? actor.manager.name : ''} — {branch.name} Branch Manager</span>
-        <span className="who">
-          <button onClick={onLogout} style={{ color: 'var(--pine)', fontWeight: 600 }}>Sign out</button>
-        </span>
+        <span className="here">{branch.name} Branch Manager</span>
       </div>
 
       {page === 'home' ? (
