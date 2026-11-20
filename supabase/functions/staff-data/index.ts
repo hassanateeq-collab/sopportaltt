@@ -84,6 +84,22 @@ Deno.serve(async (req) => {
       admin.from('notifications').select('*').eq('staff_id', staff.id),
     ])
 
+    // Policies this person must read & acknowledge (their department's published
+    // policies) plus their own acknowledgments. Tolerant of the tables not
+    // existing yet (migrations 0012/0014 not run).
+    let policies: unknown[] = []
+    let policyAcknowledgments: unknown[] = []
+    try {
+      const [{ data: pols }, { data: pAcks }] = await Promise.all([
+        admin.from('policies').select('*').eq('department_id', staff.department_id).eq('status', 'published'),
+        admin.from('policy_acknowledgments').select('*').eq('staff_id', staff.id),
+      ])
+      policies = pols ?? []
+      policyAcknowledgments = pAcks ?? []
+    } catch (_) {
+      /* policy tables not migrated yet */
+    }
+
     // Re-select the staff row through the non-secret column list, defensively.
     const { data: selfRow } = await admin.from('staff').select(STAFF_COLUMNS).eq('id', staff.id).maybeSingle()
 
@@ -100,6 +116,8 @@ Deno.serve(async (req) => {
       certifications: certifications ?? [],
       grants: grants ?? [],
       notifications: notifications ?? [],
+      policies,
+      policyAcknowledgments,
     })
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : 'Could not load your portal.' }, 500)

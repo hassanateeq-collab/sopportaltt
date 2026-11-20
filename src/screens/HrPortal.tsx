@@ -4,13 +4,14 @@ import type { Editor } from '@tiptap/react'
 import { api, read, policyAcksFor, policyAckAudienceCount, ApiError } from '../data/store'
 import type { Actor } from '../data/store'
 import type { Policy, Sop, SopDoc } from '../types'
-import { POLICY_STATUS_LABELS, APPROVAL_STATUS_LABELS } from '../types'
+import { POLICY_STATUS_LABELS } from '../types'
 import { useStore } from '../lib/useStore'
 import { useBackNav } from '../lib/useBackNav'
-import { fmtD } from '../lib/format'
 import { toast } from '../lib/toast'
 import { SopEditor } from '../components/SopEditor'
 import { PolicyReader } from '../components/PolicyReader'
+import { SopPage } from '../components/SopPage'
+import { SopComments } from '../components/SopComments'
 import { TrainingRecordsBoard } from '../components/TrainingRecordsBoard'
 import { SopSectionIcon, PolicySectionIcon, AddSectionIcon, ApprovalSectionIcon, StatusSectionIcon } from '../components/icons'
 
@@ -25,6 +26,7 @@ export function HrPortal({ actor, navTo }: { actor: Actor; navTo: { page: string
   useStore()
   const [page, setPage] = useState<Page>('home')
   const [reading, setReading] = useState<Policy | null>(null)
+  const [readingSop, setReadingSop] = useState<Sop | null>(null)
   const [composing, setComposing] = useState<'new' | Policy | null>(null)
 
   useEffect(() => {
@@ -32,10 +34,11 @@ export function HrPortal({ actor, navTo }: { actor: Actor; navTo: { page: string
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navTo?.nonce])
 
-  const navDepth = (page !== 'home' ? 1 : 0) + (reading ? 1 : 0) + (composing ? 1 : 0)
+  const navDepth = (page !== 'home' ? 1 : 0) + (reading ? 1 : 0) + (readingSop ? 1 : 0) + (composing ? 1 : 0)
   useBackNav(navDepth, () => {
     if (composing) setComposing(null)
     else if (reading) setReading(null)
+    else if (readingSop) setReadingSop(null)
     else if (page !== 'home') setPage('home')
   })
 
@@ -44,13 +47,18 @@ export function HrPortal({ actor, navTo }: { actor: Actor; navTo: { page: string
     return <PolicyReader actor={actor} policy={fresh} onBack={() => setReading(null)} />
   }
 
+  if (readingSop) {
+    const fresh = read.sops().find((s) => s.id === readingSop.id) ?? readingSop
+    return <HrSopReview actor={actor} sop={fresh} onBack={() => setReadingSop(null)} />
+  }
+
   if (page !== 'home') {
     return (
       <>
         {page === 'policies' && (
           <HrPolicies actor={actor} onRead={(p) => setReading(p)} onCompose={(c) => setComposing(c)} />
         )}
-        {page === 'approvals' && <HrSopApprovals />}
+        {page === 'approvals' && <HrSopReviewList onOpen={(s) => setReadingSop(s)} />}
         {page === 'training' && <TrainingRecordsBoard actor={actor} />}
         {composing && (
           <PolicyEditorModal
@@ -65,17 +73,16 @@ export function HrPortal({ actor, navTo }: { actor: Actor; navTo: { page: string
   }
 
   const pubPolicies = read.policies().filter((p) => p.status === 'published').length
-  const pendingSops = read.sops().filter((s) => s.approval_status === 'admin_review').length
   const tiles: Array<{ key: Page; icon: ReactNode; title: string; sub: string }> = [
     { key: 'policies', icon: <PolicySectionIcon />, title: 'Policies', sub: `${pubPolicies} published · write & track` },
-    { key: 'approvals', icon: <ApprovalSectionIcon />, title: 'SOP approvals', sub: pendingSops ? `${pendingSops} with the admin` : 'every SOP’s status' },
+    { key: 'approvals', icon: <ApprovalSectionIcon />, title: 'SOP review', sub: 'read & comment on any SOP' },
     { key: 'training', icon: <StatusSectionIcon />, title: 'Training records', sub: 'every branch · assessments & PDFs' },
   ]
 
   return (
     <>
       <p className="demo-hint" style={{ marginBottom: 14 }}>
-        Write and publish company policies, and review SOP approvals and training records across every branch.
+        Write and publish company policies, review SOPs by commenting, and see training records across every branch.
       </p>
       <div className="mtiles">
         {tiles.map((t) => (
@@ -238,17 +245,17 @@ function PolicyEditorModal({ actor, policy, onClose, onSaved }: { actor: Actor; 
   )
 }
 
-/* -------------------------------------------------- SOP approvals (read) -- */
+/* ---------------------------------------------------------- SOP review -- */
 
-/** Read-only: where every SOP stands in the approval chain, across departments. */
-function HrSopApprovals() {
+/** Every SOP across departments; HR opens one to read it and leave comments. */
+function HrSopReviewList({ onOpen }: { onOpen: (s: Sop) => void }) {
   const departments = read.departments().slice().sort((a, b) => a.code.localeCompare(b.code))
   const sops = read.sops()
 
   return (
     <>
       <p className="demo-hint" style={{ marginBottom: 14 }}>
-        Where every SOP stands — HR sees the approval status across all departments (read-only).
+        Read any SOP and leave review comments on it — the department manager and the admin see them.
       </p>
       {departments.map((d) => {
         const list = sops.filter((s) => s.department_id === d.id).sort((a, b) => a.code.localeCompare(b.code))
@@ -256,21 +263,42 @@ function HrSopApprovals() {
         return (
           <details className="board" open key={d.id}>
             <summary><SopSectionIcon />{d.name}<span className="hint">{list.length} SOP{list.length === 1 ? '' : 's'}</span></summary>
-            {list.map((s: Sop) => (
-              <div className="brow" key={s.id}>
-                <div className="brow-top">
-                  <span className="brow-title">
-                    <span className="ver">{s.code}</span> {s.title} <span className="ver">v{s.version}</span>{' '}
-                    <span className={`apchip ap-${s.approval_status}`}>{APPROVAL_STATUS_LABELS[s.approval_status]}</span>
-                  </span>
-                  <span className="hint">{s.published_by ? `by ${s.published_by}` : ''}{s.updated_at ? ` · ${fmtD(s.updated_at)}` : ''}</span>
+            {list.map((s: Sop) => {
+              const comments = read.sopComments().filter((c) => c.sop_id === s.id).length
+              return (
+                <div className="brow" key={s.id}>
+                  <div className="brow-top">
+                    <span className="brow-title">
+                      <span className="ver">{s.code}</span> {s.title} <span className="ver">v{s.version}</span>
+                      {comments > 0 && <span className="vidchip" style={{ marginLeft: 6 }}>💬 {comments}</span>}
+                    </span>
+                    <button className="btn sm primary" onClick={() => onOpen(s)}>Read &amp; comment</button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </details>
         )
       })}
       {sops.length === 0 && <div className="board"><div className="empty-row">No SOPs yet.</div></div>}
+    </>
+  )
+}
+
+/** HR reads an SOP and comments on it. */
+function HrSopReview({ actor, sop, onBack }: { actor: Actor; sop: Sop; onBack: () => void }) {
+  const dept = read.department(sop.department_id)
+  return (
+    <>
+      <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button className="btn backbtn" style={{ margin: 0 }} onClick={onBack}>← Back to SOPs</button>
+        <span className="brow-title" style={{ fontSize: 16 }}>
+          <span className="ver">{sop.code}</span> {sop.title} <span className="ver">v{sop.version}</span>
+        </span>
+        {dept && <span className="ver">{dept.name}</span>}
+      </div>
+      {sop.sop_doc ? <SopPage sop={sop} /> : <div className="notice">This SOP has no in-portal document.</div>}
+      <SopComments actor={actor} sopId={sop.id} />
     </>
   )
 }

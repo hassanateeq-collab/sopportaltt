@@ -259,10 +259,12 @@ export interface Policy {
 export interface PolicyAcknowledgment {
   id: Uuid
   policy_id: Uuid
-  /** The managers-table id of the acknowledger, or null when it's the admin. */
+  /** The managers-table id of the acknowledger (null for an admin or a staff member). */
   manager_id: Uuid | null
+  /** The staff-table id when a staff member acknowledged (null otherwise). */
+  staff_id?: Uuid | null
   name: string
-  role: ManagerRole | 'admin'
+  role: ManagerRole | 'admin' | 'staff'
   version: number
   acknowledged_at: Iso
 }
@@ -366,6 +368,7 @@ export type NotificationKind =
   | 'test_assigned'
   | 'sop_published'
   | 'score_recorded'
+  | 'policy_published'
 
 export interface Notification {
   id: Uuid

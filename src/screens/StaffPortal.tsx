@@ -9,17 +9,21 @@ import {
   attemptPermission,
   openGrant,
   assignedTestsFor,
+  policiesForStaff,
+  hasStaffAckedPolicy,
   notificationsFor,
   refreshStaffData,
   ApiError,
 } from '../data/store'
-import type { Attempt, Certification, Sop, Staff, Test } from '../types'
+import type { Attempt, Certification, Policy, Sop, Staff, Test } from '../types'
 import { sopsForStaff } from '../lib/scope'
 import { certStatus, daysUntil } from '../lib/certs'
 import { fmt, fmtD } from '../lib/format'
 import { toast } from '../lib/toast'
 import { playChime, showBanner, unlockAudio, ensureNotifyPermission, notifyEnabled, notifyBlocked } from '../lib/notify'
 import { DocIcon, TestIcon } from '../components/icons'
+import { PolicySectionIcon } from '../components/icons'
+import { PolicyPage } from '../components/PolicyPage'
 import { Viewer } from '../components/Viewer'
 import { TestRunner } from './TestRunner'
 
@@ -34,6 +38,7 @@ export function StaffPortal({ staff, token, onLogout }: { staff: Staff; token: s
   const [view, setView] = useState<{ sop: Sop; kind: 'doc' | 'video'; justSigned?: boolean } | null>(null)
   const [testView, setTestView] = useState<string | null>(null)
   const [taking, setTaking] = useState<Test | null>(null)
+  const [policyView, setPolicyView] = useState<Policy | null>(null)
 
   // Poll for new department alerts (a new SOP or an assigned test). Each new
   // one plays a soft bell, shows an OS notification banner and an in-app toast.
@@ -71,6 +76,8 @@ export function StaffPortal({ staff, token, onLogout }: { staff: Staff; token: s
 
   const sops = useMemo(() => sopsForStaff(read.sops(), staff, branch.code), [staff, branch.code, read.sops()])
   const tests = useMemo(() => assignedTestsFor(staff), [staff, read.assignments(), read.tests()])
+  const policies = useMemo(() => policiesForStaff(staff), [staff, read.policies()])
+  const pendingPolicies = policies.filter((p) => !hasStaffAckedPolicy(staff.id, p)).length
 
   if (taking) {
     return (
@@ -131,6 +138,20 @@ export function StaffPortal({ staff, token, onLogout }: { staff: Staff; token: s
             <div className="allclear">No SOPs for this department at this branch yet.</div>
           )}
 
+          {policies.length > 0 && (
+            <>
+              <div className="duty-note">
+                <h2 className="section">My Policies</h2>
+                <span className="duty-count">{pendingPolicies} to acknowledge</span>
+              </div>
+              <div className="tilegrid">
+                {policies.map((p) => (
+                  <PolicyTile key={p.id} policy={p} staff={staff} onOpen={() => setPolicyView(p)} />
+                ))}
+              </div>
+            </>
+          )}
+
           <div className="duty-note">
             <h2 className="section">My tests &amp; scores</h2>
             <span className="duty-count">{tests.length} assigned</span>
@@ -162,6 +183,21 @@ export function StaffPortal({ staff, token, onLogout }: { staff: Staff; token: s
             />
           }
         />
+      )}
+
+      {policyView && (
+        <div className="modal-scrim" onClick={() => setPolicyView(null)}>
+          <div className="modal-card" style={{ maxWidth: 860 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <span><PolicySectionIcon /> {policyView.code} — {policyView.title}</span>
+              <button className="v-close" onClick={() => setPolicyView(null)} aria-label="Close">✕</button>
+            </div>
+            <div className="card-body">
+              <PolicyPage policy={policyView} />
+              <StaffPolicyAck policy={policyView} staff={staff} token={token} />
+            </div>
+          </div>
+        </div>
       )}
     </>
   )
@@ -222,6 +258,49 @@ function SopTile({ sop, staff, onOpen }: { sop: Sop; staff: Staff; onOpen: (kind
         ▶ Video
       </button>
     </div>
+  )
+}
+
+function PolicyTile({ policy, staff, onOpen }: { policy: Policy; staff: Staff; onOpen: () => void }) {
+  const acked = hasStaffAckedPolicy(staff.id, policy)
+  return (
+    <div className="tile">
+      <button className="tile-main" onClick={onOpen}>
+        <span className="kind"><PolicySectionIcon /></span>
+        <span className="t-title">{policy.title}</span>
+        <span className="ver">{policy.code} · v{policy.version}</span>
+        {acked ? <span className="chip signed">✓ Acknowledged</span> : <span className="chip pending">Read &amp; acknowledge</span>}
+      </button>
+    </div>
+  )
+}
+
+/** The acknowledge control inside the staff policy reader. */
+function StaffPolicyAck({ policy, staff, token }: { policy: Policy; staff: Staff; token: string }) {
+  const [busy, setBusy] = useState(false)
+  const acked = hasStaffAckedPolicy(staff.id, policy)
+  if (acked) {
+    return <div className="notice" style={{ marginTop: 14 }}>✓ You’ve acknowledged this policy (v{policy.version}).</div>
+  }
+  return (
+    <button
+      className="btn primary block"
+      style={{ marginTop: 14 }}
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true)
+        try {
+          await api.signPolicy(token, policy.id)
+          toast(`Acknowledged — ${policy.code}`)
+        } catch (e) {
+          toast(e instanceof ApiError ? e.message : 'Could not record your acknowledgment.')
+        } finally {
+          setBusy(false)
+        }
+      }}
+    >
+      {busy ? <span className="spinner" /> : 'Read & understood — acknowledge this policy'}
+    </button>
   )
 }
 

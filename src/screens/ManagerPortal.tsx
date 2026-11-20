@@ -14,8 +14,6 @@ import {
   attachSopVideo,
   removeSopVideo,
   downloadTestReport,
-  approvalQueue,
-  sopStatusList,
   hasAckedPolicy,
   orgStaffDirectory,
   listDriveFolders,
@@ -28,12 +26,10 @@ import { generateSopDocx, sopNumber, SOP_DOCX_MIME } from '../lib/sopdoc'
 import { SopEditor } from '../components/SopEditor'
 import type { Editor } from '@tiptap/react'
 import type { Branch, BranchScope, Department, Difficulty, Language, Manager, Sop, Staff, Test } from '../types'
-import { LANGUAGE_NAMES, APPROVAL_STATUS_LABELS } from '../types'
-import type { ApprovalStatus, ApprovalEvent } from '../types'
-import { isInReview } from '../lib/approval'
+import { LANGUAGE_NAMES } from '../types'
 import { scopeIncludes } from '../lib/scope'
 import { certStatus, daysUntil } from '../lib/certs'
-import { fmtD, fmt } from '../lib/format'
+import { fmtD } from '../lib/format'
 import { useBackNav } from '../lib/useBackNav'
 import { toast } from '../lib/toast'
 import { isSupabaseEnabled } from '../lib/supabase'
@@ -54,7 +50,6 @@ import {
   AddSectionIcon,
   BranchSectionIcon,
   DepartmentSectionIcon,
-  ApprovalSectionIcon,
   SettingsSectionIcon,
   StatusSectionIcon,
 } from '../components/icons'
@@ -65,7 +60,7 @@ import {
  * and also manages the org. The boards and forms are the same; only the scope
  * and the extra admin sections differ.
  */
-type Page = 'home' | 'sops' | 'policies' | 'training' | 'tests' | 'staff' | 'managers' | 'branches' | 'departments' | 'settings' | 'approvals' | 'status'
+type Page = 'home' | 'sops' | 'policies' | 'training' | 'tests' | 'staff' | 'managers' | 'branches' | 'departments' | 'settings'
 
 export function ManagerPortal({ actor, navTo }: { actor: Actor; navTo: { page: string; nonce: number } | null }) {
   // A branch manager gets a trimmed, read-only + comment portal; HR gets the
@@ -128,9 +123,6 @@ export function ManagerPortal({ actor, navTo }: { actor: Actor; navTo: { page: s
   const branchTile: TileDef = { key: 'branches', icon: <BranchSectionIcon />, title: 'Branches', sub: `${branches.length} · add, rename, status` }
   const deptTile: TileDef = { key: 'departments', icon: <DepartmentSectionIcon />, title: 'Departments', sub: `${departments.length} · add, rename, delete` }
   const settingsTile: TileDef = { key: 'settings', icon: <SettingsSectionIcon />, title: 'Settings', sub: 'Drive folders · SOP & test routing' }
-  const pendingApprovals = read.sops().filter((s) => s.approval_status === 'admin_review').length
-  const approvalsTile: TileDef = { key: 'approvals', icon: <ApprovalSectionIcon />, title: 'SOP approvals', sub: pendingApprovals ? `${pendingApprovals} awaiting your review` : 'review the SOP chain' }
-  const statusTile: TileDef = { key: 'status', icon: <StatusSectionIcon />, title: 'Status', sub: 'where every SOP & test stands' }
   const publishedPolicies = read.policies().filter((p) => p.status === 'published')
   const policiesPending = publishedPolicies.filter((p) => !hasAckedPolicy(actor, p)).length
   const policyTile: TileDef = { key: 'policies', icon: <PolicySectionIcon />, title: 'Policies', sub: policiesPending ? `${policiesPending} to acknowledge` : `${publishedPolicies.length} · read & acknowledge` }
@@ -201,7 +193,7 @@ export function ManagerPortal({ actor, navTo }: { actor: Actor; navTo: { page: s
                 you're viewing, so they sit above the branch picker. */}
             <div className="mtiles">
               {[sopTile, policyTile, trainingTile, managerTile].map(renderTile)}
-              {[approvalsTile, statusTile, branchTile, deptTile, settingsTile].map(renderTile)}
+              {[branchTile, deptTile, settingsTile].map(renderTile)}
             </div>
             {branchSelect}
             {/* Branch-dependent: staff and test scores for the selected branch. */}
@@ -213,7 +205,6 @@ export function ManagerPortal({ actor, navTo }: { actor: Actor; navTo: { page: s
           <>
             <div className="mtiles">
               {[sopTile, policyTile, trainingTile, testTile, staffTile].map(renderTile)}
-              {renderTile(statusTile)}
             </div>
             {branchSelect}
             <EmployeeResults dept={dept} branch={branch} />
@@ -263,8 +254,6 @@ export function ManagerPortal({ actor, navTo }: { actor: Actor; navTo: { page: s
           {page === 'branches' && isAdmin && <BranchAdmin actor={actor} />}
           {page === 'departments' && isAdmin && <DepartmentAdmin actor={actor} />}
           {page === 'settings' && isAdmin && <DriveSettings actor={actor} />}
-          {page === 'approvals' && isAdmin && <ApprovalsBoard actor={actor} />}
-          {page === 'status' && <StatusBoard actor={actor} />}
         </>
       )}
 
@@ -284,292 +273,14 @@ export function ManagerPortal({ actor, navTo }: { actor: Actor; navTo: { page: s
   )
 }
 
-/* ------------------------------------------------------ SOP approval chain -- */
-
-/** Recompose an editor-authored SOP into sanitised, themed article HTML. */
-/** Load the SOPs awaiting the signed-in reviewer/admin, with a manual reload. */
-function useApprovalQueue(actor: Actor): { sops: Sop[]; loading: boolean; reload: () => void } {
-  const [sops, setSops] = useState<Sop[]>([])
-  const [loading, setLoading] = useState(true)
-  const [tick, setTick] = useState(0)
-  useEffect(() => {
-    let active = true
-    setLoading(true)
-    approvalQueue(actor)
-      .then((list) => { if (active) setSops(list) })
-      .finally(() => { if (active) setLoading(false) })
-    return () => { active = false }
-  }, [actor, tick])
-  return { sops, loading, reload: () => setTick((t) => t + 1) }
-}
-
 /**
- * The admin's approvals board. Shows the SOPs a manager has submitted; the admin
- * approves (which publishes the SOP to staff) or sends it back with a note.
- */
-function ApprovalsBoard({ actor }: { actor: Actor }) {
-  const { sops, loading, reload } = useApprovalQueue(actor)
-
-  return (
-    <details className="board" open>
-      <summary>
-        <SopSectionIcon />Awaiting your review
-        <span className="hint">{loading ? 'loading…' : `${sops.length} SOP${sops.length === 1 ? '' : 's'}`}</span>
-      </summary>
-      <div className="card-body">
-        <p className="demo-hint" style={{ marginTop: 0 }}>
-          A manager submits an SOP here. <strong>Approve</strong> to publish it to staff, or <strong>Send back</strong>
-          {' '}with a note for the manager to fix and resubmit.
-        </p>
-        <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 8 }}>
-          <button className="btn sm" onClick={reload} disabled={loading}>↻ Refresh</button>
-        </div>
-        {loading ? (
-          <div className="empty-row"><span className="spinner" /> Loading…</div>
-        ) : sops.length === 0 ? (
-          <div className="empty-row">No SOPs are waiting on your review.</div>
-        ) : (
-          sops.map((s) => <ReviewCard key={s.id} actor={actor} sop={s} onDone={reload} />)
-        )}
-      </div>
-    </details>
-  )
-}
-
-/**
- * The "Status" board (everyone except staff): where every SOP sits on the
- * approval chain, plus each test's state. A department manager sees their own
- * department; an admin and the reviewers see the whole organisation.
- */
-function StatusBoard({ actor }: { actor: Actor }) {
-  const isAdmin = actor.kind === 'admin'
-  const [sops, setSops] = useState<Sop[]>([])
-  const [loading, setLoading] = useState(true)
-  useEffect(() => {
-    let active = true
-    setLoading(true)
-    sopStatusList(actor)
-      .then((list) => { if (active) setSops(list) })
-      .finally(() => { if (active) setLoading(false) })
-    return () => { active = false }
-  }, [actor])
-
-  // Tests come from the cache — a manager sees their own department; admin all.
-  const tests = read
-    .tests()
-    .filter((t) => isAdmin || (actor.kind === 'manager' && t.department_id === actor.manager.department_id))
-    .slice()
-    .sort((a, b) => a.title.localeCompare(b.title))
-
-  const deptCode = (id: string) => read.department(id)?.code ?? '—'
-
-  return (
-    <>
-      <details className="board" open>
-        <summary><StatusSectionIcon />SOP status<span className="hint">{loading ? 'loading…' : `${sops.length}`}</span></summary>
-        <div className="card-body">
-          {loading ? (
-            <div className="empty-row"><span className="spinner" /> Loading…</div>
-          ) : sops.length === 0 ? (
-            <div className="empty-row">No SOPs yet.</div>
-          ) : (
-            sops.map((s) => (
-              <div className="brow" key={s.id}>
-                <div className="brow-top">
-                  <span className="brow-title">
-                    <span className="ver">{s.code}</span> {s.title}{' '}
-                    {isAdmin && <span className="ver">{deptCode(s.department_id)}</span>}{' '}
-                    {s.approval_status === 'authorized' ? <span className="livechip">LIVE</span> : <ApprovalChip status={s.approval_status} />}
-                  </span>
-                  <span className="demo-hint" style={{ margin: 0 }}>{APPROVAL_STATUS_LABELS[s.approval_status]}</span>
-                </div>
-                <ApprovalStrip sop={s} />
-              </div>
-            ))
-          )}
-        </div>
-      </details>
-
-      {tests.length > 0 && (
-        <details className="board" open>
-          <summary><TestSectionIcon />Test status<span className="hint">{tests.length}</span></summary>
-          <div className="card-body">
-            {tests.map((t) => {
-              const qCount = read.questionsFor(t.id).length
-              const assigned = read.assignments().filter((a) => a.test_id === t.id).length
-              return (
-                <div className="brow" key={t.id}>
-                  <div className="brow-top">
-                    <span className="brow-title">
-                      {t.title} <span className="ver">{qCount} Qs</span>{' '}
-                      <span className={`apchip ${t.status === 'published' ? 'ap-authorized' : 'ap-draft'}`}>{t.status === 'published' ? 'Published' : 'Draft'}</span>
-                    </span>
-                    <span className="demo-hint" style={{ margin: 0 }}>{assigned} assigned</span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </details>
-      )}
-    </>
-  )
-}
-
-/** One SOP awaiting a decision: read it, add a note, approve or send it back. */
-function ReviewCard({ actor, sop, onDone }: { actor: Actor; sop: Sop; onDone: () => void }) {
-  const [note, setNote] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [showVideo, setShowVideo] = useState(false)
-  const html = useMemo(() => recomposeSopHtml(sop), [sop])
-  const deptName = read.department(sop.department_id)?.name ?? '—'
-
-  async function act(decision: 'approve' | 'reject') {
-    if (decision === 'reject' && !note.trim()) { toast('Add a short note so the author knows what to change'); return }
-    setBusy(true)
-    try {
-      await api.reviewSop(actor, sop.id, { decision, note: note.trim() || undefined })
-      toast(decision === 'approve' ? `${sop.code} approved` : `${sop.code} sent back`)
-      onDone()
-    } catch (e) {
-      toast(e instanceof ApiError ? e.message : 'Could not record your decision.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="brow reviewcard">
-      <div className="brow-top">
-        <span className="brow-title">
-          <span className="ver">{sop.code}</span> {sop.title} <span className="ver">v{sop.version}</span>
-          <ApprovalChip status={sop.approval_status} />
-        </span>
-        <span className="demo-hint" style={{ margin: 0 }}>{deptName}{sop.submitted_by ? ` · submitted by ${sop.submitted_by}` : ''}</span>
-      </div>
-
-      <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
-        {sop.video_file_id && (
-          <button className="btn sm" onClick={() => setShowVideo(true)}>▶ Watch training video</button>
-        )}
-      </div>
-
-      <details className="inline" style={{ marginTop: 6 }}>
-        <summary>Read the SOP</summary>
-        {html ? (
-          <article className="soppage" style={{ marginTop: 10 }} dangerouslySetInnerHTML={{ __html: html }} />
-        ) : (
-          <div className="notice" style={{ marginTop: 10 }}>
-            This SOP has no in-portal content.
-            {isSupabaseEnabled && actor.kind === 'admin' && sop.document_file_id && (
-              <> Open the <a href={driveFileViewLink(sop.document_file_id)} target="_blank" rel="noopener noreferrer">Word file</a>.</>
-            )}
-          </div>
-        )}
-      </details>
-
-      <ApprovalTimeline sop={sop} />
-
-      <div className="field" style={{ marginTop: 8 }}>
-        <label>Note to the author (required to send back)</label>
-        <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Tighten step 3, then resend." />
-      </div>
-
-      <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-        <button className="btn sm primary" disabled={busy} onClick={() => void act('approve')}>
-          {busy ? <span className="spinner" /> : nextApproveLabel(sop.approval_status)}
-        </button>
-        <button className="btn sm danger" disabled={busy} onClick={() => void act('reject')}>✕ Send back</button>
-      </div>
-
-      {showVideo && (
-        <Viewer sop={sop} initialKind="video" showViewOnly={false} onClose={() => setShowVideo(false)} />
-      )}
-    </div>
-  )
-}
-
-/**
- * The two-step sign-off record: the Manager who published (submitted) the SOP,
- * and the Admin's decision (reviewing / approved / sent back). Derived from the
- * status + trail so it stays clean even for SOPs from an older workflow.
- */
-function approvalSummary(sop: Sop): { publisher: string | null; decision: ApprovalEvent | null } {
-  const trail = sop.approval_trail ?? []
-  const publisher = sop.submitted_by || trail.find((e) => e.action === 'submitted')?.name || null
-  const decision = [...trail].reverse().find((e) => e.action === 'authorized' || e.action === 'rejected') ?? null
-  return { publisher, decision }
-}
-
-/**
- * The full chronological approval timeline: every step (submitted, approved,
- * sent back) with who did it and when — read straight from approval_trail, so
- * re-submissions and multiple rounds all show in order. Falls back gracefully
- * for SOPs with no recorded trail (e.g. an admin-published one).
- */
-type TimelineStep = { mark: string; cls: string; action: string; by?: string; at?: string; note?: string | null }
-
-function timelineSteps(sop: Sop): TimelineStep[] {
-  const trail = (sop.approval_trail ?? []).filter((e) => e && e.at)
-  const status = sop.approval_status
-  const steps: TimelineStep[] = []
-
-  if (trail.length > 0) {
-    for (const e of trail) {
-      if (e.action === 'submitted') {
-        steps.push({ mark: '↑', cls: '', action: 'Submitted for review', by: e.name, at: e.at })
-      } else if (e.action === 'authorized' || e.action === 'approved') {
-        steps.push({ mark: '✓', cls: 'atr-authorized', action: 'Reviewed & approved — published to staff', by: e.name, at: e.at, note: e.note })
-      } else if (e.action === 'rejected') {
-        steps.push({ mark: '✕', cls: 'atr-rejected', action: 'Sent back for changes', by: e.name, at: e.at, note: e.note })
-      }
-    }
-    if (status === 'admin_review') steps.push({ mark: '●', cls: 'atr-pending', action: 'Awaiting Admin review' })
-  } else if (status === 'authorized') {
-    steps.push({ mark: '✓', cls: 'atr-authorized', action: 'Published & live', by: sop.published_by, at: sop.updated_at })
-  } else if (status === 'admin_review') {
-    steps.push({ mark: '●', cls: 'atr-pending', action: 'Awaiting Admin review' })
-  } else if (status === 'rejected') {
-    steps.push({ mark: '✕', cls: 'atr-rejected', action: 'Sent back for changes', note: sop.approval_note })
-  }
-  return steps
-}
-
-function ApprovalTimeline({ sop }: { sop: Sop }) {
-  const steps = timelineSteps(sop)
-  if (steps.length === 0) return null
-  return (
-    <section className="sop-approvals">
-      <div className="sop-approvals-head">Approval timeline</div>
-      <ol className="approval-trail timeline">
-        {steps.map((s, i) => (
-          <li key={i} className={`atr ${s.cls}`}>
-            <span className="atr-mark" aria-hidden>{s.mark}</span>
-            <span className="atr-action">{s.action}</span>
-            {s.by && <span className="atr-by">{s.by}</span>}
-            {s.at && <span className="atr-at">{fmt(s.at)}</span>}
-            {s.note && <span className="atr-note">“{s.note}”</span>}
-          </li>
-        ))}
-      </ol>
-    </section>
-  )
-}
-
-/** The admin's approve button label — approving publishes the SOP to staff. */
-function nextApproveLabel(_status: ApprovalStatus): string {
-  return '✓ Approve & publish'
-}
-
-/**
- * May this actor change this SOP? An admin always may. A department manager may
- * only while the SOP is a draft or was sent back — once it's submitted or
- * approved (live), it's locked to the manager (the admin owns changes then).
+ * May this actor change this SOP? Department heads upload SOPs freely, but once
+ * uploaded only the ADMIN can change (edit / re-version / delete) one. HR and
+ * the admin review by commenting; they don't edit it either, except the admin.
  */
 function canEditSop(actor: Actor, sop: Sop): boolean {
-  if (actor.kind === 'admin') return true
-  if (actor.manager.department_id !== sop.department_id) return false
-  return sop.approval_status === 'draft' || sop.approval_status === 'rejected'
+  void sop
+  return actor.kind === 'admin'
 }
 
 /* -------------------------------------------------------------- read SOP -- */
@@ -600,7 +311,6 @@ function SopReader({ sop, actor, isAdmin, canEdit, onBack, onEdit }: { sop: Sop;
           )}
         </div>
       )}
-      <ApprovalTimeline sop={sop} />
       <SopReadStatus sop={sop} />
       <SopComments actor={actor} sopId={sop.id} canPost={canPost} />
     </>
@@ -793,21 +503,12 @@ function SopBoard({
                 <span className="brow-title">
                   <span className="ver">{s.code}</span> {s.title} <span className="ver">v{s.version}</span>{' '}
                   {s.document_file_id && <span className="livechip">{actor.kind === 'admin' ? 'LIVE · DRIVE' : 'LIVE'}</span>}{' '}
-                  {s.video_file_id && <span className="vidchip">▶ VIDEO</span>}{' '}
-                  <ApprovalChip status={s.approval_status} />
+                  {s.video_file_id && <span className="vidchip">▶ VIDEO</span>}
                 </span>
                 <button className="btn sm" onClick={() => onOpen(s, 'doc')}>📄 Open</button>
                 <button className="btn sm" onClick={() => onOpen(s, 'video')}>▶ Video</button>
                 <span className={`brow-frac ${full ? 'full' : 'gap'}`}>{signed}/{eligible.length} signed</span>
               </div>
-              <ApprovalStrip sop={s} />
-              {s.approval_status !== 'draft' && (
-                <details className="inline aptl-toggle">
-                  <summary>Approval timeline</summary>
-                  <ApprovalTimeline sop={s} />
-                </details>
-              )}
-              <SopApprovalControl actor={actor} sop={s} />
               {eligible.length === 0 ? (
                 <div className="names"><span className="nm">No staff here yet</span></div>
               ) : (
@@ -827,87 +528,6 @@ function SopBoard({
   )
 }
 
-/** A small coloured pill naming where an SOP sits on the review chain. */
-function ApprovalChip({ status }: { status: ApprovalStatus }) {
-  if (status === 'authorized') return null
-  return <span className={`apchip ap-${status}`}>{APPROVAL_STATUS_LABELS[status]}</span>
-}
-
-/**
- * The compact on-row sign-off: "Manager published" and then the Admin's step —
- * awaiting review, reviewed, or sent back. Hidden while the SOP is a draft.
- */
-function ApprovalStrip({ sop }: { sop: Sop }) {
-  const status = sop.approval_status
-  if (status === 'draft') return null
-  const { publisher, decision } = approvalSummary(sop)
-  return (
-    <div className="apstrip">
-      <span className="apstrip-label">Sign-off:</span>
-      {publisher && <span className="apstrip-chip yes">✓ Published by {publisher}</span>}
-      {status === 'admin_review' && <span className="apstrip-chip wait">● Awaiting Admin review</span>}
-      {status === 'authorized' && <span className="apstrip-chip yes">✓ Reviewed by {decision?.name ?? 'Admin'}</span>}
-      {status === 'rejected' && <span className="apstrip-chip no">✕ Sent back by {decision?.name ?? 'Admin'}</span>}
-    </div>
-  )
-}
-
-/**
- * The author's submit control on an SOP row: a Submit / Resubmit button while
- * the SOP is a draft or was sent back, the reviewer's note when it was rejected,
- * and a quiet "in review" line while it is climbing the chain. Only the owning
- * department manager (or an admin) sees the action.
- */
-function SopApprovalControl({ actor, sop }: { actor: Actor; sop: Sop }) {
-  const status = sop.approval_status
-  const mayAct = actor.kind === 'admin' || (actor.kind === 'manager' && sop.department_id === actor.manager.department_id)
-
-  if (status === 'rejected') {
-    return (
-      <div className="approw">
-        <div className="notice reject">
-          <strong>Sent back for changes.</strong>
-          {sop.approval_note ? <> {sop.approval_note}</> : <> No reason was given.</>} Edit the SOP, then resubmit.
-        </div>
-        {mayAct && (
-          <button className="btn sm primary" onClick={() => run(() => api.submitSopForReview(actor, sop.id), `${sop.code} resubmitted for review`)}>
-            ↑ Resubmit for review
-          </button>
-        )}
-      </div>
-    )
-  }
-  if (status === 'draft') {
-    if (!mayAct) return null
-    return (
-      <div className="approw">
-        <span className="demo-hint" style={{ margin: 0 }}>This SOP is a draft — staff can’t see it until it’s approved.</span>
-        <button className="btn sm primary" onClick={() => run(() => api.submitSopForReview(actor, sop.id), `${sop.code} submitted to the Admin`)}>
-          ↑ Submit for review
-        </button>
-      </div>
-    )
-  }
-  if (isInReview(status)) {
-    return (
-      <div className="approw">
-        <span className="demo-hint" style={{ margin: 0 }}>
-          With the Admin for review.{sop.submitted_by ? ` Submitted by ${sop.submitted_by}.` : ''} Hidden from staff until the Admin approves it.
-        </span>
-      </div>
-    )
-  }
-  // Authorised = live to staff. The re-review option lives in "Manage this SOP".
-  if (status === 'authorized') {
-    return (
-      <div className="approw">
-        <span className="demo-hint" style={{ margin: 0 }}>✓ Live — reviewed by the Admin and visible to staff.</span>
-      </div>
-    )
-  }
-  return null
-}
-
 function RevalidateRow({ actor, sop }: { actor: Actor; sop: Sop }) {
   return (
     <details className="inline">
@@ -921,8 +541,8 @@ function RevalidateRow({ actor, sop }: { actor: Actor; sop: Sop }) {
           <button
             className="btn sm"
             onClick={() => {
-              if (sop.approval_status === 'authorized' && !confirm(`Start a new version of ${sop.code}?\n\nIt drops to a draft and must be submitted for the Admin's approval again before it is live.`)) return
-              run(() => api.reviseSop(actor, sop.id, {}), `${sop.code} — new draft v${sop.version + 1}, submit it for review`)
+              if (!confirm(`Start a new version of ${sop.code}?\n\nIt stays live and everyone who signed v${sop.version} is asked to re-read and sign v${sop.version + 1}.`)) return
+              run(() => api.reviseSop(actor, sop.id, {}), `${sop.code} — new version v${sop.version + 1} is live`)
             }}
           >
             ↑ New version of {sop.code}
@@ -937,9 +557,6 @@ function RevalidateRow({ actor, sop }: { actor: Actor; sop: Sop }) {
             ✕ Delete SOP
           </button>
         </div>
-        <p className="demo-hint" style={{ margin: '4px 0 0' }}>
-          A new version drops the SOP to a draft and re-opens the approval chain — the <strong>Submit for review</strong> button appears again on its row.
-        </p>
 
         <SopVideoControl sop={sop} />
       </div>
@@ -1490,14 +1107,13 @@ function AddSopForm({
       const docFile = new File([blob], `${codeVal.replace(/[\\/:*?"<>|]/g, '-')}.docx`, { type: SOP_DOCX_MIME })
 
       if (isSupabaseEnabled) {
+        // The upload function stores the document + its editable content in one
+        // service_role call, so a manager needs no direct write to the SOP.
         await uploadSopViaFunction(
-          { title: title.trim(), code: codeVal, department_id: dept.id, branch_scope: scope, folder_id: folderId },
+          { title: title.trim(), code: codeVal, department_id: dept.id, branch_scope: scope, folder_id: folderId, sop_doc: sopDoc },
           docFile,
           video?.file ?? null,
         )
-        // Store the editable content so the SOP renders natively in the portal.
-        const created = read.sops().find((s) => s.code === codeVal)
-        if (created) await api.setSopContent(actor, created.id, { sop_doc: sopDoc })
         toast(`Saved as ${codeVal} to ${folderName} — matching ${dept.name} staff notified`)
       } else {
         const s = await api.publishSop(actor, {

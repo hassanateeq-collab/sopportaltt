@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { api, read, policyAcksFor, hasAckedPolicy, policyAckAudienceCount, ApiError } from '../data/store'
+import { api, read, policyAcksFor, hasAckedPolicy, policyAckAudienceCount, staffPolicyAcks, policyStaffAudience, ApiError } from '../data/store'
 import type { Actor } from '../data/store'
 import type { Policy } from '../types'
 import { MANAGER_ROLE_LABELS, POLICY_STATUS_LABELS } from '../types'
@@ -70,7 +70,7 @@ export function PolicyReader({ actor, policy, onBack }: { actor: Actor; policy: 
             Acknowledged by {acks.length} of {policyAckAudienceCount()} (admin &amp; managers) · v{policy.version}
           </div>
           {acks.length === 0 ? (
-            <p className="sopcomments-empty">No one has acknowledged this version yet.</p>
+            <p className="sopcomments-empty">No manager has acknowledged this version yet.</p>
           ) : (
             <ol className="approval-trail">
               {acks.map((a) => (
@@ -85,6 +85,35 @@ export function PolicyReader({ actor, policy, onBack }: { actor: Actor; policy: 
           )}
         </section>
       )}
+
+      {published && <PolicyStaffSignOff policy={policy} />}
     </>
+  )
+}
+
+/** Which staff have read & acknowledged this policy (for HR / admin). */
+function PolicyStaffSignOff({ policy }: { policy: Policy }) {
+  const audience = policyStaffAudience(policy)
+  if (audience.length === 0) return null
+  const acks = staffPolicyAcks(policy)
+  return (
+    <section className="sop-approvals">
+      <div className={`sop-approvals-head ${acks.length >= audience.length ? 'done' : ''}`}>
+        Staff sign-off — {acks.length} of {audience.length} have acknowledged v{policy.version}
+      </div>
+      <ol className="approval-trail">
+        {audience.map((s) => {
+          const ack = acks.find((a) => a.staff_id === s.id)
+          return (
+            <li key={s.id} className={`atr ${ack ? 'atr-authorized' : ''}`}>
+              <span className="atr-mark" aria-hidden>{ack ? '✓' : '•'}</span>
+              <span className="atr-role">{s.name}</span>
+              <span className="atr-action">{ack ? 'Acknowledged' : 'Not yet'}</span>
+              {ack && <span className="atr-at">{fmt(ack.acknowledged_at)}</span>}
+            </li>
+          )
+        })}
+      </ol>
+    </section>
   )
 }

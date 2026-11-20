@@ -16,9 +16,9 @@ const STAFF_TOKEN_KEY = 'hamsun-sop-portal/staff-token'
 
 /** What the management notification bell counts, and where it jumps to. */
 function mgmtBell(actor: Actor): { count: number; target: string; title: string } {
-  if (actor.kind === 'admin' || actor.manager.role === 'hr') {
-    const n = read.sops().filter((s) => s.approval_status === 'admin_review').length
-    return { count: n, target: 'approvals', title: n ? `${n} SOP${n === 1 ? '' : 's'} awaiting review` : 'SOP approvals' }
+  // HR publishes policies and reviews SOPs; nothing for them to acknowledge.
+  if (actor.kind === 'manager' && actor.manager.role === 'hr') {
+    return { count: 0, target: 'approvals', title: 'SOP review' }
   }
   const n = read.policies().filter((p) => p.status === 'published' && !hasAckedPolicy(actor, p)).length
   return { count: n, target: 'policies', title: n ? `${n} polic${n === 1 ? 'y' : 'ies'} to acknowledge` : 'Policies' }

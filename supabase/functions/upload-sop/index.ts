@@ -155,9 +155,10 @@ Deno.serve(async (req) => {
     }
 
     // ---- insert the SOP ----
-    // An admin publishes live; a department manager's SOP enters the review
-    // chain as a draft and stays invisible to staff until the CEO authorises it.
-    const approvalStatus = isAdmin ? 'authorized' : 'draft'
+    // There is no approval chain: a department manager (or an admin) publishes an
+    // SOP live on upload. It's visible to staff immediately; HR and the admin can
+    // review it afterwards by commenting.
+    const approvalStatus = 'authorized'
     const { data: sop, error: insErr } = await admin
       .from('sops')
       .insert({
@@ -169,6 +170,10 @@ Deno.serve(async (req) => {
         version: 1,
         document_file_id: docId,
         video_file_id: videoId,
+        // The in-portal document is stored on create, so the manager never needs
+        // a direct write afterwards (only the admin can change an SOP later).
+        ...(sopDoc ? { sop_doc: sopDoc } : {}),
+        ...(documentHtml ? { document_html: documentHtml } : {}),
         approval_status: approvalStatus,
         updated_at: new Date().toISOString(),
         published_by: actorName,
@@ -178,9 +183,7 @@ Deno.serve(async (req) => {
     if (insErr) return json({ error: `Could not save the SOP: ${insErr.message}` }, 500)
 
     // ---- notify eligible staff (best-effort) ----
-    // Only an admin's live publish reaches staff now; a manager's draft notifies
-    // them only once the CEO authorises it (handled in sop-approval).
-    if (!isAdmin) return json({ sop })
+    // Every published SOP reaches its department's staff right away.
     try {
       const { data: staff } = await admin
         .from('staff')

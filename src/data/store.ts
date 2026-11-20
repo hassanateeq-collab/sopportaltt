@@ -421,7 +421,7 @@ async function resolveSupabaseActor(): Promise<Actor | null> {
  * Used in Supabase mode instead of the gated api.publishSop.
  */
 export async function uploadSopViaFunction(
-  input: { title: string; code?: string; department_id: string; branch_scope: BranchScope; folder_id: string },
+  input: { title: string; code?: string; department_id: string; branch_scope: BranchScope; folder_id: string; sop_doc?: SopDoc | null },
   pdf: File,
   video: File | null,
 ): Promise<void> {
@@ -437,6 +437,9 @@ export async function uploadSopViaFunction(
   fd.set('folder_id', input.folder_id)
   fd.set('document', pdf)
   if (video) fd.set('video', video)
+  // Store the in-portal document on create, so the manager never needs a direct
+  // write to the SOP afterwards (only the admin can change it later).
+  if (input.sop_doc) fd.set('sop_doc', JSON.stringify(input.sop_doc))
 
   let res: Response
   try {
@@ -1221,6 +1224,8 @@ function applyStaffData(payload: Record<string, unknown>): Staff | null {
     certifications: (payload.certifications as Certification[]) ?? [],
     grants: (payload.grants as RetestGrant[]) ?? [],
     notifications: (payload.notifications as Notification[]) ?? [],
+    policies: (payload.policies as Policy[]) ?? [],
+    policyAcknowledgments: (payload.policyAcknowledgments as PolicyAcknowledgment[]) ?? [],
   }
   snapshotVersion++
   listeners.forEach((fn) => fn())
@@ -1475,10 +1480,10 @@ export function commentsFor(sopId: string): SopComment[] {
 
 /* ---------------------------------------------------------------- policies -- */
 
-/** Acknowledgments on a policy's CURRENT version, newest first. */
+/** Management acknowledgments (admin + managers) on a policy's current version. */
 export function policyAcksFor(policy: Policy): PolicyAcknowledgment[] {
   return db.policyAcknowledgments
-    .filter((a) => a.policy_id === policy.id && a.version === policy.version)
+    .filter((a) => a.policy_id === policy.id && a.version === policy.version && a.role !== 'staff')
     .sort((a, b) => b.acknowledged_at.localeCompare(a.acknowledged_at))
 }
 
@@ -1486,8 +1491,34 @@ export function policyAcksFor(policy: Policy): PolicyAcknowledgment[] {
 export function hasAckedPolicy(actor: Actor, policy: Policy): boolean {
   const managerId = actor.kind === 'admin' ? null : actor.manager.id
   return db.policyAcknowledgments.some(
-    (a) => a.policy_id === policy.id && a.version === policy.version && a.manager_id === managerId,
+    (a) => a.policy_id === policy.id && a.version === policy.version && a.role !== 'staff' && a.manager_id === managerId,
   )
+}
+
+/** Published policies a staff member must read (their own department's). */
+export function policiesForStaff(staff: Staff): Policy[] {
+  return db.policies
+    .filter((p) => p.status === 'published' && p.department_id === staff.department_id)
+    .sort((a, b) => a.code.localeCompare(b.code))
+}
+
+/** Has this staff member acknowledged the current version of this policy? */
+export function hasStaffAckedPolicy(staffId: string, policy: Policy): boolean {
+  return db.policyAcknowledgments.some(
+    (a) => a.policy_id === policy.id && a.version === policy.version && a.staff_id === staffId,
+  )
+}
+
+/** Staff acknowledgments on a policy's current version (for the management board). */
+export function staffPolicyAcks(policy: Policy): PolicyAcknowledgment[] {
+  return db.policyAcknowledgments
+    .filter((a) => a.policy_id === policy.id && a.version === policy.version && a.role === 'staff')
+    .sort((a, b) => b.acknowledged_at.localeCompare(a.acknowledged_at))
+}
+
+/** Active staff in a policy's department — the staff who owe an acknowledgment. */
+export function policyStaffAudience(policy: Policy): Staff[] {
+  return db.staff.filter((s) => s.active && s.department_id === policy.department_id)
 }
 
 /**
@@ -1603,6 +1634,12 @@ function notify(staff_id: string, kind: NotificationKind, text: string): void {
     // consumer yet — the flag is what makes that a worker, not a migration.
     whatsapp_pending: true,
   })
+}
+
+/** Notify every active staff member that a policy was published (demo mode). */
+function notifyAllStaffOfPolicy(policy: Policy): void {
+  const text = `New company policy ${policy.code} — ${policy.title} — has been published. Please read and acknowledge it.`
+  for (const s of db.staff.filter((st) => st.active)) notify(s.id, 'policy_published', text)
 }
 
 /* -------------------------------------------------- manager authorisation ---- */
@@ -2082,9 +2119,7 @@ export const api = {
       throw new ApiError(`${code} is already in use. Codes must identify one procedure.`)
     }
 
-    // An admin publishes live; a department manager's SOP enters the review
-    // chain as a draft and is invisible to staff until the CEO authorises it.
-    const authorized = actor.kind === 'admin'
+    // No approval chain: a department manager (or admin) publishes live on upload.
     const sop: Sop = {
       id: id('sop'),
       code,
@@ -2096,18 +2131,15 @@ export const api = {
       document_file_id: input.document_file_id ?? null,
       video_file_id: input.video_file_id ?? null,
       sop_doc: input.sop_doc ?? null,
-      approval_status: authorized ? 'authorized' : 'draft',
+      approval_status: 'authorized',
       approval_note: null,
       submitted_by: null,
       updated_at: nowIso(),
       published_by: actorName(actor),
     }
     db.sops.push(sop)
-
-    if (authorized) {
-      for (const staff of eligibleStaffFor(sop)) {
-        notify(staff.id, 'sop_published', `New SOP ${sop.code} — ${sop.title} — has been published for your department.`)
-      }
+    for (const staff of eligibleStaffFor(sop)) {
+      notify(staff.id, 'sop_published', `New SOP ${sop.code} — ${sop.title} — has been published for your department.`)
     }
     commit()
     return sop
@@ -2152,21 +2184,14 @@ export const api = {
     const current = read.sop(sopId)
     if (!current) throw new ApiError('That SOP no longer exists.')
 
-    // Supabase mode: bump the version via PostgREST (RLS confines managers to
-    // their own department + branch). The bump reopens the sign-off because
-    // acknowledgments are pinned to the old version number.
-    // A new version re-opens the approval chain: it drops back to a draft
-    // (hidden from staff), so "Submit for review" appears again and it must be
-    // re-authorised before it goes live. The sign-off register reopens too.
+    // A new version bump reopens the sign-off register (acknowledgments are pinned
+    // to the old version number). The SOP stays live — there is no approval chain.
     if (isSupabaseEnabled) {
       const patch: Record<string, unknown> = {
         version: current.version + 1,
         updated_at: nowIso(),
         published_by: actorName(actor),
-        approval_status: 'draft',
-        approval_trail: [],
-        submitted_by: null,
-        approval_note: null,
+        approval_status: 'authorized',
       }
       if (changes.title !== undefined) patch.title = changes.title.trim()
       if (changes.summary !== undefined) patch.summary = changes.summary.trim()
@@ -2188,11 +2213,10 @@ export const api = {
     sop.version += 1
     sop.updated_at = nowIso()
     sop.published_by = actorName(actor)
-    sop.approval_status = 'draft'
-    sop.approval_trail = []
-    sop.submitted_by = null
-    sop.approval_note = null
-    // No staff notification yet — they're told when it's re-authorised.
+    sop.approval_status = 'authorized'
+    for (const staff of eligibleStaffFor(sop)) {
+      notify(staff.id, 'sop_published', `${sop.code} — ${sop.title} — has been updated to v${sop.version}. Please re-read and sign.`)
+    }
     commit()
     return sop
   },
@@ -2606,7 +2630,8 @@ export const api = {
 
     const sop = db.sops.find((s) => s.id === sopId)
     if (!sop) throw new ApiError('That SOP no longer exists.')
-    const isBranchManager = actor.kind === 'manager' && actor.manager.role === 'branch_manager'
+    // A department manager may only comment on their own department's SOPs;
+    // branch managers, HR and the admin may comment on any SOP (review).
     if (actor.kind === 'manager' && actor.manager.role === 'manager' && sop.department_id !== actor.manager.department_id) {
       throw new ApiError('You can only comment on your own department’s SOPs.')
     }
@@ -2615,7 +2640,7 @@ export const api = {
       sop_id: sopId,
       author_manager_id: actor.kind === 'admin' ? null : actor.manager.id,
       author_name: actorName(actor),
-      author_role: actor.kind === 'admin' ? 'admin' : isBranchManager ? 'branch_manager' : 'manager',
+      author_role: actor.kind === 'admin' ? 'admin' : actor.manager.role,
       body: text,
       created_at: nowIso(),
     })
@@ -2700,14 +2725,14 @@ export const api = {
     commit()
   },
 
-  /** HR publishes a draft policy — it becomes live for the admin and managers. */
+  /**
+   * HR publishes a draft policy — it goes live and EVERYONE is notified: every
+   * staff member gets a notification, and the admin and managers see it in their
+   * Policies board.
+   */
   async publishPolicy(actor: Actor, policyId: string): Promise<void> {
     if (isSupabaseEnabled) {
-      const { error } = await supabase!
-        .from('policies')
-        .update({ status: 'published', published_by: actorName(actor), updated_at: new Date().toISOString() })
-        .eq('id', policyId)
-      if (error) throw new ApiError(error.message)
+      await callAdminFn('policy-publish', { policy_id: policyId, action: 'publish' })
       await hydrateFromSupabase()
       return
     }
@@ -2717,22 +2742,18 @@ export const api = {
     policy.status = 'published'
     policy.published_by = actorName(actor)
     policy.updated_at = nowIso()
+    notifyAllStaffOfPolicy(policy)
     commit()
   },
 
   /**
    * HR re-issues a published policy after an edit: bumps the version, which
-   * reopens everyone's acknowledgment (acks are pinned to the version).
+   * reopens everyone's acknowledgment (acks are pinned to the version), and
+   * notifies all staff again.
    */
   async reissuePolicy(actor: Actor, policyId: string): Promise<void> {
     if (isSupabaseEnabled) {
-      const current = read.policies().find((p) => p.id === policyId)
-      if (!current) throw new ApiError('That policy no longer exists.')
-      const { error } = await supabase!
-        .from('policies')
-        .update({ version: current.version + 1, status: 'published', updated_at: new Date().toISOString() })
-        .eq('id', policyId)
-      if (error) throw new ApiError(error.message)
+      await callAdminFn('policy-publish', { policy_id: policyId, action: 'reissue' })
       await hydrateFromSupabase()
       return
     }
@@ -2742,6 +2763,35 @@ export const api = {
     policy.version += 1
     policy.status = 'published'
     policy.updated_at = nowIso()
+    notifyAllStaffOfPolicy(policy)
+    commit()
+  },
+
+  /** A staff member acknowledges a published policy (token-gated in Supabase). */
+  async signPolicy(token: string, policyId: string): Promise<void> {
+    if (isSupabaseEnabled) {
+      await callStaffFn('policy-sign', { token, policy_id: policyId })
+      await activateStaffSession(token)
+      return
+    }
+    const staff = validateStaffToken(token)
+    const policy = db.policies.find((p) => p.id === policyId)
+    if (!policy) throw new ApiError('That policy no longer exists.')
+    if (policy.status !== 'published') throw new ApiError('That policy isn’t published.')
+    if (policy.department_id !== staff.department_id) throw new ApiError('That policy isn’t for your department.')
+    if (db.policyAcknowledgments.some((a) => a.policy_id === policyId && a.version === policy.version && a.staff_id === staff.id)) {
+      return
+    }
+    db.policyAcknowledgments.push({
+      id: id('pack'),
+      policy_id: policyId,
+      manager_id: null,
+      staff_id: staff.id,
+      name: staff.name,
+      role: 'staff',
+      version: policy.version,
+      acknowledged_at: nowIso(),
+    })
     commit()
   },
 
