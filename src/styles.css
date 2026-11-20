@@ -2500,3 +2500,32 @@ details.board > summary .hint {
     display: none;
   }
 }
+
+/* --------------------------------------------------- approval timeline */
+
+.atr-pending {
+  border-style: dashed;
+}
+.atr-pending .atr-mark {
+  color: var(--brass-deep);
+}
+/* The on-row timeline is a compact disclosure under the sign-off strip. */
+.aptl-toggle > summary {
+  color: var(--pine);
+  font-weight: 600;
+  font-size: 12.5px;
+  margin-top: 4px;
+}
+.aptl-toggle .sop-approvals {
+  margin-top: 10px;
+  border-top: none;
+  padding-top: 0;
+}
+/* The disclosure summary already says "Approval timeline" — drop the inner one. */
+.aptl-toggle .sop-approvals-head {
+  display: none;
+}
+.approval-trail.timeline .atr-action {
+  color: var(--ink);
+  font-weight: 600;
+}

@@ -33,7 +33,7 @@ import type { ApprovalStatus, ApprovalEvent } from '../types'
 import { isInReview } from '../lib/approval'
 import { scopeIncludes } from '../lib/scope'
 import { certStatus, daysUntil } from '../lib/certs'
-import { fmtD } from '../lib/format'
+import { fmtD, fmt } from '../lib/format'
 import { useBackNav } from '../lib/useBackNav'
 import { toast } from '../lib/toast'
 import { isSupabaseEnabled } from '../lib/supabase'
@@ -468,7 +468,7 @@ function ReviewCard({ actor, sop, onDone }: { actor: Actor; sop: Sop; onDone: ()
         )}
       </details>
 
-      {sop.approval_trail && sop.approval_trail.length > 0 && <ApprovalTrail sop={sop} />}
+      <ApprovalTimeline sop={sop} />
 
       <div className="field" style={{ marginTop: 8 }}>
         <label>Note to the author (required to send back)</label>
@@ -501,50 +501,56 @@ function approvalSummary(sop: Sop): { publisher: string | null; decision: Approv
   return { publisher, decision }
 }
 
-function ApprovalTrail({ sop }: { sop: Sop }) {
+/**
+ * The full chronological approval timeline: every step (submitted, approved,
+ * sent back) with who did it and when — read straight from approval_trail, so
+ * re-submissions and multiple rounds all show in order. Falls back gracefully
+ * for SOPs with no recorded trail (e.g. an admin-published one).
+ */
+type TimelineStep = { mark: string; cls: string; action: string; by?: string; at?: string; note?: string | null }
+
+function timelineSteps(sop: Sop): TimelineStep[] {
+  const trail = (sop.approval_trail ?? []).filter((e) => e && e.at)
   const status = sop.approval_status
-  if (status === 'draft') return null
-  const { publisher, decision } = approvalSummary(sop)
-  const authorised = status === 'authorized'
+  const steps: TimelineStep[] = []
+
+  if (trail.length > 0) {
+    for (const e of trail) {
+      if (e.action === 'submitted') {
+        steps.push({ mark: '↑', cls: '', action: 'Submitted for review', by: e.name, at: e.at })
+      } else if (e.action === 'authorized' || e.action === 'approved') {
+        steps.push({ mark: '✓', cls: 'atr-authorized', action: 'Reviewed & approved — published to staff', by: e.name, at: e.at, note: e.note })
+      } else if (e.action === 'rejected') {
+        steps.push({ mark: '✕', cls: 'atr-rejected', action: 'Sent back for changes', by: e.name, at: e.at, note: e.note })
+      }
+    }
+    if (status === 'admin_review') steps.push({ mark: '●', cls: 'atr-pending', action: 'Awaiting Admin review' })
+  } else if (status === 'authorized') {
+    steps.push({ mark: '✓', cls: 'atr-authorized', action: 'Published & live', by: sop.published_by, at: sop.updated_at })
+  } else if (status === 'admin_review') {
+    steps.push({ mark: '●', cls: 'atr-pending', action: 'Awaiting Admin review' })
+  } else if (status === 'rejected') {
+    steps.push({ mark: '✕', cls: 'atr-rejected', action: 'Sent back for changes', note: sop.approval_note })
+  }
+  return steps
+}
+
+function ApprovalTimeline({ sop }: { sop: Sop }) {
+  const steps = timelineSteps(sop)
+  if (steps.length === 0) return null
   return (
     <section className="sop-approvals">
-      <div className={`sop-approvals-head ${authorised ? 'done' : ''}`}>
-        {authorised ? '✓ Approved — visible to staff' : status === 'rejected' ? 'Sent back for changes' : 'Awaiting Admin review'}
-      </div>
-      <ol className="approval-trail">
-        {publisher && (
-          <li className="atr atr-authorized">
-            <span className="atr-mark" aria-hidden>✓</span>
-            <span className="atr-role">Manager</span>
-            <span className="atr-action">Published</span>
-            <span className="atr-by">{publisher}</span>
+      <div className="sop-approvals-head">Approval timeline</div>
+      <ol className="approval-trail timeline">
+        {steps.map((s, i) => (
+          <li key={i} className={`atr ${s.cls}`}>
+            <span className="atr-mark" aria-hidden>{s.mark}</span>
+            <span className="atr-action">{s.action}</span>
+            {s.by && <span className="atr-by">{s.by}</span>}
+            {s.at && <span className="atr-at">{fmt(s.at)}</span>}
+            {s.note && <span className="atr-note">“{s.note}”</span>}
           </li>
-        )}
-        {status === 'admin_review' && (
-          <li className="atr">
-            <span className="atr-mark" aria-hidden>●</span>
-            <span className="atr-role">Admin</span>
-            <span className="atr-action">Reviewing…</span>
-          </li>
-        )}
-        {authorised && (
-          <li className="atr atr-authorized">
-            <span className="atr-mark" aria-hidden>✓</span>
-            <span className="atr-role">Admin</span>
-            <span className="atr-action">Reviewed &amp; approved</span>
-            <span className="atr-by">{decision?.name ?? 'Admin'}</span>
-            {decision && <span className="atr-at">{fmtD(decision.at)}</span>}
-          </li>
-        )}
-        {status === 'rejected' && (
-          <li className="atr atr-rejected">
-            <span className="atr-mark" aria-hidden>✕</span>
-            <span className="atr-role">Admin</span>
-            <span className="atr-action">Sent back</span>
-            <span className="atr-by">{decision?.name ?? 'Admin'}</span>
-            {decision?.note && <span className="atr-note">“{decision.note}”</span>}
-          </li>
-        )}
+        ))}
       </ol>
     </section>
   )
@@ -594,7 +600,7 @@ function SopReader({ sop, actor, isAdmin, canEdit, onBack, onEdit }: { sop: Sop;
           )}
         </div>
       )}
-      <ApprovalTrail sop={sop} />
+      <ApprovalTimeline sop={sop} />
       <SopReadStatus sop={sop} />
       <SopComments actor={actor} sopId={sop.id} canPost={canPost} />
     </>
@@ -795,6 +801,12 @@ function SopBoard({
                 <span className={`brow-frac ${full ? 'full' : 'gap'}`}>{signed}/{eligible.length} signed</span>
               </div>
               <ApprovalStrip sop={s} />
+              {s.approval_status !== 'draft' && (
+                <details className="inline aptl-toggle">
+                  <summary>Approval timeline</summary>
+                  <ApprovalTimeline sop={s} />
+                </details>
+              )}
               <SopApprovalControl actor={actor} sop={s} />
               {eligible.length === 0 ? (
                 <div className="names"><span className="nm">No staff here yet</span></div>
