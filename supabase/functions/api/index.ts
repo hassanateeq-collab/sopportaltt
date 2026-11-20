@@ -307,13 +307,34 @@ async function listPolicies(admin: SupabaseClient, req: Request): Promise<Respon
 
   const rows = (data ?? []) as Row[]
 
-  // Attach who has acknowledged each policy's CURRENT version (name, role, when).
+  // Branch + staff + manager reference data for resolving each person's branch.
+  const { byId: bById } = await branchMaps(admin)
+  const branchCodeOf = (bid: string | null | undefined) =>
+    bid && bById.get(bid) ? (bById.get(bid)!.code as string) : null
+
+  // Policies reach EVERY active staff member — that is the roster we mark
+  // acknowledged / not-acknowledged against.
+  const { data: staffRows } = await admin.from('staff').select('id, name, branch_id').eq('active', true)
+  const staffList = (staffRows ?? []) as Row[]
+  const staffBranch = new Map<string, string | null>()
+  const staffName = new Map<string, string>()
+  for (const s of staffList) {
+    staffBranch.set(s.id, branchCodeOf(s.branch_id))
+    staffName.set(s.id, s.name)
+  }
+
+  // Managers (their acks are management sign-offs) — for their branch.
+  const { data: mgrRows } = await admin.from('managers').select('id, branch_id')
+  const mgrBranch = new Map<string, string | null>()
+  for (const m of (mgrRows ?? []) as Row[]) mgrBranch.set(m.id, branchCodeOf(m.branch_id))
+
+  // All acknowledgments for these policies.
   const acksByPolicy = new Map<string, Row[]>()
   const ids = rows.map((r) => r.id)
   if (ids.length) {
     const { data: acks, error: ackErr } = await admin
       .from('policy_acknowledgments')
-      .select('policy_id, name, role, version, acknowledged_at')
+      .select('policy_id, staff_id, manager_id, name, role, version, acknowledged_at')
       .in('policy_id', ids)
     if (!ackErr) {
       for (const a of (acks ?? []) as Row[]) {
@@ -327,12 +348,36 @@ async function listPolicies(admin: SupabaseClient, req: Request): Promise<Respon
     const current = (acksByPolicy.get(p.id) ?? [])
       .filter((a) => a.version === p.version)
       .sort((a, b) => new Date(a.acknowledged_at).getTime() - new Date(b.acknowledged_at).getTime())
+
+    // Everyone who DID acknowledge (staff + managers + admin), with branch.
+    const people = current.map((a) => ({
+      name: a.name,
+      role: a.role,
+      branch: a.staff_id ? staffBranch.get(a.staff_id) ?? null : a.manager_id ? mgrBranch.get(a.manager_id) ?? null : null,
+      acknowledged_at: a.acknowledged_at,
+    }))
+
+    // Full staff roster: acknowledged (green) vs not (red), for this version.
+    const ackedAt = new Map<string, string>()
+    for (const a of current) if (a.staff_id) ackedAt.set(a.staff_id, a.acknowledged_at)
+    const roster = staffList
+      .map((s) => ({
+        name: s.name,
+        branch: staffBranch.get(s.id) ?? null,
+        acknowledged: ackedAt.has(s.id),
+        acknowledged_at: ackedAt.get(s.id) ?? null,
+      }))
+      .sort((a, b) => Number(b.acknowledged) - Number(a.acknowledged) || a.name.localeCompare(b.name))
+
     return {
       ...shapePolicy(p, dById),
       acknowledgments: {
         version: p.version,
         count: current.length,
-        people: current.map((a) => ({ name: a.name, role: a.role, acknowledged_at: a.acknowledged_at })),
+        acknowledged_staff: roster.filter((r) => r.acknowledged).length,
+        total_staff: staffList.length,
+        people,
+        roster,
       },
     }
   })
