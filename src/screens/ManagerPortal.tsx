@@ -43,6 +43,7 @@ import { recomposeSopHtml } from '../components/SopPage'
 import { BranchManagerPortal } from './BranchManagerPortal'
 import { HrPortal } from './HrPortal'
 import { PoliciesReadBoard } from '../components/PoliciesReadBoard'
+import { TrainingRecordsBoard } from '../components/TrainingRecordsBoard'
 import {
   SopSectionIcon,
   PolicySectionIcon,
@@ -64,7 +65,7 @@ import {
  * and also manages the org. The boards and forms are the same; only the scope
  * and the extra admin sections differ.
  */
-type Page = 'home' | 'sops' | 'policies' | 'tests' | 'staff' | 'managers' | 'branches' | 'departments' | 'settings' | 'approvals' | 'status'
+type Page = 'home' | 'sops' | 'policies' | 'training' | 'tests' | 'staff' | 'managers' | 'branches' | 'departments' | 'settings' | 'approvals' | 'status'
 
 export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
   // A branch manager gets a trimmed, read-only + comment portal; HR gets the
@@ -118,6 +119,7 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
   const publishedPolicies = read.policies().filter((p) => p.status === 'published')
   const policiesPending = publishedPolicies.filter((p) => !hasAckedPolicy(actor, p)).length
   const policyTile: TileDef = { key: 'policies', icon: <PolicySectionIcon />, title: 'Policies', sub: policiesPending ? `${policiesPending} to acknowledge` : `${publishedPolicies.length} · read & acknowledge` }
+  const trainingTile: TileDef = { key: 'training', icon: <StatusSectionIcon />, title: 'Training records', sub: 'every branch · assessments & PDFs' }
 
   const renderTile = (t: TileDef) => (
     <button key={t.key} className="mtile" onClick={() => setPage(t.key)}>
@@ -204,8 +206,8 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
                 branch/department setup are the same regardless of which branch
                 you're viewing, so they sit above the branch picker. */}
             <div className="mtiles">
-              {[sopTile, policyTile, managerTile, approvalsTile].map(renderTile)}
-              {[statusTile, branchTile, deptTile, settingsTile].map(renderTile)}
+              {[sopTile, policyTile, trainingTile, managerTile].map(renderTile)}
+              {[approvalsTile, statusTile, branchTile, deptTile, settingsTile].map(renderTile)}
             </div>
             {branchSelect}
             {/* Branch-dependent: staff and test scores for the selected branch. */}
@@ -235,6 +237,8 @@ export function ManagerPortal({ actor, onLogout }: { actor: Actor; onLogout: () 
           )}
 
           {page === 'policies' && <PoliciesReadBoard actor={actor} />}
+
+          {page === 'training' && isAdmin && <TrainingRecordsBoard actor={actor} />}
 
           {page === 'tests' && (
             <>

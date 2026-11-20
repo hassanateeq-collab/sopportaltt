@@ -811,6 +811,160 @@ function buildReportElement(d: any): HTMLElement {
   return el
 }
 
+/** The SOPs that apply to a staff member (authorized + derived eligibility). */
+export function sopsForStaff(staff: Staff): Sop[] {
+  const branch = read.branch(staff.branch_id)
+  if (!branch) return []
+  return db.sops
+    .filter((s) => s.approval_status === 'authorized' && appliesToStaff(s, staff, branch.code))
+    .sort((a, b) => a.code.localeCompare(b.code))
+}
+
+/** One staff member's assessment status per assigned test, for the records board. */
+export type TrainingLine = { test: Test; status: 'passed' | 'failed' | 'not_taken'; score: string; detail: string }
+
+export function trainingLinesFor(staff: Staff): TrainingLine[] {
+  return assignedTestsFor(staff)
+    .sort((a, b) => a.title.localeCompare(b.title))
+    .map((test) => {
+      const last = attemptsFor(staff.id, test.id)[0]
+      const cert = latestCertification(staff.id, test.id)
+      if (!last) return { test, status: 'not_taken' as const, score: '—', detail: 'Not taken' }
+      const score = `${last.score}/${last.total}`
+      if (last.passed) {
+        const detail = cert ? `Certified until ${fmtDate(cert.expires_at)}` : 'Passed'
+        return { test, status: 'passed' as const, score, detail }
+      }
+      return { test, status: 'failed' as const, score, detail: 'Failed' }
+    })
+}
+
+function fmtDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+/**
+ * Generate and download a consolidated training record for one staff member —
+ * their details, every assigned test with its status (passed / failed / not
+ * taken) and certificate, and their SOP sign-offs. In the live app a copy is also
+ * filed in the department's Drive folder (a "Training Records" sub-folder).
+ * Returns whether the Drive copy was saved.
+ */
+export async function downloadTrainingRecord(staffId: string): Promise<{ driveSaved: boolean }> {
+  const staff = read.staffMember(staffId)
+  if (!staff) throw new ApiError('That staff record no longer exists.')
+  const lines = trainingLinesFor(staff)
+  const sops = sopsForStaff(staff)
+
+  const el = buildTrainingRecordElement({
+    staff,
+    dept: read.department(staff.department_id),
+    branch: read.branch(staff.branch_id),
+    lines,
+    sops: sops.map((s) => ({ sop: s, signed: hasSigned(staff.id, s), ack: acknowledgmentFor(staff.id, s) })),
+  })
+  const filename = `Training Record - ${staff.name} - ${new Date().toISOString().slice(0, 10)}.pdf`
+    .replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim()
+
+  document.body.appendChild(el)
+  let blob: Blob
+  try {
+    const [h2c, jspdf] = await Promise.all([import('html2canvas'), import('jspdf')])
+    const html2canvas = h2c.default
+    const { jsPDF } = jspdf
+    const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff', logging: false, width: el.offsetWidth, height: el.offsetHeight, windowWidth: el.offsetWidth, windowHeight: el.offsetHeight })
+    const pdf = new jsPDF({ unit: 'pt', format: 'a4' })
+    const pageW = pdf.internal.pageSize.getWidth()
+    const pageH = pdf.internal.pageSize.getHeight()
+    const f = pageW / canvas.width
+    const pagePx = Math.floor(pageH / f)
+    const scale = canvas.width / el.offsetWidth
+    const bounds = (Array.from(el.querySelectorAll('.rpt-block')) as HTMLElement[]).map((b) => Math.round(b.offsetTop * scale)).filter((v) => v > 0)
+    bounds.push(canvas.height)
+    let start = 0
+    let pageIdx = 0
+    while (start < canvas.height - 1) {
+      const maxEnd = start + pagePx
+      let end = -1
+      for (const b of bounds) if (b > start && b <= maxEnd) end = b
+      if (end === -1) end = Math.min(maxEnd, canvas.height)
+      const h = end - start
+      const slice = document.createElement('canvas')
+      slice.width = canvas.width
+      slice.height = h
+      const ctx = slice.getContext('2d')!
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, slice.width, slice.height)
+      ctx.drawImage(canvas, 0, start, canvas.width, h, 0, 0, canvas.width, h)
+      if (pageIdx > 0) pdf.addPage()
+      pdf.addImage(slice.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, pageW, h * f)
+      start = end
+      pageIdx++
+    }
+    blob = pdf.output('blob')
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (/dynamically imported module|module script failed|Failed to fetch/i.test(msg)) {
+      throw new ApiError('The app was just updated — please refresh the page and try again.')
+    }
+    throw new ApiError(`Could not build the PDF in this browser: ${msg}`)
+  } finally {
+    el.remove()
+  }
+
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 5000)
+
+  // File a copy in the department's Drive folder (live app only; best-effort).
+  if (!isSupabaseEnabled) return { driveSaved: false }
+  let driveSaved = false
+  try {
+    const pdfBase64 = await blobToBase64(blob)
+    const j = await callAdminFn('training-record', { staff_id: staffId, filename, pdf: pdfBase64 })
+    driveSaved = !!j.driveSaved
+  } catch {
+    driveSaved = false
+  }
+  return { driveSaved }
+}
+
+/** The off-screen HTML a training-record PDF is rendered from. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildTrainingRecordElement(d: any): HTMLElement {
+  const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string)
+  const { staff, dept, branch, lines, sops } = d
+  const el = document.createElement('div')
+  el.style.cssText = 'position:fixed;left:-9999px;top:0;width:794px;background:#fff;color:#1c241f;font-family:Arial,Helvetica,sans-serif;padding:36px;box-sizing:border-box;'
+  const block = (inner: string) => `<div class="rpt-block" style="margin-bottom:14px">${inner}</div>`
+  const pill = (status: string) => {
+    const c = status === 'passed' ? ['#e7f1ea', '#1e5a45'] : status === 'failed' ? ['#fbe9e7', '#b23b2e'] : ['#eef1ec', '#6b756e']
+    const label = status === 'passed' ? 'PASSED' : status === 'failed' ? 'FAILED' : 'NOT TAKEN'
+    return `<span style="background:${c[0]};color:${c[1]};font-size:11px;font-weight:bold;padding:2px 8px;border-radius:10px">${label}</span>`
+  }
+  const assessRows = lines.length
+    ? lines.map((l: TrainingLine) => `<tr><td style="padding:7px 8px;border-bottom:1px solid #eceee9">${esc(l.test.title)}</td><td style="padding:7px 8px;border-bottom:1px solid #eceee9;text-align:center">${esc(l.score)}</td><td style="padding:7px 8px;border-bottom:1px solid #eceee9;text-align:center">${pill(l.status)}</td><td style="padding:7px 8px;border-bottom:1px solid #eceee9;color:#4e5d56">${esc(l.detail)}</td></tr>`).join('')
+    : `<tr><td colspan="4" style="padding:7px 8px;color:#6b756e">No tests assigned.</td></tr>`
+  const sopRows = sops.length
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ? sops.map((s: any) => `<tr><td style="padding:7px 8px;border-bottom:1px solid #eceee9">${esc(s.sop.code)} — ${esc(s.sop.title)}</td><td style="padding:7px 8px;border-bottom:1px solid #eceee9;text-align:center">${s.signed ? '✓ Signed' : '— Not signed'}</td><td style="padding:7px 8px;border-bottom:1px solid #eceee9;color:#4e5d56">${s.ack ? esc(fmtDate(s.ack.signed_at)) : ''}</td></tr>`).join('')
+    : `<tr><td colspan="3" style="padding:7px 8px;color:#6b756e">No SOPs apply.</td></tr>`
+  const th = 'text-align:left;padding:7px 8px;background:#f4f6f4;font-size:11px;color:#4e5d56;border-bottom:1px solid #e2e6dc'
+  el.innerHTML = `
+    ${block(`<div style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:20px;font-weight:bold;letter-spacing:2px">HAMSUN</div><div style="font-size:13px;color:#4e5d56">TRAINING RECORD</div></div>`)}
+    ${block(`<div style="font-size:18px;font-weight:bold">${esc(staff.name)}</div><div style="color:#4e5d56;font-size:13px">${esc(staff.job_title)} · ${esc(dept?.name ?? '')} · ${esc(branch?.name ?? '')} · code ${esc(staff.employee_code ?? '—')}</div>`)}
+    ${block(`<div style="font-size:13px;font-weight:bold;margin-bottom:6px">Assessments</div><table style="width:100%;border-collapse:collapse;font-size:12px"><tr><th style="${th}">Test</th><th style="${th};text-align:center">Score</th><th style="${th};text-align:center">Status</th><th style="${th}">Detail</th></tr>${assessRows}</table>`)}
+    ${block(`<div style="font-size:13px;font-weight:bold;margin-bottom:6px">SOP sign-offs</div><table style="width:100%;border-collapse:collapse;font-size:12px"><tr><th style="${th}">SOP</th><th style="${th};text-align:center">Read &amp; signed</th><th style="${th}">Date</th></tr>${sopRows}</table>`)}
+    ${block(`<div style="margin-top:18px;border-top:1px solid #e2e6dc;padding-top:12px;color:#4e5d56;font-size:10.5px">Generated ${esc(new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }))}. CONFIDENTIAL — controlled training record.</div>`)}
+  `
+  return el
+}
+
 /**
  * On-demand translation of one quiz question + options into Urdu/Pashto, for a
  * staff member taking a test. Option order is preserved so scoring is unchanged.
