@@ -485,12 +485,16 @@ async function acksDebug(admin: SupabaseClient): Promise<Response> {
     .select('staff_id, sop_id, version, signed_at')
     .order('signed_at', { ascending: false })
     .limit(50)
+  const { data: managers } = await admin.from('managers').select('id, name, email, role, department_id, active')
+  const { data: admins } = await admin.from('admins').select('id, name')
   return json({
     policies: pols ?? [],
     policy_ack_count: (acks ?? []).length,
     policy_acks: acks ?? [],
     sop_sign_count: (sopAcks ?? []).length,
     sop_signs: sopAcks ?? [],
+    managers: managers ?? [],
+    admins: admins ?? [],
   })
 }
 

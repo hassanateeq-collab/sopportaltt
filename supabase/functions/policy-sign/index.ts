@@ -29,9 +29,7 @@ Deno.serve(async (req) => {
       .maybeSingle()
     if (!policy) return json({ error: 'That policy no longer exists.' }, 404)
     if (policy.status !== 'published') return json({ error: 'That policy isn’t published.' }, 409)
-    if (policy.department_id !== staff.department_id) {
-      return json({ error: 'That policy isn’t for your department.' }, 403)
-    }
+    // Policies reach EVERY staff member (migration 0014) — no department gate.
 
     const version = policy.version as number
     const { data: existing } = await admin
