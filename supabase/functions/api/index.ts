@@ -22,7 +22,7 @@
  */
 
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { getUserAccessToken, uploadToDrive, makeViewOnly, findOrCreateFolder } from '../_shared/google.ts'
+import { getUserAccessToken, uploadToDrive, makeViewOnly, findOrCreateFolder, deleteFromDrive } from '../_shared/google.ts'
 import { cors, json, requireApiKey, driveUrl } from '../_shared/integration.ts'
 import { scopeIncludes } from '../_shared/scope.ts'
 
@@ -58,6 +58,7 @@ Deno.serve(async (req) => {
     if (method === 'POST' && path === '/sops') return await createSop(admin, req)
     if (method === 'GET' && path === '/policies') return await listPolicies(admin, req)
     if (method === 'POST' && path === '/policies') return await createPolicy(admin, req)
+    if (method === 'DELETE' && path === '/policies') return await deletePolicy(admin, req)
     if (method === 'GET' && path === '/assessments') return await listAssessments(admin, req)
     if (method === 'POST' && path === '/assessments') return await createAssessment(admin, req)
     if (method === 'GET' && path === '/training') return await listTraining(admin, req)
@@ -80,6 +81,7 @@ function info(): Response {
       'POST /sops': 'Create an SOP (multipart/form-data)',
       'GET /policies': 'List policies (?department=HK&status=published)',
       'POST /policies': 'Publish a policy (multipart/form-data)',
+      'DELETE /policies': 'Delete a policy (?id=<policyId>)',
       'GET /assessments': 'List tests and their results (?department=HK)',
       'POST /assessments': 'Create a test/quiz (application/json)',
       'GET /training': 'Per-staff training records (?department=HK&branch=CLF)',
@@ -462,6 +464,39 @@ async function createPolicy(admin: SupabaseClient, req: Request): Promise<Respon
   }
 
   return json({ policy: shapePolicy(policy as Row, dById) }, 201)
+}
+
+// A Drive file id is a longish token with no slashes/spaces (not a URL or stub).
+function isDriveId(ref: string | null): ref is string {
+  return !!ref && !/[\s/]/.test(ref) && ref.length > 20
+}
+
+async function deletePolicy(admin: SupabaseClient, req: Request): Promise<Response> {
+  const id = new URL(req.url).searchParams.get('id')
+  if (!id) return json({ error: 'id is required (?id=<policyId>).' }, 400)
+
+  const { data: pol } = await admin.from('policies').select('id, document_file_id').eq('id', id).maybeSingle()
+  if (!pol) return json({ error: 'Policy not found.' }, 404)
+
+  // Remove the Drive file (best-effort — a failed Drive delete shouldn't strand
+  // the record).
+  try {
+    const gid = Deno.env.get('GOOGLE_CLIENT_ID')
+    const gsecret = Deno.env.get('GOOGLE_CLIENT_SECRET')
+    const grefresh = Deno.env.get('GOOGLE_REFRESH_TOKEN')
+    const fileId = (pol as Row).document_file_id as string | null
+    if (gid && gsecret && grefresh && isDriveId(fileId)) {
+      const token = await getUserAccessToken(gid, gsecret, grefresh)
+      await deleteFromDrive(token, fileId)
+    }
+  } catch (_) {
+    // ignore Drive errors
+  }
+
+  // Delete the policy (its acknowledgments cascade via the FK).
+  const { error } = await admin.from('policies').delete().eq('id', id)
+  if (error) return json({ error: `Could not delete the policy: ${error.message}` }, 500)
+  return json({ ok: true })
 }
 
 // ────────────────────────────────────────────────────────────── assessments ──
