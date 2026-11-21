@@ -59,6 +59,7 @@ Deno.serve(async (req) => {
     if (method === 'GET' && path === '/policies') return await listPolicies(admin, req)
     if (method === 'POST' && path === '/policies') return await createPolicy(admin, req)
     if (method === 'DELETE' && path === '/policies') return await deletePolicy(admin, req)
+    if (method === 'GET' && path === '/acks-debug') return await acksDebug(admin)
     if (method === 'GET' && path === '/assessments') return await listAssessments(admin, req)
     if (method === 'POST' && path === '/assessments') return await createAssessment(admin, req)
     if (method === 'GET' && path === '/training') return await listTraining(admin, req)
@@ -469,6 +470,28 @@ async function createPolicy(admin: SupabaseClient, req: Request): Promise<Respon
 // A Drive file id is a longish token with no slashes/spaces (not a URL or stub).
 function isDriveId(ref: string | null): ref is string {
   return !!ref && !/[\s/]/.test(ref) && ref.length > 20
+}
+
+// TEMP diagnostic: raw policy acknowledgements vs policy versions, to find why
+// an acknowledgement isn't surfacing. Safe to remove later.
+async function acksDebug(admin: SupabaseClient): Promise<Response> {
+  const { data: pols } = await admin.from('policies').select('id, code, title, version')
+  const { data: acks } = await admin
+    .from('policy_acknowledgments')
+    .select('policy_id, name, role, version, staff_id, manager_id, acknowledged_at')
+    .order('acknowledged_at', { ascending: false })
+  const { data: sopAcks } = await admin
+    .from('acknowledgments')
+    .select('staff_id, sop_id, version, signed_at')
+    .order('signed_at', { ascending: false })
+    .limit(50)
+  return json({
+    policies: pols ?? [],
+    policy_ack_count: (acks ?? []).length,
+    policy_acks: acks ?? [],
+    sop_sign_count: (sopAcks ?? []).length,
+    sop_signs: sopAcks ?? [],
+  })
 }
 
 async function deletePolicy(admin: SupabaseClient, req: Request): Promise<Response> {
